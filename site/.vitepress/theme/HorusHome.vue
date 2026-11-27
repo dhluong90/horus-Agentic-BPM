@@ -1,5 +1,5 @@
 <script setup>
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
 import { withBase } from 'vitepress';
 import HxIcons from './HxIcons.vue';
 import HxFooter from './HxFooter.vue';
@@ -95,6 +95,24 @@ const measure = () => {
 };
 onMounted(() => { measure(); watcher = new ResizeObserver(measure); frames.value.forEach((el) => el && watcher.observe(el)); if (heroFrame.value) watcher.observe(heroFrame.value); });
 onBeforeUnmount(() => watcher && watcher.disconnect());
+
+// At phone width a picture is small, so a tap (or Enter) opens it at full size in a modal dialog. The native <dialog>
+// traps focus, closes on Escape and returns focus to the picture that opened it; the full-size picture scrolls inside it.
+const phone = ref(false);
+let query;
+const syncPhone = () => { phone.value = query.matches; };
+onMounted(() => { query = window.matchMedia('(max-width: 640px)'); syncPhone(); query.addEventListener('change', syncPhone); });
+onBeforeUnmount(() => query && query.removeEventListener('change', syncPhone));
+const dialog = ref(null);
+const closeButton = ref(null);
+const zoomed = ref({ src: '', alt: '' });
+const zoom = async (src, alt) => {
+  zoomed.value = { src, alt };
+  await nextTick();
+  dialog.value.showModal();
+  closeButton.value.focus();
+};
+const zoomAttrs = (src, alt) => (phone.value ? { type: 'button', 'aria-haspopup': 'dialog', 'aria-label': `Open full size: ${alt}`, onClick: () => zoom(src, alt) } : {});
 </script>
 
 <template>
@@ -115,7 +133,9 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
             </div>
             <div class="hero-wrap">
               <figure ref="heroFrame" class="canvas-card hero-fig" :tabindex="heroScrolls ? 0 : undefined" :role="heroScrolls ? 'group' : undefined" :aria-label="heroScrolls ? 'Loan process diagram. Scroll sideways to see all of it.' : undefined" @scroll.passive="heroMoved = true">
-                <img :src="heroSrc(1579)" :srcset="heroSet" sizes="(max-width: 640px) 790px, (max-width: 1279px) min(880px, calc(100vw - 64px)), 812px" width="1579" height="1365" :alt="heroAlt" fetchpriority="high" decoding="async" />
+                <component :is="phone ? 'button' : 'span'" class="zoom" v-bind="zoomAttrs(heroSrc(1579), heroAlt)">
+                  <img :src="heroSrc(1579)" :srcset="heroSet" sizes="(max-width: 640px) 790px, (max-width: 1279px) min(880px, calc(100vw - 64px)), 812px" width="1579" height="1365" :alt="heroAlt" fetchpriority="high" decoding="async" />
+                </component>
               </figure>
               <span v-if="heroScrolls && !heroMoved" class="hero-cue" aria-hidden="true">Swipe to see more</span>
             </div>
@@ -160,7 +180,9 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
             </template>
             <div class="row" :class="{ flip: i % 2 === 1 && !s.wide, tall: s.tall, wide: s.wide }">
               <figure class="shot" ref="frames" :data-shot="s.id" :tabindex="scrolls[s.id] ? 0 : undefined" :role="scrolls[s.id] ? 'group' : undefined" :aria-label="scrolls[s.id] ? `Screenshot: ${s.eyebrow}. Scroll sideways to see all of it.` : undefined">
-                <img :src="src(s.id, s.wide ? 1400 : s.w1 || 700)" :srcset="srcset(s)" :sizes="s.tall ? '360px' : s.wide ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 1100px) 100vw, 700px'" :width="s.wide ? 1400 : s.w1 || 700" :height="s.h1" :alt="s.alt" :style="{ aspectRatio: `${dims(s).w} / ${dims(s).h}` }" decoding="async" />
+                <component :is="phone ? 'button' : 'span'" class="zoom" v-bind="zoomAttrs(src(s.id, s.w2), s.alt)">
+                  <img :src="src(s.id, s.wide ? 1400 : s.w1 || 700)" :srcset="srcset(s)" :sizes="s.tall ? '360px' : s.wide ? '(max-width: 1240px) 100vw, 1200px' : '(max-width: 1100px) 100vw, 700px'" :width="s.wide ? 1400 : s.w1 || 700" :height="s.h1" :alt="s.alt" :style="{ aspectRatio: `${dims(s).w} / ${dims(s).h}` }" decoding="async" />
+                </component>
               </figure>
               <div><p class="eyebrow">{{ s.eyebrow }}</p><h3>{{ s.title }}</h3><p>{{ s.text }}</p></div>
             </div>
@@ -272,6 +294,12 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
         </div>
       </section>
     </main>
+    <dialog ref="dialog" class="zoom-dialog" aria-label="Full-size picture">
+      <button ref="closeButton" type="button" class="zoom-close" @click="dialog.close()">Close</button>
+      <div class="zoom-scroll" tabindex="0" role="group" :aria-label="zoomed.alt + ' Scroll to see all of it.'">
+        <img :src="zoomed.src" :alt="zoomed.alt" />
+      </div>
+    </dialog>
     <HxFooter />
   </div>
 </template>
