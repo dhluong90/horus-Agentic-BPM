@@ -30,4 +30,9 @@ git -C "$tmp" mv src/A.java docs/A.md
 git -C "$tmp" -c user.name=t -c user.email=t@t commit -q -m two
 got="$(cd "$tmp" && "$here/ci-code-changed.sh" HEAD^1 HEAD)"
 if [ "$got" = true ]; then echo "ok   true  <- rename src/A.java to docs/A.md"; else echo "FAIL rename got $got"; fail=1; fi
+# Fail closed: an unknown revision, as in a shallow clone, must print true.
+got="$(cd "$tmp" && "$here/ci-code-changed.sh" deadbeef HEAD 2>/dev/null)"
+if [ "$got" = true ]; then echo "ok   true  <- git diff fails (unknown base)"; else echo "FAIL git error got $got"; fail=1; fi
+got="$(cd "$(mktemp -d)" && "$here/ci-code-changed.sh" HEAD^1 HEAD 2>/dev/null)"
+if [ "$got" = true ]; then echo "ok   true  <- not a git repository"; else echo "FAIL no repo got $got"; fail=1; fi
 exit "$fail"

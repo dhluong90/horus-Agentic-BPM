@@ -8,7 +8,13 @@
 set -euo pipefail
 
 if [ "$#" -eq 2 ]; then
-  git diff --no-renames --name-only "$1" "$2" | "$0"
+  # Fail closed: a git error (shallow clone, missing base) must run every job, never skip them.
+  if ! changed="$(git diff --no-renames --name-only "$1" "$2" 2>/dev/null)"; then
+    echo "ci-code-changed: git diff $1 $2 failed; running everything" >&2
+    echo true
+    exit 0
+  fi
+  printf '%s\n' "$changed" | "$0"
   exit 0
 fi
 
