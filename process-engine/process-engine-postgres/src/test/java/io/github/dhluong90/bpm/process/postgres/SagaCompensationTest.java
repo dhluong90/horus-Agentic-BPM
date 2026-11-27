@@ -345,6 +345,32 @@ class SagaCompensationTest {
     }
 
     @Test
+    void PRE_377_each_finished_undo_step_raises_an_event_newest_first() {
+        // Given the transfer of 25,000,000 VND whose credit-target fails with ACCOUNT_CLOSED
+        TestEngine engine = engine();
+        deploy(engine, "fund-transfer");
+        ProcessInstance started = transfer(engine, "fund-transfer", "TRF-2026-0377");
+        step(engine);
+        step(engine);
+
+        // When both undo steps run
+        step(engine);
+        step(engine);
+
+        // Then one event per undo step, newest first, naming the undone step and the handler
+        String transferScope = scopeToken(started.id(), "transfer");
+        assertThat(events(engine, "processes.compensation.step-completed.v1")).hasSize(2).satisfies(list -> {
+            assertThat(list.get(0).payload()).containsEntry("instanceId", started.id())
+                    .containsEntry("scopeId", transferScope).containsEntry("nodeId", "debit-source")
+                    .containsEntry("handler", "credit-back").containsEntry("outcome", "COMPLETED")
+                    .containsKey("attemptId");
+            assertThat(list.get(1).payload()).containsEntry("nodeId", "hold-funds")
+                    .containsEntry("handler", "release-hold").containsEntry("outcome", "COMPLETED");
+            assertThat(list.get(0).payload()).doesNotContainKeys("variables", "output");
+        });
+    }
+
+    @Test
     void PRE_073_a_failure_that_is_not_retryable_or_uses_the_last_attempt_compensates_too() {
         // Given the transfer, whose credit fails with a failure that is not retryable
         TestEngine engine = engine();
