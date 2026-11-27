@@ -276,7 +276,7 @@ class DefinitionLifecycleIT {
     }
 
     private HttpResponse<String> get(String user, String path) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
@@ -287,7 +287,7 @@ class DefinitionLifecycleIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, String ifMatch,
             String contentType, String idempotencyKey) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", contentType)
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
         if (ifMatch != null) {
