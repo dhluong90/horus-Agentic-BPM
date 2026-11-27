@@ -24,6 +24,7 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -122,14 +123,13 @@ class MultiReplicaCacheIT {
     private static GenericContainer<?> pgbouncer(String database) {
         return new GenericContainer<>(DockerImageName.parse(PGBOUNCER_IMAGE))
                 .withNetwork(NETWORK)
-                .withEnv("DB_HOST", "pg")
-                .withEnv("DB_PORT", "5432")
-                .withEnv("DB_NAME", database)
-                .withEnv("DB_USER", POSTGRES.getUsername())
-                .withEnv("DB_PASSWORD", POSTGRES.getPassword())
-                .withEnv("AUTH_TYPE", "scram-sha-256")
-                .withEnv("POOL_MODE", "transaction")
-                .withEnv("LISTEN_PORT", "5432")
+                .withCopyToContainer(Transferable.of(
+                        TestImages.pgbouncerIni(database, POSTGRES.getUsername(), POSTGRES.getPassword()), 0644),
+                        "/tmp/pgbouncer.ini")
+                .withCopyToContainer(Transferable.of(
+                        TestImages.pgbouncerUserlist(POSTGRES.getUsername(), POSTGRES.getPassword()), 0644),
+                        "/tmp/userlist.txt")
+                .withCommand("/tmp/pgbouncer.ini")
                 .withExposedPorts(5432)
                 .waitingFor(Wait.forListeningPort());
     }
