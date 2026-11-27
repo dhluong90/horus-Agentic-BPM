@@ -94,6 +94,8 @@ mvn -B verify
 
 Needs JDK 21 or later and a running Docker for the Testcontainers tests. To run the example host, see [`examples/rule-engine-only/`](examples/rule-engine-only/README.md).
 
+To run the pull-request checks of the CI workflow on your machine (spec coverage, the Java build, dependency and vulnerability gates, the cockpit, migration order), run `tools/ci-local.sh`. It prints PASS, FAIL or SKIPPED per job; `tools/ci-local.sh all` adds the on-demand jobs, and the header of the script lists them.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md).
