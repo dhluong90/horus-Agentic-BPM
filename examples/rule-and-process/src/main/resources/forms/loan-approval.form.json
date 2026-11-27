@@ -1,0 +1,18 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["decision"],
+    "properties": {
+      "decision": { "enum": ["APPROVED", "REJECTED"] },
+      "reason": { "type": "string", "maxLength": 500 }
+    }
+  },
+  "hints": {
+    "order": ["decision", "reason"],
+    "widgets": { "decision": "radio", "reason": "textarea" },
+    "labels": {
+      "decision": { "en": "Your decision", "vi": "Quyết định của bạn" },
+      "reason": { "en": "Reason", "vi": "Lý do" }
+    }
+  }
+}
