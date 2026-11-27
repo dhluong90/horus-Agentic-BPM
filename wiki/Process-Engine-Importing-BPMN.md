@@ -347,49 +347,42 @@ Expected answer, `422`:
 
 The answer lists every unsupported element in the file, each with its id, its line and its stage. Remove or replace each one and import again. At most 100 entries are listed; `violationsTruncated: true` says there were more. Ids are printed without control characters and cut at 200 characters.
 
-**Stages.** `stage` is one value and never names a sprint or a date. It comes from the coverage table in [standards compliance](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md):
+**Stage.** `stage` in each entry is a label from the coverage table in [standards compliance](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md), never a sprint or a date. It does not say whether the refusal will be lifted. The "Status" column below does.
 
-| `stage` | Meaning |
-|---|---|
-| `S1`, `S2`, `S3` | The stage after 1.0 that adds the element |
-| `not planned` | A deviation the engine keeps by design, for example an XPath condition |
-| `S0` | An element of the current stage that this release has not finished: `intermediateThrowEvent` other than a `throwCompensation` or a signal throw |
-
-Examples: a timer cycle on a catch or boundary event is `S1`; an ad-hoc feature after 1.0 is `S3`. A choreography is read and kept as received, never run.
-
-Every boundary event, sub-process, transaction, loop and multi-instance marker that BPMN 2.0 defines for execution imports. The engine still refuses what is below, one row for each. "Deviation" means the engine keeps the refusal by design and lists it in the [deviation register](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md). "Planned" means the refusal will go away; the issue is named.
+Every boundary event, sub-process, transaction, loop and multi-instance marker that BPMN 2.0 defines for execution imports. The engine still refuses what is below, one row for each. "Deliberate deviation" means the engine keeps the refusal by design and lists it in the [deviation register](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md). "Planned for 1.1 (#632)" means the refusal will be lifted in that issue.
 
 **Refused with `BPMN_UNSUPPORTED_ELEMENT` (`422`, listed in `unsupportedElements`)**
 
 | File has | Condition | Status |
 |---|---|---|
-| `startQuantity` or `completionQuantity` | any value other than `1` | Deviation |
-| `implementation` | any value other than `##unspecified`. Bind the step with `horus:handler` | Deviation |
-| `isForCompensation="true"` | on anything but a service task | Planned (#632) |
-| `isInterrupting="false"` | on any element but a start event. On a boundary event write `cancelActivity="false"` | Planned (#632) |
-| `receiveTask` with `instantiate="true"` | always. Start the process with a message start event | Planned (#632) |
-| `boundaryEvent` or `intermediateCatchEvent` | with no event definition | Deviation |
-| `intermediateThrowEvent` | with no event definition (stage `S0`), or with an `errorEventDefinition` or `terminateEventDefinition`; raise these from an end event | Deviation |
-| `startEvent` | with a `cancelEventDefinition` | Deviation |
-| `timeCycle` | on a catch or boundary event (a cycle works on the start of an event sub-process) | Planned (stage `S1`) |
-| `transaction` | `method` other than `##Compensate` | Deviation |
-| `laneSet` | inside a sub-process or transaction | Deviation |
-| `completionCondition` | outside an ad-hoc sub-process | Deviation |
-| `parallelMultiple="true"` | on anything but an event | Deviation |
-| `horus:type` | any value other than `agentTask`. A `horus:mode` other than `local` or `remote` is `MODE_INVALID` | Deviation |
-| `conditionExpression` or `scriptFormat` | in a language other than `urn:horus-bpm:expr:v1` or FEEL. The code is `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED`, and the answer names the language (XPath, JavaScript) | Deviation |
+| `startQuantity` or `completionQuantity` | any value other than `1` | Deliberate deviation |
+| `implementation` | any value other than `##unspecified`. `urn:horus-bpm:handler:<name>` is planned for 1.1 (#632); every other value (WSDL, web service) stays refused. Bind the step with `horus:handler` | Planned for 1.1 (#632) for the urn form, otherwise deliberate deviation |
+| `isForCompensation="true"` | on anything but a service task | Planned for 1.1 (#632) |
+| `isInterrupting="false"` | on any element but a start event. On a boundary event write `cancelActivity="false"` | Planned for 1.1 (#632) |
+| `receiveTask` with `instantiate="true"` | always. Start the process with a message start event | Planned for 1.1 (#632) |
+| `boundaryEvent` or `intermediateCatchEvent` | with no event definition | Deliberate deviation |
+| `intermediateThrowEvent` | with no event definition, or with an `errorEventDefinition` or `terminateEventDefinition`; raise these from an end event | Deliberate deviation |
+| `startEvent` | with a `cancelEventDefinition` | Deliberate deviation |
+| `intermediateThrowEvent` or `endEvent` | with a `conditionalEventDefinition` | Deliberate deviation |
+| `timeCycle` | on a catch or boundary event (a cycle works on the start of an event sub-process) | Deliberate deviation |
+| `transaction` | `method` other than `##Compensate` | Deliberate deviation |
+| `laneSet` | inside a sub-process or transaction | Deliberate deviation |
+| `completionCondition` | outside an ad-hoc sub-process | Deliberate deviation |
+| `parallelMultiple="true"` | on anything but an event | Deliberate deviation |
+| `horus:type` | any value other than `agentTask`. A `horus:mode` other than `local` or `remote` is `MODE_INVALID` | Deliberate deviation |
+| `conditionExpression` or `scriptFormat` | in a language other than `urn:horus-bpm:expr:v1` or FEEL. The code is `BPMN_EXPRESSION_LANGUAGE_UNSUPPORTED` or `BPMN_SCRIPT_FORMAT_UNSUPPORTED`, and the answer names the language (XPath, JavaScript) | Deliberate deviation |
 | Any other element or event definition, for example `globalTask` | | The answer gives the stage |
 
 **Refused with `422 VALIDATION_FAILED` (a code in `problems`)**
 
 | File has | Code | Status |
 |---|---|---|
-| A loop or multi-instance marker | `LOOP_ON_UNSUPPORTED_ACTIVITY`: on anything but a task, a `callActivity` or an embedded `subProcess` | Deviation |
-| `eventBasedGateway` with `eventGatewayType="Parallel"` and no `instantiate="true"` | `EVENT_GATEWAY_PARALLEL_INSTANTIATE` | Deviation |
-| A throw or end event with several definitions | `MULTIPLE_THROW_DEFINITION_INVALID`: only message, signal, escalation and a compensation with `waitForCompletion="false"` | Deviation |
-| A multiple event with a definition its place does not take | `MULTIPLE_EVENT_DEFINITION_INVALID`. A process start event takes message and signal only, so it cannot wait for a timer or a condition | Deviation |
-| A start event with `isInterrupting="false"` outside an event sub-process | `START_TRIGGER_MISPLACED` | Planned (#632) |
-| More than one `process` and no collaboration pointing to each | `PROCESS_NOT_IN_COLLABORATION` | Deviation |
+| A loop or multi-instance marker | `LOOP_ON_UNSUPPORTED_ACTIVITY`: on anything but a task, a `callActivity` or an embedded `subProcess` | Deliberate deviation |
+| `eventBasedGateway` with `eventGatewayType="Parallel"` and no `instantiate="true"` | `EVENT_GATEWAY_PARALLEL_INSTANTIATE` | Deliberate deviation |
+| A throw or end event with several definitions | `MULTIPLE_THROW_DEFINITION_INVALID`: only message, signal, escalation and a compensation with `waitForCompletion="false"` | Deliberate deviation |
+| A multiple event with a definition its place does not take | `MULTIPLE_EVENT_DEFINITION_INVALID`. A process start event takes message and signal only, so it cannot wait for a timer or a condition | Deliberate deviation |
+| A start event with `isInterrupting="false"` outside an event sub-process | `START_TRIGGER_MISPLACED` | Planned for 1.1 (#632) |
+| More than one `process` and no collaboration pointing to each | `PROCESS_NOT_IN_COLLABORATION` | Deliberate deviation |
 
 An attribute or extension element from another modeler's namespace, such as a vendor `class` attribute on a service task, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
 
