@@ -584,6 +584,8 @@ Published per release (`TR-STD-05`). The claim is "BPMN 2.0.2 Process Execution 
 | DMN external functions (Java, PMML) | Refused; host functions through `RuleFunctionRegistry` | Principles 3 and 4 |
 | FEEL evaluation without bounds | Step budget and recursion depth | Principle 3 |
 | FEEL errors as `null` | Per-model `errorMode`; guardrails fail closed | Banking fail-closed rule |
+| `startQuantity` and `completionQuantity` other than 1 on an activity | Refused with `422 BPMN_UNSUPPORTED_ELEMENT`, stage `not planned` | A token carries no quantity; ignoring the value would run the step differently from the model |
+| `implementation` other than `##unspecified` on a task | Refused with `422 BPMN_UNSUPPORTED_ELEMENT`, stage `not planned`; bind the step with `horus:handler` | No engine network I/O (principles 1 and 4) |
 | Choreography and conversation | Imported with that part kept untouched in the stored source document and a warning naming it; not displayed or executed | Not targeted (PD-065) |
 | DMN vendor `extensionElements`, foreign attributes and DMNDI on export | Accepted on import and kept only in the stored source document; not read, never executed, and not written back by DMN export, so an exported file has no diagram and no vendor extensions | DMNDI round trip arrives in stage S3 (section 6.2); until then the source document (`?include=source`) keeps them byte for byte |
 
