@@ -146,6 +146,7 @@
 .dock__facts dd { color: var(--ink); overflow-wrap: anywhere; }
 .dock__buttons { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .dock__note { color: var(--ink-2); }
+.dock__self { margin: 0; color: var(--ink-2); font: var(--type-label); }
 .dock__hint { color: var(--muted); font-size: 12.5px; width: 100%; }
 .dock__live:empty { display: none; }
 .dock__live { color: var(--ok); font-weight: 600; font-size: 13px; }
