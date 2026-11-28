@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Incident } from '../../api/processes/schemas';
-import { formatRoute, useRoute, type IncidentTab } from '../../app/route';
+import { formatRoute, useRoute, type IncidentTab, type Route } from '../../app/route';
 import { AreaError, EmptyState, ErrorAlert, LoadingRows, PageHead } from '../../components/PageParts';
 import { useKeepInView } from '../../components/useKeepInView';
 import type { MessageKey } from '../../i18n/en';
@@ -11,6 +11,8 @@ import { Tabs } from '../rules/components/Tabs';
 import { Toast } from '../rules/components/Toast';
 import { INCIDENT_LIMIT, useIncidentList, useStepNames } from './api/useIncidents';
 import { IncidentInspector, type IncidentNotice } from './IncidentInspector';
+import { readableName } from '../tasks/model/queue';
+import { useDefinitionGraph, useDefinitionVersion } from '../processes/api/useProcesses';
 import { IncidentState, stepName } from './parts';
 import { causeKey, statusOf } from './model/incidents';
 import '../../components/tasks.css';
@@ -26,23 +28,30 @@ const TABS: readonly IncidentTab[] = ['open', 'pending'];
 const TAB_LABEL: Record<IncidentTab, MessageKey> = { open: 'incidents.tab.open', pending: 'incidents.tab.pending' };
 const EMPTY: Record<IncidentTab, MessageKey> = { open: 'incidents.empty.open', pending: 'incidents.empty.pending' };
 
-export function IncidentsPage({ view, incidentId, refreshSeconds, mode }: { view: IncidentTab | undefined; incidentId: string | undefined; refreshSeconds: number; mode: 'four-eyes' | 'single' }) {
+export function IncidentsPage({ view, incidentId, process, version, step, refreshSeconds, mode }: {
+  view: IncidentTab | undefined; incidentId: string | undefined; process?: string | undefined; version?: number | undefined; step?: string | undefined; refreshSeconds: number; mode: 'four-eyes' | 'single';
+}) {
   const { t } = useI18n();
   const [, navigate] = useRoute();
   const active = view ?? 'open';
-  const lists = { open: useIncidentList(statusOf('open'), refreshSeconds), pending: useIncidentList(statusOf('pending'), refreshSeconds) };
+  // Opened from a count on the process diagram (#91): one process, one version, one step; the engine narrows by process and version.
+  const narrowed = process === undefined ? undefined : { key: process, version };
+  const lists = { open: useIncidentList(statusOf('open'), refreshSeconds, true, narrowed), pending: useIncidentList(statusOf('pending'), refreshSeconds, true, narrowed) };
   const [notice, setNotice] = useState<IncidentNotice | undefined>(undefined);
   const [toast, setToast] = useState<string | undefined>(undefined);
 
+  const kept = (rows: readonly Incident[]) => rows.filter((item) => step === undefined || item.nodeId === step);
+  const where = process === undefined ? {} : { process, ...(version !== undefined ? { version } : {}), ...(step !== undefined ? { step } : {}) };
   const tabLabel = (tab: IncidentTab) => {
     const data = lists[tab].data;
     const label = t(TAB_LABEL[tab]);
     if (data === undefined) return label;
-    const count = data.hasNext ? t('tasks.more', { count: String(data.data.length) }) : String(data.data.length);
+    const total = kept(data.data).length;
+    const count = data.hasNext ? t('tasks.more', { count: String(total) }) : String(total);
     return t('tasks.tab.withCount', { label, count });
   };
   const list = lists[active];
-  const items = list.data?.data ?? [];
+  const items = kept(list.data?.data ?? []);
   const selected = items.find((item) => item.id === incidentId) ?? items[0];
   const named = useStepNames(items);
   const nameOf = (incident: Incident) => stepName(incident, named(incident));
@@ -50,8 +59,9 @@ export function IncidentsPage({ view, incidentId, refreshSeconds, mode }: { view
   return (
     <section className="workspace tasks incidents" aria-labelledby="incidents-title">
       <PageHead id="incidents-title" title={t('incidents.title')} subtitle={t('incidents.subtitle')} action={<ScopeSwitch area="incidents" merged={false} />} />
+      {process !== undefined ? <NarrowedTo process={process} version={version} step={step} /> : null}
       <Tabs label={t('incidents.tabs')} items={TABS.map((tab) => ({ id: tab, label: tabLabel(tab) }))} selected={active} className="tasks__tabs"
-        onSelect={(next) => { setNotice(undefined); navigate({ name: 'incidents', view: next }); }}>
+        onSelect={(next) => { setNotice(undefined); navigate({ name: 'incidents', view: next, ...where }); }}>
         {notice !== undefined ? (
           <ErrorAlert className="tasks__notice" text={notice.text} error={notice.error}
             action={<button type="button" className="btn btn--quiet btn--small hit" onClick={() => { setNotice(undefined); }}>{t('toast.close')}</button>} />
@@ -64,14 +74,14 @@ export function IncidentsPage({ view, incidentId, refreshSeconds, mode }: { view
           <article className="card tasks__empty"><EmptyState icon="incidents" text={t(EMPTY[active])} /></article>
         ) : (
           <div className="tasks__grid">
-            <IncidentTable items={items} hasMore={list.data.hasNext} tab={active} selectedId={selected?.id} nameOf={nameOf}
-              onSelect={(id) => { navigate({ name: 'incidents', view: active, incidentId: id }); }} />
+            <IncidentTable items={items} hasMore={list.data.hasNext} tab={active} where={where} selectedId={selected?.id} nameOf={nameOf}
+              onSelect={(id) => { navigate({ name: 'incidents', view: active, incidentId: id, ...where }); }} />
             {selected !== undefined ? (
               <IncidentInspector key={selected.id} summary={selected} step={nameOf(selected)} mode={mode} onNotice={setNotice}
                 onDone={(text, next) => {
                   setNotice(undefined);
                   setToast(text);
-                  if (next !== undefined) navigate({ name: 'incidents', view: next.view, incidentId: next.incidentId });
+                  if (next !== undefined) navigate({ name: 'incidents', view: next.view, incidentId: next.incidentId, ...where });
                 }} />
             ) : null}
           </div>
@@ -82,8 +92,24 @@ export function IncidentsPage({ view, incidentId, refreshSeconds, mode }: { view
   );
 }
 
-function IncidentTable({ items, hasMore, tab, selectedId, nameOf, onSelect }: {
-  items: readonly Incident[]; hasMore: boolean; tab: IncidentTab; selectedId: string | undefined; nameOf: (incident: Incident) => string; onSelect: (id: string) => void;
+/** The line that says the list is narrowed to one process and step, with the way back to every incident. */
+function NarrowedTo({ process, version, step }: { process: string; version: number | undefined; step: string | undefined }) {
+  const { t } = useI18n();
+  const details = useDefinitionVersion(process, version ?? 0, version !== undefined);
+  const graph = useDefinitionGraph(process, version ?? 0, version !== undefined);
+  const stepLabel = step === undefined ? undefined : graph.data?.nodes.find((node) => node.id === step)?.name ?? readableName(step);
+  return (
+    <p className="incidents__narrowed">
+      <span className="muted">{t('incidents.filter.label')}</span>{' '}
+      <strong>{details.data?.name ?? readableName(process)}</strong>
+      {stepLabel !== undefined ? <> <span className="muted">{t('incidents.filter.step', { step: stepLabel })}</span></> : null}
+      <a className="incidents__narrowed-clear" href={formatRoute({ name: 'incidents' })}>{t('incidents.filter.clear')}</a>
+    </p>
+  );
+}
+
+function IncidentTable({ items, hasMore, tab, where, selectedId, nameOf, onSelect }: {
+  items: readonly Incident[]; hasMore: boolean; tab: IncidentTab; where: Pick<Extract<Route, { name: 'incidents' }>, 'process' | 'version' | 'step'>; selectedId: string | undefined; nameOf: (incident: Incident) => string; onSelect: (id: string) => void;
 }) {
   const { t, locale } = useI18n();
   const selectedRow = useKeepInView<HTMLTableRowElement>(selectedId);
@@ -110,7 +136,7 @@ function IncidentTable({ items, hasMore, tab, selectedId, nameOf, onSelect }: {
             return (
               <tr key={item.id} className={isSelected ? 'is-selected' : undefined} ref={isSelected ? selectedRow : undefined}>
                 <th scope="row">
-                  <a className="qtable__link tasks__name" href={formatRoute({ name: 'incidents', view: tab, incidentId: item.id })} aria-current={isSelected ? 'true' : undefined}
+                  <a className="qtable__link tasks__name" href={formatRoute({ name: 'incidents', view: tab, incidentId: item.id, ...where })} aria-current={isSelected ? 'true' : undefined}
                     onClick={(event) => { event.preventDefault(); onSelect(item.id); }}>
                     {nameOf(item)}
                   </a>

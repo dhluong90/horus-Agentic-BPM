@@ -433,3 +433,21 @@
 .dg-node--heat-3 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); stroke: var(--warn-fill); }
 .dg-node--heat-4 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); stroke: var(--warn-fill); stroke-width: 2.25; }
 .dg-node .dg-node__heat { fill: var(--ink); font: var(--type-caption); font-weight: 600; stroke: var(--canvas); stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; }
+
+/* Live figures under a step of the definition diagram (#91): plain numbers, a dot and a sign; nothing is boxed. */
+.dg-live__hit { fill: transparent; }
+.dg-live__link { cursor: pointer; text-decoration: none; }
+.dg-live__dot { fill: var(--accent-fill); }
+.dg-live__figure { fill: var(--ink); font: var(--type-caption); font-weight: 600; }
+.dg-live__figure--incidents { fill: var(--warn); }
+.dg-live__sign { fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.dg-live__link:hover .dg-live__figure { text-decoration: underline; }
+.dg-live__link:focus-visible { outline: none; }
+.dg-live__link:focus-visible .dg-live__hit { stroke: var(--focus, var(--accent)); stroke-width: 2; }
+.live-key { display: flex; align-items: center; gap: var(--space-4); margin: 0; padding: 0; list-style: none; font: var(--type-caption); color: var(--ink-2); }
+.live-key__item { display: inline-flex; align-items: center; gap: var(--space-2); }
+.live-key__dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-fill); }
+.live-key__sign { width: 12px; height: 12px; fill: none; stroke: var(--warn); stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
+.live-key__item--incidents { color: var(--warn); }
+.incidents__narrowed { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-2); margin: 0 0 var(--space-3); font: var(--type-label); }
+.incidents__narrowed-clear { margin-left: var(--space-3); }

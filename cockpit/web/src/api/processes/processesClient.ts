@@ -13,6 +13,7 @@ import {
   type CalendarChange,
   type PendingDefinitionApproval,
   graphDiff,
+  nodeLiveStats,
   nodeWindowStats,
   migrationDryRun,
   migrationExecution,
@@ -32,6 +33,7 @@ import {
   type DefinitionSummary,
   type DefinitionVersion,
   type GraphDiff,
+  type NodeLiveStats,
   type NodeWindowStats,
   type InstanceActivities,
   type InstanceSummary,
@@ -117,6 +119,8 @@ export interface ProcessesClient {
   getDiff(key: string, version: number, base?: number, signal?: AbortSignal): Promise<GraphDiff>;
   /** getNodeStats (mode=window): per step the counts and the median and 95th percentile of completed durations over whole hours */
   getStepTiming(key: string, version: number, range: { from: string; to?: string | undefined }, signal?: AbortSignal): Promise<NodeWindowStats>;
+  /** getNodeStats (mode=live): the tokens now at each step by status, and the open incidents of each step */
+  getLiveCounts(key: string, version: number, signal?: AbortSignal): Promise<NodeLiveStats>;
   /** approveDefinition: as a second person, bound to the reviewed content hash */
   approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
   /** rejectDefinition: back to draft with a reason */
@@ -174,9 +178,9 @@ export interface ProcessesClient {
   /** listMigrationInstances: what happened to each instance, one outcome kind at a time, a bounded page */
   listMigrationInstances(request: { id: string; outcome: 'FAILED' | 'SKIPPED'; after?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<MigrationOutcomePage>;
   /** listIncidents: one page of the incidents of one status, newest first */
-  listIncidents(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<Incident>>;
+  listIncidents(request: { status: IncidentStatus; definitionKey?: string | undefined; version?: number | undefined; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<Incident>>;
   /** listIncidents as a conditional read: sends If-None-Match when `etag` is given; 304 is `changed: false` (CKP-019) */
-  readIncidents(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }, etag?: string): Promise<Conditional<Page<Incident>>>;
+  readIncidents(request: { status: IncidentStatus; definitionKey?: string | undefined; version?: number | undefined; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }, etag?: string): Promise<Conditional<Page<Incident>>>;
   /** getIncident: one incident with the actions this caller may take */
   getIncident(id: string, signal?: AbortSignal): Promise<Incident>;
   /** retryIncident: run the failed step again, with a reason; one person's action (PRE-077) */
@@ -205,8 +209,10 @@ function tasksPath(request: TaskQuery): string {
   return `${PROCESSES_BASE}/tasks?${query.toString()}`;
 }
 
-function incidentsPath(request: { status: IncidentStatus; cursor?: string | undefined; limit?: number | undefined }): string {
+function incidentsPath(request: { status: IncidentStatus; definitionKey?: string | undefined; version?: number | undefined; cursor?: string | undefined; limit?: number | undefined }): string {
   const query = new URLSearchParams({ status: request.status });
+  if (request.definitionKey !== undefined) query.set('definitionKey', request.definitionKey);
+  if (request.definitionKey !== undefined && request.version !== undefined) query.set('version', String(request.version));
   if (request.limit !== undefined) query.set('limit', String(request.limit));
   if (request.cursor !== undefined) query.set('cursor', request.cursor);
   return `${PROCESSES_BASE}/incidents?${query.toString()}`;
@@ -252,6 +258,9 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       const query = new URLSearchParams({ mode: 'window', from: range.from });
       if (range.to !== undefined) query.set('to', range.to);
       return (await call({ method: 'GET', path: `${versionPath(key, version)}/node-stats?${query.toString()}`, ...withSignal(signal) }, nodeWindowStats)).data;
+    },
+    async getLiveCounts(key, version, signal) {
+      return (await call({ method: 'GET', path: `${versionPath(key, version)}/node-stats?mode=live`, ...withSignal(signal) }, nodeLiveStats)).data;
     },
     async approveDefinition(key, version, lockVersion, approval, idempotencyKey) {
       const comment = approval.comment.trim();
@@ -328,10 +337,7 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/tasks/${segment(id)}:delegate`, headers: command(lockVersion, idempotencyKey), body }, task)).data;
     },
     async listIncidents(request) {
-      const query = new URLSearchParams({ status: request.status });
-      if (request.limit !== undefined) query.set('limit', String(request.limit));
-      if (request.cursor !== undefined) query.set('cursor', request.cursor);
-      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/incidents?${query.toString()}`, ...withSignal(request.signal) }, incidentPage)).data;
+      return (await call({ method: 'GET', path: incidentsPath(request), ...withSignal(request.signal) }, incidentPage)).data;
     },
     async getIncident(id, signal) {
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/incidents/${segment(id)}`, ...withSignal(signal) }, incident)).data;

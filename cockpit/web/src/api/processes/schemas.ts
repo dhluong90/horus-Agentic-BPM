@@ -318,6 +318,19 @@ export const nodeWindowStats = z
     nodes: z.record(z.string(), stepWindowFigures),
   })
   .loose();
+/** The tokens now at each step by status, and the open incidents of each step (getNodeStats, mode=live; PRE-521). */
+export const nodeLiveStats = z
+  .object({
+    definitionKey: z.string(),
+    version: z.number().int().min(1),
+    mode: z.literal('live'),
+    asOf: nullableString,
+    nodes: z.record(z.string(), z.record(z.string(), z.number().int().min(0))),
+    /** Absent from an engine older than 1.0.1: read as no incidents. */
+    openIncidents: z.record(z.string(), z.number().int().min(0)).optional(),
+  })
+  .loose();
+export type NodeLiveStats = z.infer<typeof nodeLiveStats>;
 export type NodeWindowStats = z.infer<typeof nodeWindowStats>;
 export type StepWindowFigures = z.infer<typeof stepWindowFigures>;
 

@@ -156,7 +156,7 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
       return <ReviewTaskPage taskId={route.taskId} />;
     case 'incidents':
       if (merged) return <MergedIncidentsPage view={route.view} incidentId={route.incidentId} on={route.on} refreshSeconds={refresh.incidentsSeconds} />;
-      return <IncidentsPage view={route.view} incidentId={route.incidentId} refreshSeconds={refresh.incidentsSeconds}
+      return <IncidentsPage view={route.view} incidentId={route.incidentId} process={route.process} version={route.version} step={route.step} refreshSeconds={refresh.incidentsSeconds}
         mode={resolveMode(meta.modules.find((module) => module.module === 'processes')?.settings)} />;
   }
 }

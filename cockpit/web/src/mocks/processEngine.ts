@@ -126,9 +126,18 @@ export interface ProcessSeed {
   unclassified?: boolean;
   /** Step timing of the demo key: `empty` is a period without activity. */
   stepTiming?: 'empty';
+  /** `empty`: no live token anywhere (the live counts of the diagram, #91). */
+  liveCounts?: 'empty';
   /** A pending change of the `vn-banking-hours` calendar, proposed by lan (#473): in the approvals list and under Calendar changes. */
   calendar?: boolean;
 }
+
+/** The tokens now at the steps of the demo key, by status (getNodeStats, mode=live). */
+const LIVE_KYC: Record<string, Record<string, number>> = {
+  'verify-docs': { ACTIVE: 4, WAITING_ASYNC: 2 },
+  approve: { WAITING_USER: 12 },
+  cooling: { WAITING_TIMER: 31 },
+};
 
 /** The figures of the demo key over a period (getNodeStats, mode=window): the approval is the slow step. */
 const STEP_TIMING = {
@@ -506,6 +515,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     return body;
   };
 
+  /** The process key an incident's case belongs to. */
+  const incidentKey = (item: StoredIncident): string | undefined => cases.find((candidate) => candidate.instance.id === item.instanceId)?.instance.definitionKey ?? (item.instanceId === INSTANCE_ID ? instance().definitionKey : undefined);
+
   /** listIncidents: one status, newest first; a retried step settles on the read after the one that showed it retrying. */
   const listIncidents = (url: URL, request: ProcessRequest): ProcessAnswer => {
     if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
@@ -519,7 +531,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         settling.delete(id);
       }
     }
-    const data = incidents.filter((item) => item.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
+    const onlyKey = url.searchParams.get('definitionKey');
+    if (url.searchParams.has('version') && onlyKey === null) return problem(400, 'QUERY_INVALID');
+    const data = incidents.filter((item) => item.status === status && (onlyKey === null || incidentKey(item) === onlyKey)).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id.localeCompare(a.id));
     return json(200, { data: data.map((item) => incidentBody(item, request)), nextCursor: null, hasNext: false });
   };
 
@@ -611,6 +625,14 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (statsRoute && request.method === 'GET') {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
       if (!definitions.some((d) => d.key === statsRoute[1] && d.version === Number(statsRoute[2]))) return problem(404, 'DEFINITION_NOT_FOUND');
+      if (url.searchParams.get('mode') === 'live') {
+        // The demo tenant's live figures (#91): the key's own steps hold tokens; open incidents are counted from the list the engine serves.
+        const key = statsRoute[1] ?? '';
+        const nodes = seed.liveCounts === 'empty' || key !== 'kyc-onboarding' ? {} : LIVE_KYC;
+        const openIncidents: Record<string, number> = {};
+        for (const item of incidents) if (item.status === 'OPEN' && incidentKey(item) === key) openIncidents[item.nodeId] = (openIncidents[item.nodeId] ?? 0) + 1;
+        return json(200, { definitionKey: key, version: Number(statsRoute[2]), mode: 'live', asOf: '2026-11-21T11:00:00Z', nodes, openIncidents }, { ETag: '"1"' });
+      }
       if (url.searchParams.get('mode') !== 'window') return problem(400, 'INPUT_INVALID');
       const from = url.searchParams.get('from') ?? '2026-11-20T10:00:00Z';
       const nodes = seed.stepTiming === 'empty' || statsRoute[1] !== 'kyc-onboarding' ? {} : STEP_TIMING;
