@@ -1,0 +1,78 @@
+name: HA soak
+
+# #655: three copies of the example host behind a balancer and PgBouncer, ten minutes of mixed load, seven faults (kill, restart, stop,
+# freeze, paused database), then the checks of perf/soak/README.md. Nightly and on demand. A long run (mode: long, up to 5 hours here;
+# days on a machine of your own with perf/soak/soak.sh long) can be started from the Actions tab.
+on:
+  schedule:
+    - cron: "15 3 * * *"
+  pull_request:
+    paths:
+      - "perf/soak/**"
+      - ".github/workflows/soak-nightly.yml"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "ci (about 15 minutes) or long"
+        type: choice
+        options: [ci, long]
+        default: ci
+      hours:
+        description: "Hours of load for mode long (at most 5 on a hosted runner)"
+        default: "4"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: soak-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  soak:
+    name: Soak with faults
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # The checks of the soak are shown to fail on tampered data before the run is trusted (perf/soak/README.md).
+      - name: Self-test of the checks
+        if: github.event_name != 'workflow_dispatch' || inputs.mode == 'ci'
+        run: perf/soak/soak.sh selftest --out perf/results/soak-selftest
+
+      - name: Soak
+        env:
+          MODE: ${{ inputs.mode || 'ci' }}
+          HOURS: ${{ inputs.hours || '4' }}
+        run: |
+          if [ "$MODE" = long ]; then
+            perf/soak/soak.sh long --hours "$HOURS"
+          else
+            perf/soak/soak.sh ci
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          for f in perf/results/soak-selftest/soak-report.md perf/results/soak/soak-report.md; do
+            [ -f "$f" ] && cat "$f" >> "$GITHUB_STEP_SUMMARY"
+          done || true
+
+      - name: Upload the report and the series
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: soak
+          path: |
+            perf/results/soak/
+            perf/results/soak-selftest/
+          if-no-files-found: ignore
+          retention-days: 14

@@ -383,3 +383,53 @@
 .taskform__effects strong { font-weight: 600; color: var(--ink); }
 /* On a phone the action card follows the fields instead of floating over them, so it never covers a field. */
 @media (max-width: 640px) { .taskform .review-dock { position: static; } }
+
+/* ---------- Step timing: plain numbers and a thin bar, nothing boxed ---------- */
+
+.timing__period { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) 0 var(--space-2); }
+.timing__period-label { color: var(--muted); font: var(--type-label); }
+.timing .qtable .num { text-align: right; }
+.timing__name { font-weight: 600; color: var(--ink); }
+.timing__type { margin-left: var(--space-3); color: var(--muted); font: var(--type-label); font-weight: 400; }
+.timing__track { width: 22%; min-width: 120px; padding-left: var(--space-4); }
+.timing__track .timing__fill { display: block; height: 4px; border-radius: 2px; background: var(--chart-bar); }
+.timing__track .timing__fill--hot { background: var(--warn-fill); }
+.timing__asof { margin: var(--space-3) 0 0; font: var(--type-caption); }
+/* The bar is drawn in steps of five percent: the CSP allows no inline style. */
+.timing__fill--w0 { width: 0%; }
+.timing__fill--w5 { width: 5%; }
+.timing__fill--w10 { width: 10%; }
+.timing__fill--w15 { width: 15%; }
+.timing__fill--w20 { width: 20%; }
+.timing__fill--w25 { width: 25%; }
+.timing__fill--w30 { width: 30%; }
+.timing__fill--w35 { width: 35%; }
+.timing__fill--w40 { width: 40%; }
+.timing__fill--w45 { width: 45%; }
+.timing__fill--w50 { width: 50%; }
+.timing__fill--w55 { width: 55%; }
+.timing__fill--w60 { width: 60%; }
+.timing__fill--w65 { width: 65%; }
+.timing__fill--w70 { width: 70%; }
+.timing__fill--w75 { width: 75%; }
+.timing__fill--w80 { width: 80%; }
+.timing__fill--w85 { width: 85%; }
+.timing__fill--w90 { width: 90%; }
+.timing__fill--w95 { width: 95%; }
+.timing__fill--w100 { width: 100%; }
+
+/* The heat on the diagram: a tint and an edge on each box, the figure written on it; the key is swatches and words. */
+.timing__period { flex-wrap: wrap; }
+.timing__views { margin-left: auto; }
+.timing__key { display: flex; align-items: center; gap: var(--space-4); margin: 0; padding: 0; list-style: none; font: var(--type-caption); color: var(--ink-2); }
+.timing__key-item { display: inline-flex; align-items: center; gap: var(--space-2); }
+.timing__swatch { display: inline-block; width: 14px; height: 10px; border: 1px solid var(--node-stroke); }
+.timing__swatch--1 { background: color-mix(in srgb, var(--chart-bar) 18%, var(--node)); }
+.timing__swatch--2 { background: color-mix(in srgb, var(--chart-bar) 55%, var(--node)); }
+.timing__swatch--3 { background: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); border-color: var(--warn-fill); }
+.timing__swatch--4 { background: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); border-color: var(--warn-fill); }
+.dg-node--heat-1 > rect:first-of-type { fill: color-mix(in srgb, var(--chart-bar) 18%, var(--node)); }
+.dg-node--heat-2 > rect:first-of-type { fill: color-mix(in srgb, var(--chart-bar) 55%, var(--node)); }
+.dg-node--heat-3 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); stroke: var(--warn-fill); }
+.dg-node--heat-4 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); stroke: var(--warn-fill); stroke-width: 2.25; }
+.dg-node .dg-node__heat { fill: var(--ink); font: var(--type-caption); font-weight: 600; stroke: var(--canvas); stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; }
