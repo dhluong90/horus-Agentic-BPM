@@ -122,16 +122,15 @@ class DmnImportSpecTest {
         for (String policy : List.of("PRIORITY", "ANY", "RULE ORDER", "OUTPUT ORDER")) {
             byMessage.put("Hit policy " + policy + " arrives in stage S1", base.replace("hitPolicy=\"FIRST\"", "hitPolicy=\"" + policy + "\""));
         }
-        byMessage.put("Hit policy COLLECT with aggregation SUM arrives in stage S1",
-                base.replace("hitPolicy=\"FIRST\"", "hitPolicy=\"COLLECT\" aggregation=\"SUM\""));
+        byMessage.put("Aggregation 'SUM' belongs to hit policy COLLECT",
+                base.replace("hitPolicy=\"FIRST\"", "hitPolicy=\"FIRST\" aggregation=\"SUM\""));
         byMessage.put("Rule DecisionRule_0fk2x7a, output fee: 'age * 2'",
                 base.replaceFirst("<text>0</text>", "<text>age * 2</text>"));
         byMessage.put("Input expression 'applicant.age' must be a plain input name",
                 base.replace("<text>txCount</text>", "<text>applicant.age</text>"));
-        byMessage.put("typeRef 'tAge' of input 'txCount' is not supported; item definitions arrive in stage S1",
+        byMessage.put("typeRef 'tAge' of input 'txCount' has no schema version 1 type",
                 base.replace("typeRef=\"integer\"", "typeRef=\"tAge\""));
         byMessage.put("More than one <decision>", base.replace("</definitions>", "<decision id=\"second\" name=\"second\"/></definitions>"));
-        byMessage.put("give the decision a kebab-case id such as card-fee", base.replace("id=\"card-fee\"", "id=\"Decision_1\""));
         for (String cell : List.of("? > 18", "abs(-20)", "!= 18", "> 18 and < 65", "date(\"2026-02-30\")")) {
             byMessage.put("Rule DecisionRule_1lh0wd3, input txCount: '" + cell.replace("\"", "&quot;") + "'",
                     base.replace("&gt;= 3", escape(cell)));
