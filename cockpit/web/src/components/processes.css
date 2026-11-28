@@ -352,6 +352,11 @@
 .taskform__card { max-width: 960px; }
 .taskform__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; align-items: start; }
 @media (max-width: 900px) { .taskform__grid { grid-template-columns: minmax(0, 1fr); } }
+.taskform__values { margin: 0; }
+.taskform__value { min-width: 0; overflow-wrap: anywhere; }
+.taskform__value dd { margin: 2px 0 0; font-size: var(--text-md, 15px); }
+.taskform__signed { margin: 0 0 16px; color: var(--muted, inherit); }
+.taskform__recorded .link-action { display: inline-block; margin-top: 20px; }
 .taskform__field--wide { grid-column: 1 / -1; }
 .taskform__field, .taskform__group { scroll-margin-bottom: 240px; }
 .taskform__field .field__input, .taskform__field select.field__input { min-height: var(--target-min); width: 100%; }

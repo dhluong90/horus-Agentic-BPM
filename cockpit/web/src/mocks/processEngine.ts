@@ -182,6 +182,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const replies = new Map<string, ProcessAnswer>();
   const overrides: RecordedOverride[] = [];
   const completions: RecordedCompletion[] = [];
+  const submittedData = new Map<string, Record<string, unknown>>();
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
   const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
   const incidentCommands: RecordedIncidentCommand[] = [];
@@ -642,7 +643,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       const declared = QUEUE_FORMS[task.id];
       if (declared === undefined) return problem(404, 'FORM_NOT_DECLARED');
       const base = { schemaVersion: 1, taskId: task.id, lockVersion: task.lockVersion };
-      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: declared };
+      // Once completed, the schema's variables hold what was submitted (a masked one as the placeholder), as the real engine reads them.
+      const submitted = submittedData.get(task.id);
+      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: submitted === undefined ? declared : { ...declared, data: { ...declared.data, ...submitted } } };
       return json(200, body, { ETag: `"${String(task.lockVersion)}"` });
     }
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete|reassign|delegate))?$/.exec(path);
@@ -705,6 +708,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         const errors = formViolations(declared.schema, result);
         if (errors.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations: errors.map((e) => `$.${e.pointer.slice(1)}: ${e.rule}`), errors });
         completions.push({ taskId: task.id, actor: request.user, result, ifMatch, idempotencyKey });
+        const properties = (declared.schema['properties'] ?? {}) as Record<string, { mask?: boolean }>;
+        submittedData.set(task.id, Object.fromEntries(Object.entries(result).map(([name, value]) => [name, properties[name]?.mask === true ? '***' : value])));
       }
       Object.assign(task, { status: 'COMPLETED', completedBy: request.user, completedAt: '2026-11-20T03:20:00Z', lockVersion: task.lockVersion + 1 });
       return json(200, instance(), { ETag: '"5"' });

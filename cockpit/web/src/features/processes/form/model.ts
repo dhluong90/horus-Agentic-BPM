@@ -190,6 +190,55 @@ export function initialDrafts(fields: readonly FormField[], data: Json, locale: 
   return drafts;
 }
 
+/** One line of the recorded decision: what the field is called and the value as the reader reads it; `masked` and `missing` carry no text. */
+export interface RecordedRow {
+  name: string;
+  label: string;
+  text: string | undefined;
+  masked: boolean;
+  wide: boolean;
+}
+
+const isoDay = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The values a completed task's form holds, as read-only text: a choice by its label, money in the language's
+ * separators and the currency's minor units, a masked field never as its value. A field with no value has no text.
+ */
+export function recordedRows(fields: readonly FormField[], data: Json, locale: Locale, words: { yes: string; no: string; when: (iso: string) => string | undefined }): RecordedRow[] {
+  return fields.map((field) => {
+    const value = data[field.name];
+    const wide = field.kind.kind === 'text' && field.kind.multiline;
+    const row = (text: string | undefined): RecordedRow => ({ name: field.name, label: field.label, text, masked: field.masked, wide });
+    if (field.masked) return row(undefined);
+    if (value === undefined || value === null || value === '') return row(undefined);
+    const unit = field.unit !== undefined ? ` ${field.unit}` : '';
+    switch (field.kind.kind) {
+      case 'money': {
+        if (!isMoney(value)) return row(undefined);
+        const plain = minorToText(value.amount, value.currency);
+        const negative = plain.startsWith('-');
+        return row(`${negative ? '-' : ''}${formatDecimalText(plain.replace('-', ''), locale) ?? plain} ${value.currency}`);
+      }
+      case 'number': {
+        if (typeof value !== 'number' && typeof value !== 'string') return row(undefined);
+        const raw = String(value);
+        return row(`${field.kind.grouped ? formatDecimalText(raw, locale) ?? raw : locale === 'vi' ? raw.replace('.', ',') : raw}${unit}`);
+      }
+      case 'choice':
+        return row(typeof value === 'string' ? field.optionLabels[value] ?? value : undefined);
+      case 'yesno':
+        return row(typeof value === 'boolean' ? (value ? words.yes : words.no) : undefined);
+      case 'datetime':
+        return row(typeof value === 'string' ? words.when(value) ?? value : undefined);
+      case 'date':
+        return row(typeof value === 'string' && isoDay.test(value) ? words.when(`${value}T00:00:00Z`)?.replace(/ \d{2}:\d{2}$/, '') ?? value : undefined);
+      case 'text':
+        return row(typeof value === 'string' ? `${value}${unit}` : undefined);
+    }
+  });
+}
+
 export type Problem = 'required' | 'number' | 'integer' | 'money' | 'moneyScale' | 'moneyRange' | 'moneyCurrency' | 'date' | 'datetime' | 'choice' | 'tooLong';
 
 export interface Built {

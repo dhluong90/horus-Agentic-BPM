@@ -133,3 +133,32 @@ test('TR_UI_623_after_approval_the_result_is_shown', async ({ page }) => {
   await expect(page.getByRole('link', { name: /Back to/ })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/loan-approval-result-1440-en-v2.png`, fullPage: false });
 });
+
+
+for (const size of SIZES) {
+  test(`TR_UI_623_a_completed_task_shows_the_recorded_decision_${String(size.width)}`, async ({ page }) => {
+    await openLoanTask(page, 'approval', size, 'en');
+    await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+    await page.getByRole('button', { name: 'Complete task' }).click();
+    const record = page.getByRole('article', { name: 'Recorded decision' });
+    await expect(record).toBeVisible();
+    // Who and when, then the decision as submitted, with no form and no action to take.
+    await expect(record).toContainText(/Completed by an, /);
+    await expect(record.locator('dt', { hasText: 'Your decision' })).toBeVisible();
+    await expect(record.locator('dd').first()).toHaveText('Approve');
+    await expect(page.getByRole('form')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Complete task' })).toHaveCount(0);
+    await expect(record.getByText('APPROVED', { exact: true })).toHaveCount(0);
+    await expect(record.getByText('***')).toHaveCount(0);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await page.screenshot({ path: `${SHOTS}/completed-${String(size.width)}.png`, fullPage: false });
+  });
+}
+
+test('TR_UI_623_a_completed_task_reads_in_vietnamese', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'vi', (task) => ({ ...task, status: 'COMPLETED', completedBy: 'an', completedAt: '2026-11-20T03:20:00Z', allowedActions: [] }));
+  const record = page.getByRole('article', { name: 'Quyết định đã ghi nhận' });
+  await expect(record).toBeVisible();
+  await expect(record).toContainText('an đã hoàn thành');
+  await expect(page.getByRole('form')).toHaveCount(0);
+});

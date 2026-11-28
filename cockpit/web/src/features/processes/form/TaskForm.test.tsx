@@ -6,7 +6,10 @@ import { currentProcessEngine } from '../../../mocks/handlers';
 import { mockHost, setScenario } from '../../../mocks/node';
 import { QUEUE_TASKS } from '../../../mocks/taskQueueDemo';
 import { FORM_TASK_ID } from '../../../mocks/processDemo';
-import { build, fieldsOf, initialDrafts } from './model';
+import { build, fieldsOf, initialDrafts, recordedRows } from './model';
+import { en } from '../../../i18n/en';
+import { vi } from '../../../i18n/vi';
+import { format } from '../../../i18n/I18nProvider';
 import { QUEUE_FORMS } from '../../../mocks/taskQueueDemo';
 
 function open(hash: string) {
@@ -38,7 +41,7 @@ describe('CKP-021 a task is completed through its declared form', () => {
     const reason = within(form).getByLabelText(/^Reason/);
     await waitFor(() => { expect(reason).toHaveAttribute('aria-invalid', 'true'); });
     expect(within(form).getByText('Fill in this field.')).toBeInTheDocument();
-    expect(await within(dock()).findByText(/Check 1 field/)).toBeInTheDocument();
+    expect(await within(dock()).findByText('Check 1 field marked above.')).toBeInTheDocument();
     expect(completions()).toHaveLength(0);
 
     await userEvent.type(reason, 'Income is not verified');
@@ -46,6 +49,16 @@ describe('CKP-021 a task is completed through its declared form', () => {
 
     expect(await screen.findByText(/^Completed by an,/)).toBeInTheDocument();
     expect(completions()).toHaveLength(1);
+    // The completed task is the auditor's record: the decision as submitted, read-only, with no form and no action.
+    const recorded = await screen.findByRole('article', { name: 'Recorded decision' });
+    expect(screen.queryByRole('form')).not.toBeInTheDocument();
+    expect(within(recorded).getByText('Decision')).toBeInTheDocument();
+    expect(within(recorded).getByText('REJECT')).toBeInTheDocument();
+    expect(within(recorded).getByText('250,000,000 VND')).toBeInTheDocument();
+    expect(within(recorded).getByText('Income is not verified')).toBeInTheDocument();
+    expect(within(recorded).getByText('Masked')).toBeInTheDocument();
+    expect(recorded).not.toHaveTextContent('***');
+    expect(screen.queryByRole('button', { name: 'Complete task' })).not.toBeInTheDocument();
     const sent = completions()[0];
     expect(sent?.result).toEqual({
       decision: 'REJECT', approvedLimit: { currency: 'VND', amount: 250000000 }, reviewDate: '2026-11-21', dependants: 2, reason: 'Income is not verified',
@@ -84,6 +97,39 @@ describe('CKP-021 a task is completed through its declared form', () => {
     expect(within(form).getByLabelText(/^Hạn mức duyệt/)).toHaveValue('250.000.000');
     expect(within(form).getByRole('radio', { name: 'Có' })).toBeInTheDocument();
     window.localStorage.removeItem('horus.cockpit.locale');
+  });
+});
+
+describe('the count of fields to check', () => {
+  it('TR_UI_623_the_fix_counter_has_a_singular_and_a_plural_in_both_languages', () => {
+    expect(en['form.dock.fix.one']).toBe('Check 1 field marked above.');
+    expect(format(en['form.dock.fix.other'], { count: '3' })).toBe('Check 3 fields marked above.');
+    expect(vi['form.dock.fix.one']).toContain('1 ');
+    expect(format(vi['form.dock.fix.other'], { count: '3' })).toContain('3 trường');
+  });
+});
+
+describe('the recorded decision of a completed task', () => {
+  const form = { schema: { type: 'object', properties: {
+    decision: { enum: ['APPROVED', 'REJECTED'] }, amount: { type: 'object', properties: { currency: { const: 'VND' }, amount: { type: 'integer' } } },
+    term: { type: 'integer' }, ok: { type: 'boolean' }, note: { type: 'string' }, idNumber: { type: 'string', mask: true },
+  } }, hints: { options: { decision: { APPROVED: { en: 'Approved' } } }, units: { term: 'months' } },
+  data: { decision: 'APPROVED', amount: { currency: 'VND', amount: 900000000 }, term: 24, ok: true, idNumber: '***' } };
+  const rows = recordedRows(fieldsOf(form, 'en'), form.data, 'en', { yes: 'Yes', no: 'No', when: () => undefined });
+
+  it('TR_UI_623_values_read_as_text_with_labels_grouping_and_units', () => {
+    expect(rows.map((row) => [row.name, row.text])).toEqual([
+      ['decision', 'Approved'], ['amount', '900,000,000 VND'], ['term', '24 months'], ['ok', 'Yes'], ['note', undefined], ['idNumber', undefined],
+    ]);
+  });
+
+  it('TR_SEC_05_a_masked_value_has_no_text_in_the_record', () => {
+    expect(rows.find((row) => row.name === 'idNumber')).toMatchObject({ masked: true, text: undefined });
+  });
+
+  it('TR_UI_623_money_uses_the_minor_units_of_its_currency', () => {
+    const usd = { schema: { type: 'object', properties: { fee: { type: 'object', properties: { currency: { const: 'USD' }, amount: { type: 'integer' } } } } }, hints: {}, data: { fee: { currency: 'USD', amount: 123456 } } };
+    expect(recordedRows(fieldsOf(usd, 'vi'), usd.data, 'vi', { yes: 'Có', no: 'Không', when: () => undefined })[0]?.text).toBe('1.234,56 USD');
   });
 });
 

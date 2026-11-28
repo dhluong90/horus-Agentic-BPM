@@ -11,7 +11,7 @@ import { groupWhileTyping } from '../../rules/model/money';
 import { useProcessesSession } from '../api/processesContext';
 import { useClaimTask, useCompleteForm, useTaskForm } from '../api/useProcesses';
 import { ReviewMeta, useReviewCrumbs } from '../review/ReviewParts';
-import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, type Drafts, type FormField, type Problem } from './model';
+import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, recordedRows, type Drafts, type FormField, type Problem } from './model';
 
 /*
  * A task completed through the form its process declares (CKP-021). The engine owns the form and checks the result;
@@ -42,7 +42,7 @@ export function TaskFormScreen({ task }: { task: Task }) {
   const none = host?.kind === 'problem' && host.code === 'FORM_NOT_DECLARED';
   return (
     <section className="workspace review taskform" aria-labelledby="taskform-title" aria-busy={form.isPending}>
-      <PageHead id="taskform-title" title={title} subtitle={t('form.subtitle')} action={<StatusMark status={task.status} claimedBy={task.claimedBy} />} />
+      <PageHead id="taskform-title" title={title} subtitle={t(task.status === 'COMPLETED' ? 'form.subtitleDone' : 'form.subtitle')} action={<StatusMark status={task.status} claimedBy={task.claimedBy} />} />
       <ReviewMeta task={task} createdKey="form.created" />
       {form.isPending ? (
         <article className="card"><LoadingRows rows={4} /></article>
@@ -52,6 +52,8 @@ export function TaskFormScreen({ task }: { task: Task }) {
         <article className="card"><AreaError error={form.error} onRetry={() => { void form.refetch(); }} /></article>
       ) : form.data.link !== undefined ? (
         <LinkOut task={task} link={form.data.link} title={title} />
+      ) : task.status === 'COMPLETED' ? (
+        <RecordedDecision task={task} form={form.data} title={title} />
       ) : (
         <FormBody task={task} form={form.data} title={title} />
       )}
@@ -98,6 +100,37 @@ function LinkOut({ task, link, title }: { task: Task; link: string; title: strin
         {claim.isError ? <div className="review-dock__error"><AreaError error={claim.error} onRetry={() => { claim.reset(); }} /></div> : null}
       </section>
     </>
+  );
+}
+
+/** A completed task: what was submitted, by whom and when, read-only. The values are the engine's, masked fields stay masked. */
+function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; title: string }) {
+  const { t, locale } = useI18n();
+  const hostLink = useHostLink();
+  const content = form.form;
+  const rows = useMemo(() => {
+    if (content === undefined) return [];
+    return recordedRows(fieldsOf(content, locale), content.data, locale, { yes: t('review.yes'), no: t('review.no'), when: (iso) => formatDateTime(iso, locale) });
+  }, [content, locale, t]);
+  return (
+    <article className="card taskform__card taskform__recorded" aria-labelledby="taskform-recorded">
+      <h2 id="taskform-recorded" className="card__title">{t('form.recorded')}</h2>
+      <p className="taskform__signed">{t('form.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
+      {rows.length === 0 ? <p className="muted">{t('form.noFields')}</p> : (
+        <dl className="taskform__grid taskform__values" aria-label={title}>
+          {rows.map((row) => (
+            <div key={row.name} className={row.wide ? 'taskform__value taskform__field--wide' : 'taskform__value'}>
+              <dt className="field__label">{row.label}</dt>
+              <dd>
+                {row.masked ? <span className="masked__tag"><span aria-hidden="true">◍</span> {t('form.masked')}</span>
+                  : row.text !== undefined ? row.text : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t('form.notRecorded')}</span></span>}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      <a className="link-action" href={hostLink({ name: 'tasks', view: 'mine' })}>{t('form.dock.back')} <span aria-hidden="true">→</span></a>
+    </article>
   );
 }
 
@@ -188,7 +221,7 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
         {working ? (
           <div className="review-dock__foot">
             <div className="review-dock__messages" role="status">
-              {tried && problemsCount > 0 ? <p className="field__error">{t('form.dock.fix', { count: String(problemsCount) })}</p> : null}
+              {tried && problemsCount > 0 ? <p className="field__error">{t(problemsCount === 1 ? 'form.dock.fix.one' : 'form.dock.fix.other', { count: String(problemsCount) })}</p> : null}
               {fields.some((field) => field.masked) ? <p className="muted">{t('form.dock.masked')}</p> : null}
             </div>
             <button type="submit" form={formId} className="btn btn--primary" disabled={complete.isPending} aria-busy={complete.isPending}>
