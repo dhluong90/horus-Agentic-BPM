@@ -214,15 +214,15 @@
 .tabs-row > .tabs { border-bottom: 0; flex: 1 1 auto; min-width: 0; }
 .tabs-row__aside { flex: none; display: flex; align-items: center; gap: var(--space-2, 8px); padding-bottom: 4px; }
 
-/* A filter toggle (styleguide: segmented filter, one item): neutral when off, the selected treatment when on. */
+/* A filter toggle: plain text, no box. Off: muted. On: accent text with the tab underline (styleguide, tabs). */
 .filter-toggle {
-  display: inline-flex; align-items: center; gap: var(--space-2, 8px); min-height: 36px; padding: 0 12px;
-  border: 1px solid var(--control); border-radius: var(--radius-m); background: var(--surface); color: var(--ink-2);
+  display: inline-flex; align-items: center; gap: var(--space-2, 8px); min-height: 36px; padding: 0 4px;
+  border: 0; border-radius: var(--radius-s); background: transparent; color: var(--muted);
   font: var(--type-label); font-weight: 600; cursor: pointer;
 }
-.filter-toggle:hover { background: var(--surface-2); color: var(--ink); }
+.filter-toggle:hover { color: var(--ink); }
 .filter-toggle:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
-.filter-toggle[aria-pressed="true"] { background: var(--select); border-color: var(--accent); color: var(--accent); }
+.filter-toggle[aria-pressed="true"] { color: var(--accent); text-decoration: underline; text-decoration-thickness: 2px; text-underline-offset: 6px; }
 .filter-toggle__icon { color: var(--warn); font-size: 11px; }
 .filter-toggle__count { color: var(--muted); font-weight: 600; }
 .filter-toggle[aria-pressed="true"] .filter-toggle__count { color: var(--accent); }
