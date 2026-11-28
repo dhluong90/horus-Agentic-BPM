@@ -56,7 +56,9 @@ final class UserTaskBehavior implements FlowNodeBehavior<UserTask> {
         StepSupport.storeResult(node, complete.result(), token, ctx);
         Token active = token.withStatus(TokenStatus.ACTIVE);
         ctx.update(active);
-        ctx.history("TASK_COMPLETED", token, Map.of("taskId", complete.taskId()));
+        // #663: the submission is already masked by the shell; the kernel only copies it, so replay is unchanged.
+        ctx.history("TASK_COMPLETED", token, complete.submission() == null ? Map.of("taskId", complete.taskId())
+                : Map.of("taskId", complete.taskId(), "submission", complete.submission()));
         ctx.history("NODE_COMPLETED", token, Map.of());
         ctx.effect(new Effect.EmitEvent(ctx.nextId(), "processes.task.completed.v1", Map.of("taskId", complete.taskId(),
                 "nodeId", node.id(), "completedBy", String.valueOf(complete.actor()))));

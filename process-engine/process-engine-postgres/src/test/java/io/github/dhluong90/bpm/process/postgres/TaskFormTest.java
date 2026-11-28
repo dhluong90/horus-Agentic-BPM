@@ -125,6 +125,51 @@ class TaskFormTest {
     }
 
     @Test
+    void PRE_390_the_submission_is_recorded_masked_and_later_variable_changes_do_not_alter_it() {
+        importFixture();
+        as("an");
+        ProcessInstance started = engine.services.start(new StartRequest("loan-review-form", "LN-2027-0044",
+                Map.of("idNumber", ID_NUMBER), null));
+        ProcessInstance.Task approve = open(started, "approve");
+        long claimed = engine.services.claim(approve.id(), approve.lockVersion(), "an-claim-1").lockVersion();
+
+        engine.services.complete(approve.id(), Map.of("decision", "REJECT", "reason", "income not verified",
+                "idNumber", ID_NUMBER), claimed, "an-complete-1");
+        // The case moves on: a variable the officer submitted changes later.
+        TestEngine.jdbc().sql("UPDATE pre_instance SET variables = jsonb_build_object('review', "
+                + "jsonb_build_object('reason', 'changed afterwards')) WHERE id = ?").param(started.id()).update();
+
+        var entry = engine.queries.activities(started.id(), 200).entries().stream()
+                .filter(e -> e.type().equals("TASK_COMPLETED")).findFirst().orElseThrow();
+        assertThat(entry.submission()).containsEntry("decision", "REJECT")
+                .containsEntry("reason", "income not verified").containsEntry("idNumber", "***");
+        String stored = TestEngine.jdbc().sql("SELECT details::text FROM pre_history WHERE instance_id = ? AND "
+                + "event_type = 'TASK_COMPLETED'").param(started.id()).query(String.class).single();
+        assertThat(stored).contains("income not verified").doesNotContain(ID_NUMBER).doesNotContain("changed afterwards");
+    }
+
+    @Test
+    void PRE_390_a_task_without_a_form_records_no_submission() {
+        importFixture();
+        as("an");
+        ProcessInstance started = engine.services.start(new StartRequest("loan-review-form", "LN-2027-0045", Map.of(),
+                null));
+        ProcessInstance.Task approve = open(started, "approve");
+        long claimed = engine.services.claim(approve.id(), approve.lockVersion(), "an-claim-1").lockVersion();
+        ProcessInstance atScreen = engine.services.complete(approve.id(), Map.of("decision", "APPROVE"), claimed,
+                "an-complete-1");
+        ProcessInstance.Task screen = open(atScreen, "screen");
+        long screenClaimed = engine.services.claim(screen.id(), screen.lockVersion(), "an-claim-2").lockVersion();
+        engine.services.complete(screen.id(), Map.of("anything", 1), screenClaimed, "an-complete-2");
+
+        var entries = engine.queries.activities(started.id(), 200).entries().stream()
+                .filter(e -> e.type().equals("TASK_COMPLETED")).toList();
+        assertThat(entries).extracting(e -> e.nodeId()).containsExactly("approve", "screen");
+        assertThat(entries.get(0).submission()).containsEntry("decision", "APPROVE");
+        assertThat(entries.get(1).submission()).isNull();
+    }
+
+    @Test
     void PRE_031_a_link_task_returns_the_link_and_a_task_without_a_form_is_not_declared() {
         importFixture();
         as("an");

@@ -156,11 +156,14 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      *     (#490, #495); never a variable value; null otherwise
      * @param resultVariable for the {@code NODE_COMPLETED} of a script step, the variable it set, as recorded when it
      *     ran (#518); null otherwise
+     * @param submission for {@code TASK_COMPLETED}, the form values the user submitted as they were stored, masked
+     *     fields masked (#663); null for an entry written before it was recorded and for a task without a form
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
             String handler, String cause, Integer waiters, java.util.Map<String, String> message, Instances instances,
-            Routing routing, java.util.Map<String, Object> event, String resultVariable) {
+            Routing routing, java.util.Map<String, Object> event, String resultVariable,
+            java.util.Map<String, Object> submission) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -170,6 +173,17 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
             message = message == null ? null : java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(message));
             event = event == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(event));
+            submission = submission == null ? null : java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(submission));
+        }
+
+        /** An entry with no recorded submission. */
+        public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
+                String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
+                String errorCode, String handler, String cause, Integer waiters, java.util.Map<String, String> message,
+                Instances instances, Routing routing, java.util.Map<String, Object> event, String resultVariable) {
+            this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
+                    errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable, null);
         }
 
         /** An entry with no event part. */
@@ -220,13 +234,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
         /** @return the same entry with the routing of a gateway or join */
         public Entry withRouting(Routing newRouting) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting, event, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting, event, resultVariable, submission);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable, submission);
         }
 
         /**
@@ -237,7 +251,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable, submission);
         }
 
         /**
@@ -246,7 +260,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withInstances(Instances counters) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, counters, routing, event, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, counters, routing, event, resultVariable, submission);
         }
 
         /**
@@ -257,7 +271,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withEvent(java.util.Map<String, Object> newEvent) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, newEvent, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, newEvent, resultVariable, submission);
         }
 
         /**
@@ -268,7 +282,19 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withResultVariable(String variable) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, variable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, variable, submission);
+        }
+
+        /**
+         * The same entry carrying the form submission a user task was completed with (#663).
+         *
+         * @param recorded the submission as stored: validated, every masked field already masked
+         * @return the entry with {@code submission} set
+         */
+        public Entry withSubmission(java.util.Map<String, Object> recorded) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable,
+                    recorded);
         }
 
         /** @return true for the history types the undo of a saga writes */

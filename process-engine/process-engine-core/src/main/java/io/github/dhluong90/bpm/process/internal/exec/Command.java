@@ -36,12 +36,21 @@ public sealed interface Command permits Command.Start, Command.CompleteTask, Com
      * @param tokenId the waiting token
      * @param result the completion result
      * @param actor who completed it
+     * @param submission the validated submission as history keeps it, masked fields already masked (#663), or null
+     *     when the task has no form; the kernel copies it into the {@code TASK_COMPLETED} entry and never reads it back
      */
-    record CompleteTask(String taskId, String tokenId, Map<String, Object> result, String actor) implements Command {
+    record CompleteTask(String taskId, String tokenId, Map<String, Object> result, String actor,
+            Map<String, Object> submission) implements Command {
         public CompleteTask {
             Objects.requireNonNull(taskId, "taskId must not be null");
             Objects.requireNonNull(tokenId, "tokenId must not be null");
             result = result == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(result));
+            submission = submission == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(submission));
+        }
+
+        /** A completion with no recorded submission. */
+        public CompleteTask(String taskId, String tokenId, Map<String, Object> result, String actor) {
+            this(taskId, tokenId, result, actor, null);
         }
     }
 

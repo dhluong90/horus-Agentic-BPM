@@ -2788,3 +2788,13 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** `escalated` is reached, the task stays open and the instance `RUNNING`; completing the task completes the instance.
 - **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
 - **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)
+
+### PRE-390 The history of a completed task records what was submitted, masked as the form says
+- **Traces to:** `TR-SEC-05`, `TR-AUD-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The credit review task `approve` has a form whose field `idNumber` is `mask: true`; the officer `an` has claimed it.
+- **When:** `an` completes it with `decision = REJECT`, `reason = income not verified` and `idNumber = 079012345678`, and the case's variables change afterwards.
+- **Then:** The `TASK_COMPLETED` row, written in the completing transaction, holds `submission` with the validated values and `idNumber` as `***`; the plain id number is in no history row. `GET /instances/{id}/activities` returns `submission` on that entry and it does not change when the variables change. A task without a form, a link task and a task completed before this was recorded have no `submission`. The kernel only copies the submission, so replaying a command gives the same state and the same hash as before; no migration is needed because `details` is JSONB.
+- **Example:** `submission = {decision: REJECT, reason: income not verified, idNumber: ***}`.
+- **Test ID:** `PRE_390_the_submission_is_recorded_masked_and_later_variable_changes_do_not_alter_it`, `PRE_390_a_task_without_a_form_records_no_submission` (`TaskFormTest`), `PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304` (`ProcessRestContractTest`)

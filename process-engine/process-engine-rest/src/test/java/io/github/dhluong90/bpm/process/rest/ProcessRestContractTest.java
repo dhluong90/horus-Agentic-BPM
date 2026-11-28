@@ -189,7 +189,8 @@ class ProcessRestContractTest {
                 .contains("\"scope\":\"kyc-saga\"").contains("\"errorCode\":\"ACCOUNT_FROZEN\"")
                 .contains("\"state\":\"NOT_FULLY_UNDONE\"").contains("\"blockedStep\":\"verify-docs\"")
                 .contains("\"incidentId\":\"01JD0000000000000000000101\"").contains("\"kind\":\"STEP\"")
-                .contains("\"resultVariable\":\"fee2\"");
+                .contains("\"resultVariable\":\"fee2\"")
+                .contains("\"submission\":{\"decision\":\"REJECT\",\"idNumber\":\"***\"}");
         assertProblem(get(BASE + "/instances/01JD0000000000000000000077/activities"), 404, "INSTANCE_NOT_FOUND");
         assertProblem(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "0"), 400,
                 "QUERY_INVALID");
@@ -571,6 +572,9 @@ class ProcessRestContractTest {
             var scripted = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
                     "01JD0000000000000000000102", "NODE_COMPLETED", "double-fee", null, NOW.plusSeconds(1))
                     .withResultVariable("fee2");
+            var decided = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
+                    "01JD0000000000000000000103", "TASK_COMPLETED", "approve", "an", NOW.plusSeconds(2))
+                    .withSubmission(java.util.Map.of("decision", "REJECT", "idNumber", "***"));
             var undoStep = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
                     "01JD0000000000000000000100", "COMPENSATION_STEP_FAILED", "verify-docs", "system:compensation",
                     NOW.plusSeconds(200), "COMPENSATION", "verify-docs", "01JD0000000000000000000098",
@@ -580,7 +584,7 @@ class ProcessRestContractTest {
                             .CompensationState.NOT_FULLY_UNDONE, NOW.plusSeconds(195), null, "PARTNER_REFUSED",
                     "notify-partner", 0, "verify-docs", "01JD0000000000000000000101", "COMPENSATION_FAILED");
             return new io.github.dhluong90.bpm.process.api.InstanceActivities(instanceId, NOW, null, List.of(verify),
-                    List.of(entry, scripted, undoStep), false, List.of(scope));
+                    List.of(entry, scripted, decided, undoStep), false, List.of(scope));
         }
     }
 

@@ -3564,6 +3564,15 @@ components:
                     items: { type: string }
                     description: '`EVENT_GATEWAY_RESOLVED`: the ids of the catch events that were cancelled'
               resultVariable: { type: string, description: 'The `NODE_COMPLETED` of a script step: the variable it set, as recorded when it ran (#518). Absent for other entries' }
+              submission:
+                type: object
+                additionalProperties: true
+                description: >-
+                  The `TASK_COMPLETED` of a task that has a form (#663, `PRE-390`): the values the user submitted, as
+                  validated and stored in the same transaction. Every field the form schema marks `mask: true` is
+                  `***`; the plain value is never stored and never returned. It does not change when the case's
+                  variables change later. Absent for a task completed before this was recorded, for a task without a
+                  form, for a link task and for every other entry
         compensations:
           type: array
           description: >-
