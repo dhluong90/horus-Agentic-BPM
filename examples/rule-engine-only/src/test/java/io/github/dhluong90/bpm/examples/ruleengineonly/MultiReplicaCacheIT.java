@@ -120,6 +120,66 @@ class MultiReplicaCacheIT {
         }
     }
 
+    @Test
+    @org.junit.jupiter.api.Tag("pooler")
+    void RLE_027_copies_behind_a_transaction_pooler_retire_a_superseded_version_once() throws Exception {
+        // Given two copies through PgBouncer in transaction mode, each sweeping every second, and card-fee v1 in force
+        String database = freshDatabase();
+        start(directUrl(database)).close();
+        try (GenericContainer<?> pgbouncer = pgbouncer(database)) {
+            pgbouncer.start();
+            String pooled = "jdbc:postgresql://" + pgbouncer.getHost() + ":" + pgbouncer.getMappedPort(5432) + "/"
+                    + database + "?prepareThreshold=0";
+            String[] behindThePooler = {
+                "--horus.bpm.rules.cache.listen-notify=false",
+                "--horus.bpm.rules.lifecycle.sweep-interval=PT1S",
+                "--horus.bpm.rules.migrate-on-start=false",
+                "--spring.flyway.enabled=false"};
+            try (ConfigurableApplicationContext a = start(pooled, behindThePooler);
+                    ConfigurableApplicationContext b = start(pooled, behindThePooler)) {
+                publish(a, cardFee(50000), 1);
+
+                // When v2 is approved with an effective date a few seconds ahead, and the date passes
+                String effective = java.time.Instant.now().plusSeconds(4).truncatedTo(java.time.temporal.ChronoUnit.SECONDS)
+                        .toString();
+                String v2 = new String(cardFee(60000), StandardCharsets.UTF_8)
+                        .replace("schemaVersion: 1\n", "schemaVersion: 1\neffectiveFrom: \"" + effective + "\"\n");
+                assertThat(v2).contains("effectiveFrom");
+                publish(a, v2.getBytes(StandardCharsets.UTF_8), 2);
+                JdbcClient direct = JdbcClient.create(new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                        directUrl(database), POSTGRES.getUsername(), POSTGRES.getPassword()));
+                long deadline = System.nanoTime() + Duration.ofSeconds(40).toNanos();
+                while (!"RETIRED".equals(direct.sql("SELECT status FROM rle_version WHERE version_num = 1")
+                        .query(String.class).single())) {
+                    assertThat(System.nanoTime()).as("v1 was not retired by the sweep").isLessThan(deadline);
+                    Thread.sleep(200);
+                }
+                // and both copies keep sweeping for a few more rounds
+                Thread.sleep(4_000);
+
+                // Then both copies serve v2, v1 has exactly one retired event and one RETIRED history row
+                assertThat(evaluatedVersion(a)).isEqualTo(2);
+                assertThat(evaluatedVersion(b)).isEqualTo(2);
+                assertThat(direct.sql("SELECT count(*) FROM rle_decision_outbox WHERE payload->>'eventType' ="
+                        + " 'rules.version.retired.v1'").query(Long.class).single()).isEqualTo(1L);
+                assertThat(direct.sql("""
+                        SELECT count(*) FROM rle_version_history h JOIN rle_version v ON v.id = h.version_id
+                        WHERE v.version_num = 1 AND h.action = 'RETIRED'""").query(Long.class).single()).isEqualTo(1L);
+                assertThat(direct.sql("SELECT payload->>'actor' || '/' || (payload->>'reason') FROM rle_decision_outbox"
+                        + " WHERE payload->>'eventType' = 'rules.version.retired.v1'").query(String.class).single())
+                        .isEqualTo("system:supersession/SUPERSEDED");
+
+                // And no session-mode connection was needed: nothing listened, and no advisory lock was taken
+                assertThat(a.getBean(RuleEngineCacheCoherence.class).listening()).isFalse();
+                assertThat(b.getBean(RuleEngineCacheCoherence.class).listening()).isFalse();
+                assertThat(direct.sql("SELECT count(*) FROM pg_stat_activity WHERE query LIKE 'LISTEN %'")
+                        .query(Long.class).single()).isZero();
+                assertThat(direct.sql("SELECT count(*) FROM pg_locks WHERE locktype = 'advisory'")
+                        .query(Long.class).single()).isZero();
+            }
+        }
+    }
+
     private static GenericContainer<?> pgbouncer(String database) {
         return new GenericContainer<>(DockerImageName.parse(PGBOUNCER_IMAGE))
                 .withNetwork(NETWORK)
