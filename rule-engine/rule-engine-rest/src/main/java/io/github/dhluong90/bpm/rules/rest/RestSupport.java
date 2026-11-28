@@ -444,7 +444,7 @@ final class RestSupport {
      * @throws PayloadTooLargeException when the body is larger than the limit
      * @throws IOException when the stream fails
      */
-    /** The header that names the file an import came from (RLE-228). */
+    /** The header that names the file an import came from (RLE-232). */
     static final String SOURCE_FILE_NAME_HEADER = "X-Source-File-Name";
 
     /**

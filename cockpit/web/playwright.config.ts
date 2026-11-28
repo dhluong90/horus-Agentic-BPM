@@ -6,8 +6,14 @@ import { defineConfig, devices } from '@playwright/test';
 const port = Number(process.env['COCKPIT_E2E_PORT'] ?? 4173);
 const baseURL = `http://127.0.0.1:${String(port)}/`;
 
+// The visual regression spec (#587) compares screenshots drawn on Linux, in CI's Playwright image: it has its own run,
+// `npm run e2e:visual`, and the other runs leave it out. Its reviewed images are in e2e/visual-baselines.
+const visual = process.env['COCKPIT_VISUAL'] === '1';
+
 export default defineConfig({
   testDir: './e2e',
+  ...(visual ? { testMatch: '**/visual-regression.spec.ts' } : { testIgnore: '**/visual-regression.spec.ts' }),
+  snapshotPathTemplate: '{testDir}/visual-baselines/{arg}{ext}',
   fullyParallel: true,
   forbidOnly: Boolean(process.env['CI']),
   retries: process.env['CI'] ? 1 : 0,

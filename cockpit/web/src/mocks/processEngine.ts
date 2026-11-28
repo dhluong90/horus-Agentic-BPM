@@ -124,9 +124,21 @@ export interface ProcessSeed {
   resolveApproval?: 'four-eyes' | 'single';
   /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
   unclassified?: boolean;
+  /** Step timing of the demo key: `empty` is a period without activity. */
+  stepTiming?: 'empty';
   /** A pending change of the `vn-banking-hours` calendar, proposed by lan (#473): in the approvals list and under Calendar changes. */
   calendar?: boolean;
 }
+
+/** The figures of the demo key over a period (getNodeStats, mode=window): the approval is the slow step. */
+const STEP_TIMING = {
+  start: { entered: 1240, completed: 1240, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 40, p50Ms: 30, p95Ms: 90 },
+  'screen-sanctions': { entered: 1240, completed: 1236, failed: 4, incidents: 2, slaBreaches: 0, meanMs: 2400, p50Ms: 1900, p95Ms: 6200 },
+  'verify-docs': { entered: 1240, completed: 1232, failed: 8, incidents: 3, slaBreaches: 0, meanMs: 19000, p50Ms: 14000, p95Ms: 47000 },
+  'risk-rating': { entered: 1232, completed: 1232, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 120, p50Ms: 90, p95Ms: 310 },
+  approve: { entered: 187, completed: 171, failed: 0, incidents: 0, slaBreaches: 12, meanMs: 5400000, p50Ms: 4800000, p95Ms: 9900000 },
+  'open-account': { entered: 1216, completed: 1216, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 8100, p50Ms: 6500, p95Ms: 130000 },
+} as const;
 
 /** A command on an incident, as the engine received it. */
 export interface RecordedIncidentCommand {
@@ -184,6 +196,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const replies = new Map<string, ProcessAnswer>();
   const overrides: RecordedOverride[] = [];
   const completions: RecordedCompletion[] = [];
+  const submittedData = new Map<string, Record<string, unknown>>();
+  /** What the engine's history keeps of a completed form task (#663): the stored submission and the paths it did not store. */
+  const recordedSubmissions = new Map<string, { instanceId: string; nodeId: string; actor: string; submission: Record<string, unknown>; unrecordedFields: string[] }>();
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
   const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
   const incidentCommands: RecordedIncidentCommand[] = [];
@@ -417,7 +432,86 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const calendarBody = () => ({ ...calendarChange, contentHash: calendarHash() });
   /** Approvals sent to the calendar-change endpoints, as the engine received them. */
   const calendarDecisions: { id: string; command: 'approve' | 'reject'; actor: string; body: Record<string, unknown> }[] = [];
-  function calendarRoute(request: ProcessRequest, path: string): ProcessAnswer | undefined {
+  /** The calendars in force (PRE-181), and the changes proposed from the editor (PRE-114, PRE-182). */
+  interface WorkingCalendar { zone: string; week: Record<string, string[]>; holidays: Record<string, string> }
+  const calendars = new Map<string, { version: number; calendar: WorkingCalendar; updatedBy: string; approvedBy: string; updatedAt: string }>([
+    ['vn-banking-hours', {
+      version: 3, updatedBy: 'lan', approvedBy: 'minh', updatedAt: '2026-10-02T03:00:00Z',
+      calendar: { zone: 'Asia/Ho_Chi_Minh', week: { MONDAY: ['08:00-17:00'], TUESDAY: ['08:00-17:00'], WEDNESDAY: ['08:00-17:00'], THURSDAY: ['08:00-17:00'], FRIDAY: ['08:00-17:00'], SATURDAY: ['08:00-12:00'] }, holidays: { '2026-09-02': 'National Day', '2027-02-08': 'Tet' } },
+    }],
+  ]);
+  interface Proposal { id: string; calendarKey: string; status: string; approval: string; baseVersion: number; previous: WorkingCalendar | null; proposed: WorkingCalendar; reason: string; proposedBy: string; proposedAt: string; decidedBy: string | null; decidedAt: string | null; comment: string | null }
+  const proposals: Proposal[] = [];
+  /** Proposals sent from the calendar editor, as the engine received them. */
+  const calendarProposals: { key: string; ifMatch: string | undefined; idempotencyKey: string | undefined; actor: string; body: Record<string, unknown> }[] = [];
+  const proposalBody = (item: Proposal) => ({ ...item, contentHash: fakeHash(JSON.stringify([item.calendarKey, item.baseVersion, item.proposed])) });
+  function calendarEditorRoute(request: ProcessRequest, path: string, url: URL): ProcessAnswer | undefined {
+    const read = request.permissions.includes('processes:read');
+    if (request.method === 'GET' && path === `${BASE}/calendars`) {
+      if (!read) return problem(403, 'PERMISSION_DENIED');
+      const data = [...calendars.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, c]) => ({ key, version: c.version, zone: c.calendar.zone, updatedBy: c.updatedBy, approvedBy: c.approvedBy, updatedAt: c.updatedAt }));
+      return json(200, { data, nextCursor: null, hasNext: false });
+    }
+    const one = /^\/api\/bpm\/processes\/v1\/calendars\/([^/:]+)(\/changes)?$/.exec(path);
+    if (one !== null) {
+      const key = one[1] ?? '';
+      if (one[2] === undefined && request.method === 'GET') {
+        if (!read) return problem(403, 'PERMISSION_DENIED');
+        const found = calendars.get(key);
+        return found === undefined ? problem(404, 'CALENDAR_NOT_FOUND') : json(200, { key, ...found }, { ETag: `"${String(found.version)}"` });
+      }
+      if (one[2] !== undefined && request.method === 'POST') {
+        if (!request.permissions.includes('processes:calendar:manage')) return problem(403, 'PERMISSION_DENIED');
+        const ifMatch = request.headers['If-Match'] ?? request.headers['if-match'];
+        const idempotencyKey = request.headers['Idempotency-Key'] ?? request.headers['idempotency-key'];
+        if (ifMatch === undefined || idempotencyKey === undefined) return problem(428, 'PRECONDITION_REQUIRED');
+        const body = JSON.parse(request.body === '' ? '{}' : request.body) as { calendar?: WorkingCalendar; reason?: string };
+        calendarProposals.push({ key, ifMatch, idempotencyKey, actor: request.user, body });
+        if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(key) || body.calendar === undefined || (body.reason ?? '').trim() === '') return problem(400, 'INPUT_INVALID');
+        const current = calendars.get(key);
+        if (ifMatch !== `"${String(current?.version ?? 0)}"`) return problem(409, 'VERSION_CONFLICT');
+        const item: Proposal = {
+          id: `01KB2R6Q3C0000000000PROP${String(proposals.length + 1).padStart(2, '0')}`, calendarKey: key, status: 'PENDING', approval: 'FOUR_EYES', baseVersion: current?.version ?? 0,
+          previous: current?.calendar ?? null, proposed: body.calendar, reason: body.reason ?? '', proposedBy: request.user, proposedAt: '2026-11-21T04:00:00Z', decidedBy: null, decidedAt: null, comment: null,
+        };
+        proposals.push(item);
+        return json(201, proposalBody(item), { Location: `${BASE}/calendar-changes/${item.id}` });
+      }
+      return undefined;
+    }
+    const changes = /^\/api\/bpm\/processes\/v1\/calendar-changes\/([^/:]+)(:approve|:reject)$/.exec(path);
+    if (changes !== null && request.method === 'POST') {
+      const item = proposals.find((candidate) => candidate.id === changes[1]);
+      if (item === undefined) return undefined;
+      if (!request.permissions.includes('processes:calendar:manage')) return problem(403, 'PERMISSION_DENIED');
+      if (item.status !== 'PENDING') return problem(409, 'INVALID_STATE');
+      const body = JSON.parse(request.body === '' ? '{}' : request.body) as Record<string, unknown>;
+      const approve = changes[2] === ':approve';
+      if (approve && request.user === item.proposedBy) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
+      if (approve && body['expectedChangeHash'] !== proposalBody(item).contentHash) return problem(body['expectedChangeHash'] === undefined ? 400 : 409, body['expectedChangeHash'] === undefined ? 'CONTENT_HASH_REQUIRED' : 'CONTENT_CHANGED');
+      Object.assign(item, { status: approve ? 'APPROVED' : 'REJECTED', decidedBy: request.user, decidedAt: '2026-11-21T05:00:00Z', comment: typeof body['comment'] === 'string' ? body['comment'] : null });
+      if (approve) calendars.set(item.calendarKey, { version: item.baseVersion + 1, calendar: item.proposed, updatedBy: item.proposedBy, approvedBy: request.user, updatedAt: '2026-11-21T05:00:00Z' });
+      return json(200, proposalBody(item));
+    }
+    const byId = /^\/api\/bpm\/processes\/v1\/calendar-changes\/([^/:]+)$/.exec(path);
+    if (byId !== null && request.method === 'GET') {
+      const item = proposals.find((candidate) => candidate.id === byId[1]);
+      if (item === undefined) return undefined;
+      return read ? json(200, proposalBody(item)) : problem(403, 'PERMISSION_DENIED');
+    }
+    if (request.method === 'GET' && path === `${BASE}/calendar-changes`) {
+      if (!read) return problem(403, 'PERMISSION_DENIED');
+      const status = url.searchParams.get('status') ?? 'PENDING';
+      if (!['PENDING', 'APPROVED', 'REJECTED'].includes(status)) return problem(400, 'QUERY_INVALID');
+      const demo = calendarChange !== undefined && calendarChange.status === status ? [calendarBody()] : [];
+      const data = [...proposals.filter((item) => item.status === status).map(proposalBody).reverse(), ...demo];
+      return json(200, { data, nextCursor: null, hasNext: false });
+    }
+    return undefined;
+  }
+  function calendarRoute(request: ProcessRequest, path: string, url: URL): ProcessAnswer | undefined {
+    const editor = calendarEditorRoute(request, path, url);
+    if (editor !== undefined) return editor;
     const m = /^\/api\/bpm\/processes\/v1\/calendar-changes(?:\/([^/:]+)(:approve|:reject)?)?$/.exec(path);
     if (m === null) return undefined;
     if (calendarChange === undefined) return problem(404, 'CALENDAR_NOT_FOUND');
@@ -584,7 +678,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return json(200, { data, nextCursor: null, hasNext: false });
     }
     if (request.method === 'GET' && path === `${BASE}/approvals`) return pendingApprovals(url, request);
-    const calendar = calendarRoute(request, path);
+    const calendar = calendarRoute(request, path, url);
     if (calendar !== undefined) return calendar;
     if (seed.migration !== undefined) {
       const migration = migrations.handle(request, path, url);
@@ -592,6 +686,15 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     }
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject|:withdraw)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
+    const statsRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/node-stats$/.exec(path);
+    if (statsRoute && request.method === 'GET') {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      if (!definitions.some((d) => d.key === statsRoute[1] && d.version === Number(statsRoute[2]))) return problem(404, 'DEFINITION_NOT_FOUND');
+      if (url.searchParams.get('mode') !== 'window') return problem(400, 'INPUT_INVALID');
+      const from = url.searchParams.get('from') ?? '2026-11-20T10:00:00Z';
+      const nodes = seed.stepTiming === 'empty' || statsRoute[1] !== 'kyc-onboarding' ? {} : STEP_TIMING;
+      return json(200, { definitionKey: statsRoute[1], version: Number(statsRoute[2]), mode: 'window', from, to: '2026-11-21T11:00:00Z', asOf: '2026-11-21T10:52:00Z', lagSeconds: 480, nodes });
+    }
     const layoutRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/layout$/.exec(path);
     if (layoutRoute && request.method === 'GET') {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
@@ -628,8 +731,14 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       if (instanceMatch[2] === undefined) return json(200, found.instance, { ETag: `"${String(found.instance['lockVersion'])}"` });
       if (seed.activities === 'missing') return problem(404, 'INPUT_INVALID');
       if (seed.activities === 'failing') return problem(500, 'INTERNAL');
-      if (!found.activities) return problem(404, 'INSTANCE_NOT_FOUND');
-      return json(200, found.activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
+      const added = [...recordedSubmissions.values()].filter((item) => item.instanceId === id).map((item) => ({
+        id: `H-${item.nodeId}-done`, type: 'TASK_COMPLETED', nodeId: item.nodeId, actor: item.actor, occurredAt: '2026-11-20T03:20:00Z',
+        submission: item.submission, ...(item.unrecordedFields.length > 0 ? { unrecordedFields: item.unrecordedFields } : {}),
+      }));
+      const base = found.activities ?? (added.length === 0 ? undefined : { instanceId: id, startedAt: NOW, endedAt: null, nodes: [], entries: [], hasMore: false });
+      if (base === undefined) return problem(404, 'INSTANCE_NOT_FOUND');
+      const activities = added.length === 0 ? base : { ...base, entries: [...base.entries, ...added] };
+      return json(200, activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
     }
     if (request.method === 'GET' && path === `${BASE}/incidents`) return listIncidents(url, request);
     const incidentMatch = /^\/api\/bpm\/processes\/v1\/incidents\/([^/:]+)(?::(retry|resolve|approve-resolution|reject-resolution))?$/.exec(path);
@@ -651,7 +760,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       const declared = QUEUE_FORMS[task.id];
       if (declared === undefined) return problem(404, 'FORM_NOT_DECLARED');
       const base = { schemaVersion: 1, taskId: task.id, lockVersion: task.lockVersion };
-      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: declared };
+      // Once completed, the schema's variables hold what was submitted (a masked one as the placeholder), as the real engine reads them.
+      const submitted = submittedData.get(task.id);
+      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: submitted === undefined ? declared : { ...declared, data: { ...declared.data, ...submitted } } };
       return json(200, body, { ETag: `"${String(task.lockVersion)}"` });
     }
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete|reassign|delegate))?$/.exec(path);
@@ -714,6 +825,16 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         const errors = formViolations(declared.schema, result);
         if (errors.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations: errors.map((e) => `$.${e.pointer.slice(1)}: ${e.rule}`), errors });
         completions.push({ taskId: task.id, actor: request.user, result, ifMatch, idempotencyKey });
+        const properties = (declared.schema['properties'] ?? {}) as Record<string, { mask?: boolean }>;
+        // A masked field the operator left alone still holds its value on the case, so it is recorded as the marker.
+        const untouched: [string, unknown][] = Object.keys(declared.data).filter((name) => properties[name]?.mask === true && !(name in result)).map((name) => [name, { masked: true }]);
+        const sent: [string, unknown][] = Object.entries(result).filter(([name]) => name in properties).map(([name, value]) => [name, properties[name]?.mask === true ? { masked: true } : value]);
+        recordedSubmissions.set(task.id, {
+          instanceId: INSTANCE_ID, nodeId: task.nodeId, actor: request.user,
+          submission: Object.fromEntries([...untouched, ...sent]),
+          unrecordedFields: Object.keys(result).filter((name) => !(name in properties)),
+        });
+        submittedData.set(task.id, Object.fromEntries(Object.entries(result).map(([name, value]) => [name, properties[name]?.mask === true ? '***' : value])));
       }
       Object.assign(task, { status: 'COMPLETED', completedBy: request.user, completedAt: '2026-11-20T03:20:00Z', lockVersion: task.lockVersion + 1 });
       return json(200, instance(), { ETag: '"5"' });
@@ -733,5 +854,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (item) item.lockVersion += 1;
   };
 
-  return { handle, overrides, completions, requests, decisions, calendarDecisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
+  /** Another person's change was approved meanwhile: the calendar is one version on. */
+  const advanceCalendar = (key: string) => { const found = calendars.get(key); if (found !== undefined) found.version += 1; };
+  return { handle, overrides, completions, requests, decisions, calendarDecisions, calendarProposals, advanceCalendar, handOvers, claimAs, migrations, incidentCommands, touchIncident };
 }

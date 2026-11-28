@@ -1,4 +1,4 @@
--- Asynchronous decision log (RLE-230, #45): with decision-log.mode: async the engine writes each decision to this queue
+-- Asynchronous decision log (RLE-234, #45): with decision-log.mode: async the engine writes each decision to this queue
 -- inside the caller's transaction, so it is durable when the caller's commit is acknowledged and rolls back with it;
 -- a relay moves rows into rle_decision (log_mode = 'ASYNC'). The default, transactional, never reads or writes it.
 --

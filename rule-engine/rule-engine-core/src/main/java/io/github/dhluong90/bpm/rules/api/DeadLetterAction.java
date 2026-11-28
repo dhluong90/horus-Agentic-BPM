@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.api;
 
-/** What an operator asks to do with a dead-lettered decision (RLE-231). Neither action deletes it. */
+/** What an operator asks to do with a dead-lettered decision (RLE-235). Neither action deletes it. */
 public enum DeadLetterAction {
     /** The relay tries the row again, with its attempts counted from zero. */
     RETRY,

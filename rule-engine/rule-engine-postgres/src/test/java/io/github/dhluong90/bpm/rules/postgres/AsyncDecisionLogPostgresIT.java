@@ -31,7 +31,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * RLE-230 (#45): {@code decision-log.mode: async} on PostgreSQL. A decision is queued in the caller's transaction, so it
+ * RLE-234 (#45): {@code decision-log.mode: async} on PostgreSQL. A decision is queued in the caller's transaction, so it
  * is durable at the caller's commit and gone with a rollback; a relay moves it into the log exactly once; replay reads
  * it either way; and a queue over its limit refuses the evaluation with a named code instead of dropping it.
  */
@@ -118,7 +118,7 @@ class AsyncDecisionLogPostgresIT {
     }
 
     @Test
-    void RLE_230_a_decision_is_queued_at_once_readable_and_replayable_and_the_relay_moves_it_into_the_log_once() {
+    void RLE_234_a_decision_is_queued_at_once_readable_and_replayable_and_the_relay_moves_it_into_the_log_once() {
         // Given a card-fee rule set and an async log
         AsyncDecisionLog log = asyncLog(100, 100_000);
         RuleEngines engine = engine(log);
@@ -150,7 +150,7 @@ class AsyncDecisionLogPostgresIT {
     }
 
     @Test
-    void RLE_230_a_rolled_back_business_transaction_leaves_no_queued_decision_and_a_committed_one_keeps_it() {
+    void RLE_234_a_rolled_back_business_transaction_leaves_no_queued_decision_and_a_committed_one_keeps_it() {
         AsyncDecisionLog log = asyncLog(100, 100_000);
         RuleEngines engine = engine(log);
         publishCardFee(engine);
@@ -169,7 +169,7 @@ class AsyncDecisionLogPostgresIT {
     }
 
     @Test
-    void RLE_230_a_queue_over_its_limit_refuses_the_evaluation_with_a_named_code_and_drops_nothing() {
+    void RLE_234_a_queue_over_its_limit_refuses_the_evaluation_with_a_named_code_and_drops_nothing() {
         // Given a limit of 100 queued decisions, checked every 256 decisions
         AsyncDecisionLog log = asyncLog(100, 100);
         RuleEngines engine = engine(log);
@@ -201,7 +201,7 @@ class AsyncDecisionLogPostgresIT {
     }
 
     @Test
-    void RLE_230_two_relays_running_together_write_every_queued_decision_exactly_once() throws Exception {
+    void RLE_234_two_relays_running_together_write_every_queued_decision_exactly_once() throws Exception {
         AsyncDecisionLog log = asyncLog(50, 100_000);
         AsyncDecisionLog other = asyncLog(50, 100_000);
         RuleEngines engine = engine(log);
@@ -225,7 +225,7 @@ class AsyncDecisionLogPostgresIT {
     }
 
     @Test
-    void RLE_230_the_queue_is_not_used_in_the_default_transactional_mode() {
+    void RLE_234_the_queue_is_not_used_in_the_default_transactional_mode() {
         RuleEngines engine = PostgresRuleEngines.create(db, transactions, caller, caller, clock,
                 EngineSettings.defaults().withRequireContentHash(false));
         engine.cursorKeys().load();

@@ -34,7 +34,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * RLE-231 (#45): the asynchronous decision log's queue is append-only; a row the log refuses is retried with back-off
+ * RLE-235 (#45): the asynchronous decision log's queue is append-only; a row the log refuses is retried with back-off
  * and then dead-lettered without holding back the rows behind it; a dead letter is visible through the API and a
  * metric; and an operator retries or resolves it with a second person's approval, audited, never by deleting it.
  */
@@ -157,7 +157,7 @@ class DecisionLogDeadLetterPostgresIT {
     }
 
     @Test
-    void RLE_231_the_queue_and_its_events_refuse_update_delete_and_truncate_of_a_row_not_yet_in_the_log() {
+    void RLE_235_the_queue_and_its_events_refuse_update_delete_and_truncate_of_a_row_not_yet_in_the_log() {
         AsyncDecisionLog log = log();
         RuleEngines engine = engine(log);
         publishCardFee(engine);
@@ -193,7 +193,7 @@ class DecisionLogDeadLetterPostgresIT {
     }
 
     @Test
-    void RLE_231_a_poison_row_is_retried_with_backoff_then_dead_lettered_and_later_rows_still_move() {
+    void RLE_235_a_poison_row_is_retried_with_backoff_then_dead_lettered_and_later_rows_still_move() {
         AsyncDecisionLog log = log();
         RuleEngines engine = engine(log);
         publishCardFee(engine);
@@ -240,7 +240,7 @@ class DecisionLogDeadLetterPostgresIT {
     }
 
     @Test
-    void RLE_231_the_backoff_doubles_from_the_base_up_to_its_ceiling() {
+    void RLE_235_the_backoff_doubles_from_the_base_up_to_its_ceiling() {
         AsyncDecisionLog log = new AsyncDecisionLog(db, transactions, clock, 100, 100_000, 20, Duration.ofSeconds(5),
                 Duration.ofSeconds(60));
         assertThat(List.of(1, 2, 3, 4, 5, 6, 19).stream().map(log::backoff).map(Duration::toSeconds).toList())
@@ -252,7 +252,7 @@ class DecisionLogDeadLetterPostgresIT {
     }
 
     @Test
-    void RLE_231_a_dead_letter_is_listed_with_why_it_failed_for_its_own_tenant_only() {
+    void RLE_235_a_dead_letter_is_listed_with_why_it_failed_for_its_own_tenant_only() {
         AsyncDecisionLog log = log();
         RuleEngines engine = engine(log);
         publishCardFee(engine);
@@ -286,7 +286,7 @@ class DecisionLogDeadLetterPostgresIT {
     }
 
     @Test
-    void RLE_231_a_retry_needs_a_second_person_is_audited_and_moves_the_row_once_the_cause_is_fixed() {
+    void RLE_235_a_retry_needs_a_second_person_is_audited_and_moves_the_row_once_the_cause_is_fixed() {
         AsyncDecisionLog log = log();
         RuleEngines engine = engine(log);
         publishCardFee(engine);
@@ -355,7 +355,7 @@ class DecisionLogDeadLetterPostgresIT {
     }
 
     @Test
-    void RLE_231_a_resolve_closes_the_row_with_a_second_persons_approval_and_a_rejection_leaves_it_dead_and_nothing_deletes() {
+    void RLE_235_a_resolve_closes_the_row_with_a_second_persons_approval_and_a_rejection_leaves_it_dead_and_nothing_deletes() {
         AsyncDecisionLog log = log();
         RuleEngines engine = engine(log);
         publishCardFee(engine);

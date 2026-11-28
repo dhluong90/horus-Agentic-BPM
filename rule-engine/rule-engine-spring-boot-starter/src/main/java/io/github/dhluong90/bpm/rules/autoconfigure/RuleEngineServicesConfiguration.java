@@ -118,7 +118,7 @@ class RuleEngineServicesConfiguration {
                     HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange()),
                     // RLE-223: a host bean supplies the key from outside the database; without one, plain seals.
                     seal,
-                    // RLE-230: the queue when decision-log.mode is async; otherwise the transactional log.
+                    // RLE-234: the queue when decision-log.mode is async; otherwise the transactional log.
                     asyncLog.getIfAvailable() != null
                             ? asyncLog.getIfAvailable()
                             : new io.github.dhluong90.bpm.rules.postgres.JdbcDecisionLog(dataSource)));
@@ -303,6 +303,30 @@ class RuleEngineServicesConfiguration {
         @ConditionalOnMissingBean(name = "ruleEngineEvaluationMetrics")
         RuleEngineEvaluationMetrics ruleEngineEvaluationMetrics(RuleEngineInternals internals) {
             return new RuleEngineEvaluationMetrics(internals.engines().meters());
+        }
+    }
+
+    /**
+     * One span per evaluation in the host's trace (#114, TR-OBS-03), bound only when the host has a Micrometer
+     * {@code Tracer}. Without one the engine does nothing extra and needs no tracing dependency.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.tracing.Tracer")
+    static class EvaluationTracingConfiguration {
+
+        /** Binds after every singleton exists, so the host's tracer is found whatever the configuration order. */
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineTracing")
+        org.springframework.beans.factory.SmartInitializingSingleton ruleEngineTracing(RuleEngineInternals internals,
+                ObjectProvider<io.micrometer.tracing.Tracer> tracer,
+                org.springframework.core.env.Environment environment) {
+            return () -> {
+                io.micrometer.tracing.Tracer bound = tracer.getIfAvailable();
+                if (bound != null) {
+                    internals.engines().meters().tracing().bind(new RuleEngineTracing(bound,
+                            environment.getProperty("horus.bpm.tracing.tenant-attribute", Boolean.class, true)));
+                }
+            };
         }
     }
 

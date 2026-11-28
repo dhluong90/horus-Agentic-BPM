@@ -46,10 +46,10 @@ public final class DefaultDecisionLogService implements DecisionLogService {
      */
     static final String PERMISSION_MASKED_SEARCH = "rules:masked:search";
 
-    /** Permission to ask for a retry or a resolve of a dead-lettered decision (RLE-231). */
+    /** Permission to ask for a retry or a resolve of a dead-lettered decision (RLE-235). */
     static final String PERMISSION_LOG_OPERATE = "rules:log:operate";
 
-    /** Permission to approve or reject that request; never the requester's own (RLE-231). */
+    /** Permission to approve or reject that request; never the requester's own (RLE-235). */
     static final String PERMISSION_LOG_APPROVE = "rules:log:approve";
 
     /** Event type of the audit entry of every request, approval and rejection on a dead letter. */

@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.rules.api.BatchRequest;
 import io.github.dhluong90.bpm.rules.api.BatchResult;
 import io.github.dhluong90.bpm.rules.api.BatchTooLargeException;
 import io.github.dhluong90.bpm.rules.api.ClockNotAllowedException;
+import io.github.dhluong90.bpm.rules.api.HorusBpmException;
 import io.github.dhluong90.bpm.rules.api.ComparisonRequest;
 import io.github.dhluong90.bpm.rules.api.ComparisonResult;
 import io.github.dhluong90.bpm.rules.api.DecisionInput;
@@ -152,7 +153,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     @Override
     public DecisionResult evaluate(DecisionRequest request) {
         Objects.requireNonNull(request, "request must not be null");
-        return measured(() -> {
+        return measured(context::tenant, () -> {
             String tenant = context.tenant();
             // A pinned evaluation is its own permission (DESIGN 4.2): rules:pin, never rules:evaluate alone.
             String caller = context.callerWith(request.version() == null ? PERMISSION_EVALUATE : PERMISSION_PIN);
@@ -168,17 +169,38 @@ public final class DefaultRuleEngine implements RuleEngine {
      * Times one evaluation call and records how it ended (DESIGN 4.8): a refusal is recorded with its error code,
      * then thrown on unchanged.
      */
-    private DecisionResult measured(java.util.function.Supplier<DecisionResult> call) {
+    private DecisionResult measured(java.util.function.Supplier<String> tenant,
+            java.util.function.Supplier<DecisionResult> call) {
         long started = System.nanoTime();
+        EngineTracing.Span span = meters.tracing().start();
         DecisionResult result;
         try {
             result = call.get();
         } catch (RuntimeException failure) {
             meters.refused(failure, System.nanoTime() - started);
+            try {
+                span.failed(tenantOrNull(tenant), failure instanceof HorusBpmException refusal ? refusal.code() : null,
+                        failure);
+            } catch (RuntimeException ignored) {
+                // a tracer never fails a call
+            }
             throw failure;
         }
         meters.evaluated(result, System.nanoTime() - started);
+        try {
+            span.ended(tenantOrNull(tenant), result);
+        } catch (RuntimeException ignored) {
+            // a tracer never fails a call
+        }
         return result;
+    }
+
+    private static String tenantOrNull(java.util.function.Supplier<String> tenant) {
+        try {
+            return tenant.get();
+        } catch (RuntimeException e) {
+            return null;
+        }
     }
 
     /**
@@ -205,7 +227,7 @@ public final class DefaultRuleEngine implements RuleEngine {
      */
     DecisionResult evaluateAs(String tenant, String caller, String onBehalfOf, Instant engineTime,
             DecisionRequest request) {
-        return measured(() -> evaluateUnmeasured(tenant, caller, onBehalfOf, engineTime, request));
+        return measured(() -> tenant, () -> evaluateUnmeasured(tenant, caller, onBehalfOf, engineTime, request));
     }
 
     private DecisionResult evaluateUnmeasured(String tenant, String caller, String onBehalfOf, Instant engineTime,
@@ -1026,7 +1048,7 @@ public final class DefaultRuleEngine implements RuleEngine {
             DecisionResult.Outcome outcome;
             try {
                 requireSameFunctions(decisionId, logged);
-                // RLE-229: the limits and the outcome the decision logged decide, never this machine's clock. A decision
+                // RLE-233: the limits and the outcome the decision logged decide, never this machine's clock. A decision
                 // the clock stopped replays its stored failure; every other one runs again on the step budget it ran
                 // with, with the time backstop off.
                 EvaluationLimits current = context.settings().evaluationLimits();

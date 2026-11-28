@@ -27,7 +27,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.JsonNode;
 
-/** RLE-231: the dead-letter endpoints pass the caller's request to the service and answer in the contract's shapes. */
+/** RLE-235: the dead-letter endpoints pass the caller's request to the service and answer in the contract's shapes. */
 class DeadLetterEndpointsWebMvcTest {
 
     static final String ID = "01KBX9Q3M4R7T2V8W6Y0Z1A2B3";
@@ -99,7 +99,7 @@ class DeadLetterEndpointsWebMvcTest {
     }
 
     @Test
-    void RLE_231_the_list_shows_each_dead_letter_with_its_attempts_and_last_error() throws Exception {
+    void RLE_235_the_list_shows_each_dead_letter_with_its_attempts_and_last_error() throws Exception {
         MockHttpServletResponse response = mvc.perform(get("/api/bpm/rules/v1/decision-log/dead-letters").param("limit", "20"))
                 .andReturn().getResponse();
 
@@ -114,7 +114,7 @@ class DeadLetterEndpointsWebMvcTest {
     }
 
     @Test
-    void RLE_231_a_request_carries_its_action_reason_and_idempotency_key_and_answers_the_waiting_state() throws Exception {
+    void RLE_235_a_request_carries_its_action_reason_and_idempotency_key_and_answers_the_waiting_state() throws Exception {
         MockHttpServletResponse response = mvc.perform(post("/api/bpm/rules/v1/decisions/" + ID + "/dead-letter:request")
                 .header("Idempotency-Key", "key-7").contentType("application/json")
                 .content("{\"action\":\"RETRY\",\"comment\":\"February partition created\"}")).andReturn().getResponse();
@@ -126,7 +126,7 @@ class DeadLetterEndpointsWebMvcTest {
     }
 
     @Test
-    void RLE_231_an_unknown_action_or_member_is_refused_before_the_service_is_called() throws Exception {
+    void RLE_235_an_unknown_action_or_member_is_refused_before_the_service_is_called() throws Exception {
         MockHttpServletResponse unknownAction = mvc.perform(post("/api/bpm/rules/v1/decisions/" + ID + "/dead-letter:request")
                 .contentType("application/json").content("{\"action\":\"DELETE\",\"comment\":\"remove it\"}"))
                 .andReturn().getResponse();
@@ -140,7 +140,7 @@ class DeadLetterEndpointsWebMvcTest {
     }
 
     @Test
-    void RLE_231_the_requester_approving_their_own_request_is_403_self_approval_forbidden() throws Exception {
+    void RLE_235_the_requester_approving_their_own_request_is_403_self_approval_forbidden() throws Exception {
         thrown = SelfApprovalForbiddenException.deadLetter(ID);
 
         MockHttpServletResponse response = mvc.perform(post("/api/bpm/rules/v1/decisions/" + ID + "/dead-letter:approve")
@@ -151,7 +151,7 @@ class DeadLetterEndpointsWebMvcTest {
     }
 
     @Test
-    void RLE_231_approve_and_reject_answer_the_event_recorded_and_each_needs_its_own_permission() throws Exception {
+    void RLE_235_approve_and_reject_answer_the_event_recorded_and_each_needs_its_own_permission() throws Exception {
         MockHttpServletResponse approved = mvc.perform(post("/api/bpm/rules/v1/decisions/" + ID + "/dead-letter:approve")
                 .header("Idempotency-Key", "k1").contentType("application/json").content("{\"comment\":\"checked\"}"))
                 .andReturn().getResponse();

@@ -35,6 +35,7 @@ public class ProcessProblemDetails {
     static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
+            Map.entry("QUERY_TIMEOUT", HttpStatus.SERVICE_UNAVAILABLE),
             Map.entry("ROLE_FAN_OUT_EXCEEDED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_HASH_REQUIRED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),
@@ -52,6 +53,9 @@ public class ProcessProblemDetails {
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.valueOf(428)),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("EVENT_LISTENER_FAILED", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("VARIABLE_KEY_UNAVAILABLE", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("VARIABLE_INTEGRITY_FAILED", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("VARIABLE_ENCRYPTION_RULE_REMOVED", HttpStatus.CONFLICT),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
             Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),

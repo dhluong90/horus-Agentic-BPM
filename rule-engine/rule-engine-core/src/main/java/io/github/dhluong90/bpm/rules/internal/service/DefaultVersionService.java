@@ -316,7 +316,7 @@ public final class DefaultVersionService implements VersionService {
                 parsed.canonicalJson(), parsed.canonicalHash(), format, sourceText, Hashes.sha256(source), 0,
                 null, null, null, null, null, actor, now).withSourceFileName(sourceFileName);
         store.insertVersion(version);
-        // RLE-228: the file name is display metadata; it is on the version, its CREATED history row and the event.
+        // RLE-232: the file name is display metadata; it is on the version, its CREATED history row and the event.
         store.appendHistory(new HistoryRow(tenant, Ulid.next(now), version.id(), LifecycleAction.CREATED, null,
                 version.status(), actor, null, version.lockVersion(), now, null, null, null, null, null, List.of(),
                 List.of(), null, null, null, sourceFileName));

@@ -19,7 +19,8 @@ final class RuleListQueries {
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
             v.approval_comment, v.created_by, v.created_at, v.retired_at, v.copied_from, v.retire_requested_by,
-            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version, v.approval_seal, v.source_file_name
+            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version, v.approval_seal,
+            v.legacy_backfilled_at, v.source_file_name
             """;
 
     /**
@@ -334,7 +335,7 @@ final class RuleListQueries {
     private static final String PAGE = "ORDER BY created_at DESC, id DESC\nLIMIT :limit\n";
 
 
-    /** The kinds of event after which a queue row waits for the relay (RLE-231). */
+    /** The kinds of event after which a queue row waits for the relay (RLE-235). */
     static final String WAITING_KINDS = "('ATTEMPT_FAILED', 'RETRY_APPROVED')";
     /** The kinds after which a queue row is out of the relay's hands: dead, with a request waiting, or resolved. */
     static final String PARKED_KINDS = "('DEAD_LETTERED', 'REQUEST_REJECTED', 'RETRY_REQUESTED',"
@@ -373,7 +374,7 @@ final class RuleListQueries {
 
     /**
      * The next batch of queued decisions for the relay, locked so that replicas take different rows, oldest first.
-     * Across tenants and bounded by the batch size, so it is a sweep (RLE-230, RLE-231).
+     * Across tenants and bounded by the batch size, so it is a sweep (RLE-234, RLE-235).
      */
     static final ListQuery RELAY_LOCK_BATCH = new ListQuery("relay-lock-batch",
             new Bound.Sweep("the next :n rows of the decision queue in queue order, the relay's batch of at most 10,000"),

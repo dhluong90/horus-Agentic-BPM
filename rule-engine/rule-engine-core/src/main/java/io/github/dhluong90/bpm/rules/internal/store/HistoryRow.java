@@ -36,7 +36,7 @@ import java.util.List;
  *     date changed later in {@code rle_version} can be compared with what was requested and approved (RLE-215);
  *     otherwise null
  * @param sourceFileName on the creation of an imported version and on a draft replacement, the name of the file the
- *     document came from; display metadata, null when none was named (RLE-228)
+ *     document came from; display metadata, null when none was named (RLE-232)
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,

@@ -39,7 +39,6 @@ Dates are targets, not commitments. The [[Roadmap]] owns them.
 
 | Item | State |
 |---|---|
-| Application-level encryption of process variables (#594) | After 1.0 |
 | Connectors to outside systems, and client libraries (SDKs) beyond Java | Not started |
 | Graphical process modeller in the cockpit | Not built. Import models from a standard modeller; the cockpit draws them read only |
 | Live counts and a duration heatmap on the process diagram | Not built |

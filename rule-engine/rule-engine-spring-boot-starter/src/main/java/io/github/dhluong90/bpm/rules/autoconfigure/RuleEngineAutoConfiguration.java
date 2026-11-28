@@ -90,7 +90,7 @@ public class RuleEngineAutoConfiguration {
     }
 
     /**
-     * The asynchronous decision log (#45, RLE-230), only when {@code decision-log.mode} is {@code async}: decisions
+     * The asynchronous decision log (#45, RLE-234), only when {@code decision-log.mode} is {@code async}: decisions
      * are queued in the caller's transaction and relayed into the log. A host bean of this type replaces it.
      */
     @Bean
@@ -105,7 +105,7 @@ public class RuleEngineAutoConfiguration {
                 async.maxRetryBackoff());
     }
 
-    /** Moves queued decisions into the log while the host runs in {@code async} mode (RLE-230). */
+    /** Moves queued decisions into the log while the host runs in {@code async} mode (RLE-234). */
     @Bean
     @ConditionalOnMissingBean
     @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(

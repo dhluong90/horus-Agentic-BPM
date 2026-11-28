@@ -65,7 +65,7 @@ public final class InvalidStateException extends HorusBpmException {
     }
 
     /**
-     * A dead-letter command the row's state does not allow (RLE-231).
+     * A dead-letter command the row's state does not allow (RLE-235).
      *
      * @param decisionId the decision
      * @param state the state it is in

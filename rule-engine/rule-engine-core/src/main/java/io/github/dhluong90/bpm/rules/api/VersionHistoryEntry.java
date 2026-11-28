@@ -31,7 +31,7 @@ import java.util.Objects;
  * @param retireRequestedBy on a {@code RETIRED} entry in {@code four-eyes} mode, who requested the retirement that
  *     {@code actor} confirmed (RLE-038); otherwise null
  * @param sourceFileName on a {@code CREATED} entry of an import and on {@code DRAFT_UPDATED}, the name of the file
- *     the document came from when the import named one; display metadata, otherwise null (RLE-228)
+ *     the document came from when the import named one; display metadata, otherwise null (RLE-232)
  */
 public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus,
         String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,

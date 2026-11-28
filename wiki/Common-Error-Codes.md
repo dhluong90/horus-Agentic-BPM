@@ -94,6 +94,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 429 | [START_ARRIVALS_FULL](#start_arrivals_full) | processes | 1.0 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
 | 503 | [DECISION_LOG_BACKLOG](#decision_log_backlog) | rules | 1.1 |
+| 503 | [QUERY_TIMEOUT](#query_timeout) | processes | 1.1 |
 | 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
 
 ## Codes on every endpoint
@@ -145,6 +146,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### START_ARRIVALS_FULL
 `429` with `Retry-After`. A process that starts on several messages or signals already holds `parallel-start.max-arrivals-per-definition` arrivals (default 10,000) that wait for the others, and this message has a new correlation key. Nothing is held for it. `Retry-After` is the seconds until a held arrival expires (`parallel-start.arrival-ttl`, default 24 hours); a repeat of a held key is never refused.
+
+### QUERY_TIMEOUT
+`503`, Process Engine. A list read of `GET /instances` or `GET /definitions` ran longer than `query.statement-timeout` (`PT2S` by default) and the database stopped it. Nothing partial is returned, so a page that does come back is complete: it has a `nextCursor` when more items follow and none when it is the last. Narrow the filter (a shorter `startedFrom` to `startedTo` range, one `definitionKey`, one `status`) or try again; a host that sees it often should check the database. The read runs in a read-only transaction of its own, so a host transaction around the call is left as it was.
 
 ### INTERNAL_ERROR
 `500`. Unexpected failure. The body carries only the fixed `detail` text and the `correlationId`, never a stack trace, class name, SQL or table name. Give the `correlationId` to the host's operators: the server log has the same id with the cause. Send `X-Correlation-Id` with your request to choose the id yourself.

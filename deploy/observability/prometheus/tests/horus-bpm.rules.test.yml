@@ -1,0 +1,111 @@
+# Unit tests of horus-bpm.rules.yml: promtool feeds the series, then checks which alerts fire.
+rule_files:
+  - ../rules/horus-bpm.rules.yml
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: evaluation errors fire above 1 percent
+    input_series:
+      - series: 'horus_rle_evaluations_seconds_count{outcome="matched"}'
+        values: '0+90x30'
+      - series: 'horus_rle_evaluations_seconds_count{outcome="failed"}'
+        values: '0+10x30'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: HorusRuleEvaluationErrors
+      - eval_time: 12m
+        alertname: HorusRuleEvaluationErrors
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "More than 1% of rule evaluations end in an evaluation error"
+              description: "Failed evaluations are logged as EVALUATION_ERROR decisions. Check horus_rle_evaluation_errors_total by code."
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusruleevaluationerrors"
+
+  - interval: 1m
+    name: healthy evaluations raise nothing
+    input_series:
+      - series: 'horus_rle_evaluations_seconds_count{outcome="matched"}'
+        values: '0+600x30'
+      - series: 'horus_rle_evaluations_seconds_count{outcome="failed"}'
+        values: '0+0x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HorusRuleEvaluationErrors
+
+  - interval: 1m
+    name: a due job older than two minutes fires per kind
+    input_series:
+      - series: 'horus_pre_jobs_due_oldest_age_seconds{kind="TIMER"}'
+        values: '0x2 300x20'
+      - series: 'horus_pre_jobs_due_oldest_age_seconds{kind="ASYNC_SERVICE"}'
+        values: '0x22'
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: HorusDueJobsBackedUp
+        exp_alerts:
+          - exp_labels: {severity: critical, kind: TIMER}
+            exp_annotations:
+              summary: "The oldest due TIMER job has waited more than 2 minutes"
+              description: "No replica claims due jobs fast enough, or none is running. Check the job runner and the replicas."
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusduejobsbackedup"
+
+  - interval: 1m
+    name: open incidents fire after 30 minutes
+    input_series:
+      - series: 'horus_pre_incidents_open'
+        values: '2x60'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: HorusOpenIncidents
+      - eval_time: 35m
+        alertname: HorusOpenIncidents
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Process incidents stay open for 30 minutes"
+              description: "Open incidents hold instances. Resolve or retry them in the cockpit."
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusopenincidents"
+
+  - interval: 1m
+    name: a refused message burst fires
+    input_series:
+      - series: 'horus_pre_messages_refused_total{reason="NOT_CORRELATED"}'
+        values: '0 0 0 10 10 10 10 10 10 10 10 10 10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: HorusMessageCorrelationRefusals
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Messages were refused in the last 10 minutes: no instance waits, or two do"
+              description: "Check the correlation key the sender uses, by reason (NOT_CORRELATED or AMBIGUOUS)."
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusmessagecorrelationrefusals"
+
+  - interval: 1m
+    name: a saturated pool and a lost host fire
+    input_series:
+      - series: 'hikaricp_connections_active{instance="h1"}'
+        values: '10x10'
+      - series: 'hikaricp_connections_max{instance="h1"}'
+        values: '10x10'
+      - series: 'up{job="horus-bpm",instance="h1"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: HorusConnectionPoolSaturated
+        exp_alerts:
+          - exp_labels: {severity: warning, instance: h1}
+            exp_annotations:
+              summary: "The database connection pool is above 90% or has threads waiting"
+              description: "Raise spring.datasource.hikari.maximum-pool-size only after checking the database's connection limit."
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusconnectionpoolsaturated"
+      - eval_time: 5m
+        alertname: HorusHostDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: horus-bpm, instance: h1}
+            exp_annotations:
+              summary: "Prometheus cannot scrape a Horus host"
+              description: "The host is down or its management port is unreachable."
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horushostdown"

@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 
 /**
- * What an operator may do to the dead letters of an asynchronous decision log (RLE-231). A decision log that has a
+ * What an operator may do to the dead letters of an asynchronous decision log (RLE-235). A decision log that has a
  * queue implements it next to {@link DecisionLog}. Every call is for one tenant; nothing deletes or changes a queued
  * decision, a step is a new event row.
  */

@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import { toHostError } from '../hostError';
 import { callHost, callHostIfChanged, downloadFromHost, type Conditional, type HostRequest } from '../hostCall';
 import { chunksOf, displayNames, DISPLAY_NAMES_PATH, mergeNames, namesQuery, NO_NAMES, type DisplayNames, type WantedNames } from '../displayNames';
 import type { Page } from '../rules/schemas';
@@ -9,10 +10,16 @@ import {
   definitionVersion,
   calendarChange,
   calendarChangePage,
+  calendarInForce,
+  calendarSummaryPage,
   pendingDefinitionApprovalPage,
   type CalendarChange,
+  type CalendarInForce,
+  type CalendarSummary,
+  type CalendarValue,
   type PendingDefinitionApproval,
   graphDiff,
+  nodeWindowStats,
   migrationDryRun,
   migrationExecution,
   migrationOutcomePage,
@@ -31,6 +38,7 @@ import {
   type DefinitionSummary,
   type DefinitionVersion,
   type GraphDiff,
+  type NodeWindowStats,
   type InstanceActivities,
   type InstanceSummary,
   type MigrationDryRun,
@@ -113,6 +121,8 @@ export interface ProcessesClient {
   getVersion(key: string, version: number, signal?: AbortSignal): Promise<DefinitionVersion>;
   /** getDefinitionDiff: steps and links changed from `base` (the version in effect when absent) to this version */
   getDiff(key: string, version: number, base?: number, signal?: AbortSignal): Promise<GraphDiff>;
+  /** getNodeStats (mode=window): per step the counts and the median and 95th percentile of completed durations over whole hours */
+  getStepTiming(key: string, version: number, range: { from: string; to?: string | undefined }, signal?: AbortSignal): Promise<NodeWindowStats>;
   /** approveDefinition: as a second person, bound to the reviewed content hash */
   approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
   /** rejectDefinition: back to draft with a reason */
@@ -155,8 +165,14 @@ export interface ProcessesClient {
   proposeMigration(id: string, reason: string, idempotencyKey: string): Promise<MigrationExecution>;
   /** approveMigrationExecution: as a second person; `lockVersion` is the proposal the approver was shown, `expectedPlanHash` the plan hash of the item they were shown (PD-139) */
   approveMigration(id: string, lockVersion: number, idempotencyKey: string, expectedPlanHash: string): Promise<MigrationExecution>;
-  /** listCalendarChanges: the pending changes of the business calendars, newest first (PRE-181) */
-  listCalendarChanges(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<CalendarChange>>;
+  /** listCalendarChanges: the changes of the business calendars of one status (pending when absent), newest first (PRE-181) */
+  listCalendarChanges(request?: { status?: CalendarChange['status'] | undefined; cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<CalendarChange>>;
+  /** listCalendars: the tenant's calendars by key, without hours or holidays (PRE-181) */
+  listCalendars(request?: { cursor?: string | undefined; limit?: number | undefined; signal?: AbortSignal | undefined }): Promise<Page<CalendarSummary>>;
+  /** getCalendar: one calendar as the last approved change left it; null when it does not exist yet (404) */
+  getCalendar(key: string, signal?: AbortSignal): Promise<CalendarInForce | null>;
+  /** proposeCalendarChange: the whole calendar as it should be, with a reason, against the version read (`0` for a new calendar) */
+  proposeCalendarChange(key: string, baseVersion: number, proposal: { calendar: CalendarValue; reason: string }, idempotencyKey: string): Promise<CalendarChange>;
   /** getCalendarChange: one change with its old and new value */
   getCalendarChange(id: string, signal?: AbortSignal): Promise<CalendarChange>;
   /** approveCalendarChange: as a second person, bound to the change hash the approver was shown (PD-139) */
@@ -243,6 +259,11 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async getDiff(key, version, base, signal) {
       const query = base !== undefined ? `?base=${String(base)}` : '';
       return (await call({ method: 'GET', path: `${versionPath(key, version)}/diff${query}`, ...withSignal(signal) }, graphDiff)).data;
+    },
+    async getStepTiming(key, version, range, signal) {
+      const query = new URLSearchParams({ mode: 'window', from: range.from });
+      if (range.to !== undefined) query.set('to', range.to);
+      return (await call({ method: 'GET', path: `${versionPath(key, version)}/node-stats?${query.toString()}`, ...withSignal(signal) }, nodeWindowStats)).data;
     },
     async approveDefinition(key, version, lockVersion, approval, idempotencyKey) {
       const comment = approval.comment.trim();
@@ -372,10 +393,29 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
       return (await call({ method: 'POST', path: `${PROCESSES_BASE}/migrations/${segment(id)}:approve`, headers: command(lockVersion, idempotencyKey), body }, migrationExecution)).data;
     },
     async listCalendarChanges(request = {}) {
-      const query = new URLSearchParams({ status: 'PENDING' });
+      const query = new URLSearchParams({ status: request.status ?? 'PENDING' });
       if (request.limit !== undefined) query.set('limit', String(request.limit));
       if (request.cursor !== undefined) query.set('cursor', request.cursor);
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/calendar-changes?${query.toString()}`, ...withSignal(request.signal) }, calendarChangePage)).data;
+    },
+    async listCalendars(request = {}) {
+      const query = new URLSearchParams();
+      if (request.limit !== undefined) query.set('limit', String(request.limit));
+      if (request.cursor !== undefined) query.set('cursor', request.cursor);
+      return (await call({ method: 'GET', path: `${PROCESSES_BASE}/calendars?${query.toString()}`, ...withSignal(request.signal) }, calendarSummaryPage)).data;
+    },
+    async getCalendar(key, signal) {
+      try {
+        return (await call({ method: 'GET', path: `${PROCESSES_BASE}/calendars/${segment(key)}`, ...withSignal(signal) }, calendarInForce)).data;
+      } catch (error) {
+        const host = toHostError(error);
+        if (host.kind === 'problem' && host.code === 'CALENDAR_NOT_FOUND') return null;
+        throw error;
+      }
+    },
+    async proposeCalendarChange(key, baseVersion, proposal, idempotencyKey) {
+      const body = { contentType: 'application/json', text: JSON.stringify({ calendar: proposal.calendar, reason: proposal.reason }) };
+      return (await call({ method: 'POST', path: `${PROCESSES_BASE}/calendars/${segment(key)}/changes`, headers: command(baseVersion, idempotencyKey), body }, calendarChange)).data;
     },
     async getCalendarChange(id, signal) {
       return (await call({ method: 'GET', path: `${PROCESSES_BASE}/calendar-changes/${segment(id)}`, ...withSignal(signal) }, calendarChange)).data;

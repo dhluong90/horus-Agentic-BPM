@@ -343,15 +343,15 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `palette -> 1 handler, 1 agent; save without guardrail -> error on node`.
 - **Test ID:** `CKP_025_modeller_offers_catalogue_steps_and_saves_draft`
 
-### CKP-026 The heatmap shows p50 and p95 per node for a chosen window
-- **Traces to:** `TR-PERF-10`
-- **Milestone:** M3 (cut candidate)
+### CKP-026 The Timing view shows p50 and p95 per step for a chosen period
+- **Traces to:** `TR-PERF-10`, PRE-029, #123
+- **Milestone:** M3
 - **Kind:** other
-- **Given:** Rollup for `kyc-onboarding` v2 over 7 days: `approve` p50 2 h, p95 9 h; `verify-docs` p50 40 s, p95 3 min.
-- **When:** The operator selects "Last 7 days"; then tries "Last 60 days".
-- **Then:** Each node shows its p50 and p95 in text, shaded by p95; the legend states the rollup lag; 60 days is not offered beyond the 31-day limit and the API's `400 QUERY_INVALID` is never reached from the UI.
-- **Example:** `approve p50 2 h, p95 9 h`.
-- **Test ID:** `CKP_026_heatmap_window_stats_per_node`
+- **Given:** Rollup for `kyc-onboarding` v2: `approve` p50 1 h 20 min, p95 2 h 45 min; `verify-docs` p50 14 s, p95 47 s; the rollup is 8 minutes behind.
+- **When:** The operator opens Timing on the version, then selects "Last 7 days".
+- **Then:** The view opens on the process diagram: each step's box is tinted by its 95th percentile against the slowest step, in four tints named by a key of swatches and words, with the figure written on the box. A second choice shows the same figures as a table: steps appear in flow order, each with its case count, median and 95th percentile as plain tabular text and a thin bar of the 95th percentile against the slowest step, warm for steps near the slowest; failed and incidents show only when above zero. A line states how far the figures lag. The periods offered are 24 hours, 7 days and 30 days, inside the engine's 31-day limit, so `400 QUERY_INVALID` is never reached from the UI. A period without activity says so. No figure is computed in the browser; the view reads `GET /definitions/{key}/versions/{version}/node-stats?mode=window`.
+- **Example:** `approve: 187 cases, 1 h 20 min, 2 h 45 min`.
+- **Test IDs:** `CKP_026_the_diagram_tints_each_step_by_slow_time_and_names_the_key`, `CKP_026_each_step_shows_its_typical_and_slow_time_in_flow_order`, `CKP_026_a_longer_period_asks_the_engine_again`, `CKP_026_a_period_without_activity_says_so`
 
 ### CKP-027 A migration plan is shown as two diagrams with mapped steps
 - **Traces to:** `TR-MIG-03`
@@ -728,3 +728,13 @@ The engine decides and the cockpit shows: the explanation sentence, the masked v
 - **Then:** The queue lists the change as Calendar and the plan as Move cases, each opening its own review. Minh's Approve sends `expectedChangeHash`, the engine's `contentHash` of the change he was shown; the migration review sends `expectedPlanHash` the same way. Lan sees Approve disabled with "You made this change, so someone else approves it." and nothing is sent. Processes has a Calendar changes list that opens the change.
 - **Example:** `Approve -> POST /calendar-changes/<id>:approve {"expectedChangeHash":"<64 hex>"}`
 - **Test IDs:** `CKP_091_a_pending_calendar_change_is_in_the_approvals_queue_and_opens_its_review`, `CKP_091_approve_names_the_change_the_approver_was_shown`, `CKP_091_the_proposer_cannot_approve_her_own_change_and_is_told_why`, `CKP_091_the_list_under_processes_opens_the_pending_change`, `CKP_091_a_migration_plan_carries_its_plan_hash_and_opens_the_plan`, `CKP_091_a_calendar_change_carries_its_change_hash_and_the_proposer_may_not_approve`, `CKP_091_a_definition_version_is_as_before_and_two_kinds_of_one_key_never_share_an_identity`
+
+### CKP-092 A holder of the calendar permission edits a business calendar; a second holder approves before it applies
+- **Traces to:** `TR-SEC-04`, `TR-UI-02`, PRE-114, PRE-181, PRE-182, PD-131, #125
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `vn-banking-hours` is at version 3. Lan and Minh hold `processes:calendar:manage`; a reviewer holds `processes:read` only.
+- **When:** Lan opens Processes, Business calendars, the calendar; adds the holiday 30 April 2027 and a reason, and chooses Send for approval; then opens the change. Minh approves it. A reviewer opens the calendar. Lan names a new calendar "Singapore banking hours" and sends its first change.
+- **Then:** A calendar shows by its name and its time zone as a city with the offset ("Ho Chi Minh City (UTC+7)"), never by its key or zone id. It opens to read; one Edit control opens every field and the dock. A change reads as Waiting, Approved or Rejected in plain words with a small dot, and a line saying who proposed it and when, and who decided it and when; nothing is boxed. The calendar is shown in three parts, one at a time: Hours, Holidays and History. Send for approval stays disabled until something changed, every field has its basic format and a reason is typed, and the screen says a second person approves before it applies and that due times already set do not move. The request is `POST /calendars/vn-banking-hours/changes` with `If-Match: "3"`, an `Idempotency-Key` and `{ calendar, reason }`; a new calendar sends `If-Match: "0"`. Only after the `201` does the screen say "Sent. A second person must approve it before it applies."; it never shows the change as applied. Lan's own Approve is disabled with the self-approval reason. After Minh approves, the calendar is at version 4 and History lists the change with who proposed and who approved it. A `409 VERSION_CONFLICT` reads "The calendar changed since you opened it. Load it again." with a button that loads it. The reviewer sees the calendar with every field disabled and no Send button. Zone and hours are checked by the engine, not the browser.
+- **Example:** `POST /calendars/vn-banking-hours/changes If-Match "3" {"calendar":{"zone":"Asia/Ho_Chi_Minh","week":{...},"holidays":{"2027-04-30":"Reunification Day"}},"reason":"Holiday added"} -> 201 PENDING`
+- **Test IDs:** `CKP_092_the_list_shows_each_calendar_and_who_approved_its_last_change`, `CKP_092_a_change_is_proposed_against_the_version_read_and_waits_for_a_second_person`, `CKP_092_the_second_person_approves_and_the_calendar_moves_to_its_next_version_with_the_change_in_its_history`, `CKP_092_the_proposer_cannot_approve_her_own_proposal`, `CKP_092_a_calendar_that_moved_on_is_refused_and_offers_to_load_it_again`, `CKP_092_a_reader_sees_the_calendar_and_no_way_to_change_it`, `CKP_092_a_new_calendar_is_named_in_words_and_starts_against_version_zero`, `CKP_092_a_pending_change_reads_as_waiting_with_who_proposed_it_and_when_and_no_chip`, `CKP_092_hours_are_read_first_and_one_edit_control_opens_them`

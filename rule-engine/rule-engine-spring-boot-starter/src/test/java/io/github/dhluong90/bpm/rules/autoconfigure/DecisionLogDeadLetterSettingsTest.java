@@ -14,13 +14,13 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 /**
- * RLE-231: the retry policy of the asynchronous decision log is configured and validated; the dead-letter count is a
+ * RLE-235: the retry policy of the asynchronous decision log is configured and validated; the dead-letter count is a
  * metric; and the alert rule file watches that metric by its exported name.
  */
 class DecisionLogDeadLetterSettingsTest {
 
     @Test
-    void RLE_231_the_retry_policy_has_defaults_and_names_the_property_it_refuses() {
+    void RLE_235_the_retry_policy_has_defaults_and_names_the_property_it_refuses() {
         RuleEngineProperties.DecisionLog.Async defaults = RuleEngineProperties.DecisionLog.Async.defaults();
         assertThat(defaults.maxAttempts()).isEqualTo(5);
         assertThat(defaults.retryBackoff()).isEqualTo(Duration.ofSeconds(5));
@@ -38,7 +38,7 @@ class DecisionLogDeadLetterSettingsTest {
     }
 
     @Test
-    void RLE_231_the_dead_letter_count_is_a_gauge_that_reads_the_log_when_the_registry_asks() {
+    void RLE_235_the_dead_letter_count_is_a_gauge_that_reads_the_log_when_the_registry_asks() {
         AsyncDecisionLog log = mock(AsyncDecisionLog.class);
         when(log.deadLetterDepth()).thenReturn(0L, 2L);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
@@ -52,7 +52,7 @@ class DecisionLogDeadLetterSettingsTest {
     }
 
     @Test
-    void RLE_231_the_alert_rule_file_fires_when_the_dead_letter_gauge_is_above_zero() throws Exception {
+    void RLE_235_the_alert_rule_file_fires_when_the_dead_letter_gauge_is_above_zero() throws Exception {
         String rules = Files.readString(Path.of("../docs/alerts/decision-log-queue.rules.yml"));
         String exported = RuleEngineMetrics.QUEUE_DEAD.replace('.', '_');
 

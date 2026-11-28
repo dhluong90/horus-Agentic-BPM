@@ -19,5 +19,10 @@ public enum LifecycleAction {
     /** The author discarded a draft that was no longer wanted (RLE-098); the version stays in the history. */
     DISCARDED,
     /** A second person re-wrote the approval seal of an approved version under the current key (RLE-223). */
-    RESEALED
+    RESEALED,
+    /**
+     * Migration V3 recorded that a version approved before seals existed carries the pre-seal marker (RLE-231); written
+     * once per version by the migration, never by the engine.
+     */
+    LEGACY_SEALED
 }

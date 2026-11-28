@@ -1,4 +1,4 @@
-# Prometheus alert rules for the asynchronous decision log (decision-log.mode: async, RLE-230 and RLE-231).
+# Prometheus alert rules for the asynchronous decision log (decision-log.mode: async, RLE-234 and RLE-235).
 # Load the file in the host's Prometheus; the metric names are the ones the starter registers with Micrometer.
 groups:
   - name: horus-rule-engine-decision-log-queue

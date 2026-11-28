@@ -14,6 +14,17 @@ import java.util.Optional;
  */
 public interface ProcessStore {
 
+    /**
+     * Tells whether a variable of a definition is encrypted at rest (PRE-395), so history keeps it as masked.
+     *
+     * @param definitionKey the process key
+     * @param name the top-level variable name
+     * @return true when it is encrypted; false by default
+     */
+    default boolean encryptsVariable(String definitionKey, String name) {
+        return false;
+    }
+
     /** Definition version as stored, with its lifecycle fields (DESIGN sections 3.2 and 7). */
     record StoredDefinition(String tenantId, String id, String key, int version, String status, String name,
             String definitionJson, String definitionHash, String sourceFormat, String sourceDocument, String sourceHash,

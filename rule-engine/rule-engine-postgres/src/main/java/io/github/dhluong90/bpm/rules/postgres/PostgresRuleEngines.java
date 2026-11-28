@@ -168,7 +168,7 @@ public final class PostgresRuleEngines {
 
     /**
      * Builds the entry points with the decision log the host chose: the transactional {@link JdbcDecisionLog}, which
-     * every other overload uses, or the opt-in {@link AsyncDecisionLog} (RLE-230).
+     * every other overload uses, or the opt-in {@link AsyncDecisionLog} (RLE-234).
      *
      * @param dataSource the host's data source
      * @param transactions the host's transaction manager, wrapped

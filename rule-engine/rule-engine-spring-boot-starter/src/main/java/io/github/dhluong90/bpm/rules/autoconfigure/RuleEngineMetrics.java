@@ -26,7 +26,7 @@ final class RuleEngineMetrics implements MeterBinder {
     static final String RELAYED = "horus.rle.decision.log.relayed";
     static final String REFUSED = "horus.rle.decision.log.refused";
     static final String RELAY_FAILED = "horus.rle.decision.log.relay.failed";
-    /** Dead letters an operator still has to deal with; the alert fires above 0 (RLE-231). */
+    /** Dead letters an operator still has to deal with; the alert fires above 0 (RLE-235). */
     static final String QUEUE_DEAD = "horus.rle.decision.log.queue.dead";
     static final String DEAD_LETTERED = "horus.rle.decision.log.dead.lettered";
 
@@ -51,7 +51,7 @@ final class RuleEngineMetrics implements MeterBinder {
                 .strongReference(true)
                 .register(registry);
         if (asyncLog != null) {
-            // RLE-230: only in decision-log.mode async. Alert on depth near max-backlog and on a growing oldest age.
+            // RLE-234: only in decision-log.mode async. Alert on depth near max-backlog and on a growing oldest age.
             Gauge.builder(QUEUE_DEPTH, asyncLog, io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog::depth)
                     .description("Decisions queued for the decision log at the last count; evaluations are refused "
                             + "above decision-log.async.max-backlog").strongReference(true).register(registry);

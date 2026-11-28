@@ -291,7 +291,7 @@ public record RuleEngineProperties(
      * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
      *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
      * @param mode {@code transactional} (the default): each decision is one {@code INSERT} into the log in the caller's
-     *     transaction. {@code async} (#45, RLE-230): each decision is written to a queue in the caller's transaction,
+     *     transaction. {@code async} (#45, RLE-234): each decision is written to a queue in the caller's transaction,
      *     durable at its commit, and a relay moves it into the log in batches; the log lags by about the poll interval
      *     and the evaluation is cheaper. An evaluation is refused with {@code 503 DECISION_LOG_BACKLOG}, never dropped,
      *     when the queue is over {@code async.max-backlog}. Off by default; no decision is lost in either mode
@@ -310,7 +310,7 @@ public record RuleEngineProperties(
         }
 
         /**
-         * The settings of {@code decision-log.mode: async} (RLE-230).
+         * The settings of {@code decision-log.mode: async} (RLE-234).
          *
          * @param batchSize decisions the relay moves in one transaction, 1 to 10,000; default 100
          * @param pollInterval how often the relay runs, 100 ms to one minute; default one second. The log lags by about

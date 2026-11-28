@@ -19,7 +19,7 @@ import javax.sql.DataSource;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The asynchronous decision log, {@code decision-log.mode: async} (RLE-230, #45). It is opt-in; the default stays the
+ * The asynchronous decision log, {@code decision-log.mode: async} (RLE-234, #45). It is opt-in; the default stays the
  * transactional {@link JdbcDecisionLog}.
  *
  * <p>An evaluation writes its decision to the narrow queue table {@code rle_decision_queue} in the caller's own
@@ -30,7 +30,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  * in one transaction, and the database lets a queue row go only once the same decision is in the log, so a row is
  * neither lost nor written twice.
  *
- * <p>The queue is append-only (RLE-231): a trigger refuses every UPDATE of it, and every DELETE but that one. What
+ * <p>The queue is append-only (RLE-235): a trigger refuses every UPDATE of it, and every DELETE but that one. What
  * happens to a row is recorded as new rows of {@code rle_decision_queue_event}. A row the log refuses does not stall
  * the relay: the batch falls back to one row at a time, the bad row is retried with back-off up to {@code max-attempts}
  * and then dead-lettered, and the rows behind it go on. The decision log needs no order among decisions (a read orders

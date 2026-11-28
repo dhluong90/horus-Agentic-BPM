@@ -44,3 +44,5 @@ target/
 
 # Password files for docker compose (deploy/create-secrets.sh, docs/DEPLOYING.md).
 /secrets/
+/dr-report.json
+perf/results/

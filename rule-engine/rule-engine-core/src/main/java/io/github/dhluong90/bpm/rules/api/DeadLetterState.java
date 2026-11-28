@@ -1,6 +1,6 @@
 package io.github.dhluong90.bpm.rules.api;
 
-/** Where a decision that the asynchronous decision log could not write stands (RLE-231). */
+/** Where a decision that the asynchronous decision log could not write stands (RLE-235). */
 public enum DeadLetterState {
     /** The relay gave up after its attempts; nothing is waiting for it but an operator. */
     DEAD,

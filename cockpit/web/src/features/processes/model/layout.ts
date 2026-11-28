@@ -1,7 +1,8 @@
 import dagre from '@dagrejs/dagre';
 import { applyStoredLayout } from './storedLayout';
+import type { CaptionAt } from './captions';
 import { placeNotes, type Notes, type PlacedGroup } from './notes';
-import { isKnownNodeType, type DiagramGraph, type DiagramNode } from './bpmnGraph';
+import { isKnownNodeType, type DataKind, type DiagramGraph, type DiagramNode } from './bpmnGraph';
 
 /*
  * Automatic layout of a definition with no stored layout (cockpit DESIGN section 10, CKP-069): dagre, left to right,
@@ -30,6 +31,8 @@ export interface PlacedNode extends DiagramNode {
    * inside it; a closed one is a box with a count.
    */
   container?: { steps: number; open: boolean };
+  /** Where the name of an event or gateway stands, relative to the node's top left, when it was moved off its usual place to clear a flow; absent when it stands in the usual place. */
+  captionAt?: CaptionAt;
 }
 
 export interface Point { x: number; y: number }
@@ -54,7 +57,7 @@ export interface PlacedEdge {
 /** A data object or data store drawn in the band under the steps (#499); `x`, `y` are the top-left of the symbol, the caption hangs below it. */
 export interface PlacedDataItem {
   id: string;
-  kind: 'dataObject' | 'dataStore';
+  kind: DataKind;
   name: string | undefined;
   x: number;
   y: number;
@@ -182,7 +185,8 @@ function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
     const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW + (marked ? MARKER_ROW : 0);
     return { width: TASK_WIDTH, height: Math.max(TASK_MIN_HEIGHT, content), lines, typeLines };
   }
-  const lines = wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);
+  // An event or gateway the model leaves unnamed has no caption: its id is a code, not a name.
+  const lines = node.name === undefined || node.name.trim() === '' ? [] : wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);
   return { width: SYMBOL_SIZE, height: SYMBOL_SIZE + CAPTION_GAP + lines.length * CAPTION_LINE, lines, typeLines: [] };
 }
 
@@ -398,7 +402,8 @@ function placeData(data: NonNullable<DiagramGraph['data']>, layout: Layout): Lay
   let cursor = 0;
   for (const { item, anchor } of anchored) {
     const size = item.kind === 'dataStore' ? DATA_STORE_SIZE : DATA_OBJECT_SIZE;
-    const lines = wrapText(item.name ?? item.id, DATA_CAPTION, CAPTION_CHAR);
+    // A symbol without a name is captioned by its kind when drawn, never by its id.
+    const lines = item.name === undefined ? [] : wrapText(item.name, DATA_CAPTION, CAPTION_CHAR);
     const centre = Number.isFinite(anchor) ? anchor : cursor + DATA_CAPTION / 2;
     const x = Math.max(cursor, centre - DATA_CAPTION / 2);
     items.push({ id: item.id, kind: item.kind, name: item.name, x: x + (DATA_CAPTION - size.width) / 2, y: top, ...size, lines });
@@ -423,7 +428,7 @@ function placeData(data: NonNullable<DiagramGraph['data']>, layout: Layout): Lay
     links.push({ id: link.id, activity: link.activity, item: link.item, direction: link.direction, points: link.direction === 'write' ? down : [...down].reverse() });
   }
   const width = Math.max(layout.width, Math.ceil(cursor - DATA_SYMBOL_GAP));
-  const bottom = Math.max(...items.map((item) => item.y + item.height + (Math.max(...items.map((i) => i.lines.length)) * CAPTION_LINE) + 14));
+  const bottom = Math.max(...items.map((item) => item.y + item.height + (Math.max(1, ...items.map((i) => i.lines.length)) * CAPTION_LINE) + 14));
   return { ...layout, width, height: Math.ceil(bottom), data: { items, links } };
 }
 

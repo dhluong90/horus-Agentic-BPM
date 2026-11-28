@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.Objects;
 
 /**
- * A decision the asynchronous decision log could not write after its attempts (RLE-231). The row is kept whole in the
+ * A decision the asynchronous decision log could not write after its attempts (RLE-235). The row is kept whole in the
  * queue, so the decision can still be read and replayed by its id.
  *
  * @param decisionId the decision id

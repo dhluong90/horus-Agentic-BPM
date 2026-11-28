@@ -137,15 +137,19 @@ final class TestEngine {
     private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator replicaSchemas;
     private final ProcessEventPublisher replicaPublisher;
 
+    private final io.github.dhluong90.bpm.process.internal.store.VariableVault replicaVault;
+
     private TestEngine(Builder b) {
         DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
-        ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager);
+        ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager,
+                org.springframework.jdbc.core.simple.JdbcClient.create(ds));
         this.replicaDataSource = ds;
+        this.replicaVault = b.variableVault;
         this.replicaTransactions = tx;
         this.replicaClock = b.clock;
         this.replicaSchemas = b.outputSchemas;
-        JdbcJobStore jobStore = new JdbcJobStore(ds);
+        JdbcJobStore jobStore = new JdbcJobStore(ds, b.variableVault);
         SubsetBpmnReader reader = new SubsetBpmnReader(Limits.DEFAULTS);
         JobSettings jobSettings = JobSettings.defaults(b.replicaId).withTimerLease(b.lease);
         jobSettings = new JobSettings(jobSettings.replicaId(), jobSettings.timerLease(), b.batchSize,
@@ -172,7 +176,7 @@ final class TestEngine {
                 tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval, EngineDefaults.IDEMPOTENCY_RETENTION,
                 EngineDefaults.MAX_PAGE_SIZE, b.strictApprovalHashes);
         this.strictApprovalHashes = b.strictApprovalHashes;
-        JdbcProcessStore processStore = new JdbcProcessStore(ds, b.idempotencyLockTimeout);
+        JdbcProcessStore processStore = new JdbcProcessStore(ds, b.idempotencyLockTimeout, b.variableVault);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
                 Map.of(SourceFormat.BPMN_XML, reader),
                 Map.of(SourceFormat.BPMN_XML, new io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter()::write),
@@ -189,6 +193,9 @@ final class TestEngine {
         }
         if (b.forms != null) {
             services.useFormRegistry(b.forms, b.formLinkOrigins);
+        }
+        if (b.readTimeout != null) {
+            services.useReadTimeout(b.readTimeout);
         }
         services.useMessageAdapter(b.messageAdapter);
         Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> stores = new java.util.LinkedHashMap<>();
@@ -243,7 +250,7 @@ final class TestEngine {
             io.github.dhluong90.bpm.process.internal.service.ReplaySettings settings) {
         Identity id = identity;
         return new io.github.dhluong90.bpm.process.internal.service.AgentReplays(() -> id.tenant, id, replicaClock,
-                replicaTransactions, new JdbcAgentReplayStore(replicaDataSource), decisions, replicaSchemas, settings,
+                replicaTransactions, new JdbcAgentReplayStore(replicaDataSource, replicaVault), decisions, replicaSchemas, settings,
                 io.github.dhluong90.bpm.process.internal.service.EngineDefaults.MAX_RANGE);
     }
 
@@ -323,6 +330,15 @@ final class TestEngine {
         private final String replicaId;
         private final TestClock clock;
         private Duration lease = Duration.ofSeconds(60);
+        /** Encrypts the configured instance variables at rest (PRE-395). */
+        Builder variableVault(io.github.dhluong90.bpm.process.internal.store.VariableVault value) {
+            variableVault = value;
+            return this;
+        }
+
+        private io.github.dhluong90.bpm.process.internal.store.VariableVault variableVault =
+                io.github.dhluong90.bpm.process.internal.store.VariableVault.NONE;
+        private Duration readTimeout;
         private int batchSize = 32;
         private Duration retryBackoff = Duration.ofSeconds(10);
         private boolean autoApprove = true;
@@ -385,6 +401,12 @@ final class TestEngine {
         /** Stores the diagram of an imported BPMN file as layout revision 1, as the starter does (#445). */
         Builder importedLayouts() {
             importedLayouts = true;
+            return this;
+        }
+
+        /** Limits the instance and definition lists to this long (PRE-394); unlimited by default. */
+        Builder readTimeout(Duration value) {
+            readTimeout = value;
             return this;
         }
 

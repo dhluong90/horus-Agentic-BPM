@@ -3,7 +3,7 @@ package io.github.dhluong90.bpm.rules.api;
 /**
  * {@code 503 DECISION_LOG_BACKLOG}: with {@code decision-log.mode: async} the queue of decisions waiting to be written to
  * the log holds more than {@code decision-log.async.max-backlog}, so the engine refuses a new decision instead of
- * dropping one or letting the queue grow without bound (RLE-230). The evaluation is not logged and returns nothing;
+ * dropping one or letting the queue grow without bound (RLE-234). The evaluation is not logged and returns nothing;
  * retry after the relay has caught up.
  */
 public final class DecisionLogBacklogException extends HorusBpmException {

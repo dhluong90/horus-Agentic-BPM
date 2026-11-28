@@ -176,6 +176,55 @@ class ProcessServicesQaTest {
         assertThat(calls.get()).isLessThanOrEqualTo(10_000);
     }
 
+    @Test
+    void PRE_519_an_error_thrown_in_a_step_ends_its_span_so_the_next_unit_of_work_of_another_tenant_has_no_parent() {
+        // Given a tracing binding that keeps the current span on the thread until the step's span ends, as a scope does
+        ThreadLocal<String> current = new ThreadLocal<>();
+        List<String> parents = new ArrayList<>();
+        List<String> ended = new ArrayList<>();
+        io.github.dhluong90.bpm.process.spi.ProcessTracing tracing = (tenant, key, version, kind) -> {
+            String parent = current.get();
+            String id = tenant + "/" + kind + "/" + parents.size();
+            parents.add(parent);
+            current.set(id);
+            return (outcome, code, failure) -> {
+                ended.add(id + ":" + outcome + ":" + (failure == null ? "" : failure.getClass().getSimpleName()));
+                current.set(parent);
+            };
+        };
+        Process one = BpmnModelBuilder.process("boom").startEvent("start").serviceTask("step", "boom.step", Map.of(), "r")
+                .endEvent("end").chain("start", "step", "end").build();
+        ServiceTaskHandler handler = new ServiceTaskHandler() {
+            @Override
+            public String name() {
+                return "boom.step";
+            }
+
+            @Override
+            public HandlerResult handle(ServiceCall call) {
+                throw new AssertionError("a handler's Error, not an Exception");
+            }
+        };
+        ProcessServices services = services(one, handler);
+        services.useTracing(tracing);
+        services.importAtStartup("bank-a", new ImportRequest(SourceFormat.BPMN_XML, "boom".getBytes(StandardCharsets.UTF_8), null));
+        try {
+            // When an Error leaves a step of tenant bank-a
+            assertThatThrownBy(() -> services.start(StartRequest.of("boom"))).isInstanceOf(AssertionError.class);
+
+            // Then every span that started has ended, the failed one with the Error recorded as its failure
+            assertThat(ended).hasSameSizeAs(parents);
+            assertThat(ended).anyMatch(e -> e.endsWith(":FAILED:AssertionError"));
+            assertThat(current.get()).isNull();
+
+            // and the next unit of work on the thread, for tenant bank-b, has no parent from the earlier span
+            tracing.startStep("bank-b", "boom", 1, "START").end("OK", null, null);
+            assertThat(parents.getLast()).isNull();
+        } finally {
+            current.remove();
+        }
+    }
+
     // ---- tenant guard and event delivery (security re-review, lows 2 and 4) ----------------------------------
 
     private static Process pricing() {

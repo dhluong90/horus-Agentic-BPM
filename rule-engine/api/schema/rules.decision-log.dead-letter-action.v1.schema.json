@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:horus-bpm:schema:event:rules.decision-log.dead-letter-action.v1",
   "title": "rules.decision-log.dead-letter-action.v1",
-  "description": "Written to the Rule Engine outbox, in the transaction of the step, whenever an operator asks to retry or resolve a dead-lettered decision, and whenever a second person approves or rejects that request (RLE-231). It names who, which decision and why. A dead-lettered decision is never deleted; these events and the rows of rle_decision_queue_event are its audit trail. The outbox row id is the event id. Carries the full event envelope. Additive changes only within v1.",
+  "description": "Written to the Rule Engine outbox, in the transaction of the step, whenever an operator asks to retry or resolve a dead-lettered decision, and whenever a second person approves or rejects that request (RLE-235). It names who, which decision and why. A dead-lettered decision is never deleted; these events and the rows of rle_decision_queue_event are its audit trail. The outbox row id is the event id. Carries the full event envelope. Additive changes only within v1.",
   "type": "object",
   "required": [
     "eventId",

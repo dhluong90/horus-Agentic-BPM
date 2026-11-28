@@ -918,9 +918,11 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `stats.rollup-interval`, `stats.rollup-lag`, `stats.rollup-max-slice` | `PT5M`, `PT5M`, `PT1M` | Rollup cadence, safety lag, history time per transaction |
 | `stats.rollup-retention` | `P13M` | How long hourly statistics rows are kept, an ISO-8601 period of at least `P31D` (the longest window); the rollup run deletes older whole days in batches of 5,000, at most 20 batches per run (`PRE-200`, #410) |
 | `stats.rollup-min-lag` | `PT5M` | The write-lag window: the longest a step transaction may stay open before its history row commits. No slice is rolled up within it, and `stats.rollup-lag` may not be shorter (refused at bind time). Below `PT5M` only on the `dev` profile (start-up is refused elsewhere) |
-| `query.max-page-size`, `query.statement-timeout` | `200`, `PT2S` | Page size may be lowered only; timeout per read transaction |
+| `query.max-page-size`, `query.statement-timeout` | `200`, `PT2S` | Page size may be lowered only; timeout per read transaction. `statement-timeout` is applied to the instance and definition lists (`PRE-394`); the other lists keep the ordinary transaction until they move to the same runner |
 | `query.max-roles` | `100` | Most role and group queues one task list reads (#408, `PRE-216`); 1 to 1,000. A caller over it who names no `role` or `group` gets `400 ROLE_FAN_OUT_EXCEEDED` |
 | `jobs.lease-margin`, `adapters.default-timeout` | `30s`, `PT30S` | ADR-0008 |
+| `variable-encryption.variables`, `variable-encryption.definitions.<key>` | none | Top-level instance variable names encrypted at rest in every definition, and per definition key (`*` is every variable of it). Empty: nothing is encrypted (`PRE-525`). Naming a variable with no key stops start-up |
+| `variable-encryption.keys.<id>`, `variable-encryption.active-key-id` | none | Base64 AES-256 keys (exactly 32 bytes) by id, from an environment variable or a secret store, and the id that writes. The others only read, which is how a rotation avoids a lockout (`PRE-526`). A host with a vault registers its own `VariableKeyring` bean instead |
 | `history.retention` | none; required outside `dev` | Whole months; drops whole monthly partitions of `pre_history` older than the period. Outside the `dev` profile start-up is refused until it is set, and a value below `history.retention-floor` or not in whole months is refused (PD-050). The process history ships in M2 and retention applies with the rule engine's in M3; before M3 nothing is deleted |
 | `history.retention-floor` | `P12M` | Shortest `history.retention` accepted; a host may raise it, never lower it below the engine floor (ADR-0024, `TR-EXT-05`) |
 | `jobs.timer-lease` | `60s` | Lease of timer, SLA and effective-date jobs, which make no external call (ADR-0008) |
@@ -1481,7 +1483,7 @@ Targets, not measurements, on the reference shape of the architecture overview s
 |---|---|---|
 | Tenant and a bound | Every list query has `tenant_id` and either a leading-index equality (instance, definition, assignee) or a time range of at most 31 days | CI query-plan check: `EXPLAIN (FORMAT JSON)` of every registered query on a seeded database fails on a sequential scan of a table above 10,000 rows or on more partitions than the bound allows (`TR-PERF-07`) |
 | Pages | Keyset cursor, default 50, at most 200; `limit` above 200 is `400 QUERY_INVALID`; no `OFFSET`; no exact totals, a count is shown as "200+" | REST tests |
-| Time per read | Read-only transaction with `SET LOCAL statement_timeout = '2s'` | Fault test with a slowed database |
+| Time per read | Read-only transaction of its own (`TransactionRunner.inReadTransaction`, `REQUIRES_NEW`, so it never joins a host write transaction) with `SET LOCAL statement_timeout` from `query.statement-timeout` (`PT2S`). A read that exceeds it is `503 QUERY_TIMEOUT` (SQLSTATE `57014` mapped by `ProcessEngineTransactions`), never a partial page; a page is complete, and a `nextCursor` says more follows. Applies to `GET /instances` and `GET /definitions` (`PRE-394`); the other lists follow when they move to the same runner. A host that reads inside its own transaction needs a second pooled connection for the length of the read | `PRE_394_*` in `ReadTimeoutPostgresIT`: a list slowed by a table lock held elsewhere |
 | History | `pre_history` is read only for one instance, bounded by its lifetime, or by the rollup job in one-minute slices. Never `GROUP BY` over history on a request path | ArchUnit rule on the query registry; query-plan check |
 | Registered queries | Every multi-row read is a `ListQuery` in `ProcessListQueries` with its bound: `Page` (`ORDER BY ... LIMIT ?`), `ParentKey` (`tenant_id = ?` and the parent key), `ParentKeys` (`tenant_id = ?` and `key = ANY (?)`), or `EngineSweep` for the engine's own scheduled reads across tenants (the rollup slice and the metric gauges), which takes no tenant from a caller, returns nothing to one, and carries a time range on both ends, a `LIMIT`, or a single count. The constructor refuses SQL that does not keep its bound | ArchUnit: no multi-row `JdbcClient` read outside `ListQuery` (`BoundedListQueriesTest`); `ListQueryPlanCheckTest`: `EXPLAIN` of each registered query on a seeded database with sequential scans off shows no sequential scan and the index condition its bound needs; the rollup slice has an index condition on both ends of `occurred_at` (`PRE-036`) |
 | Counters | No counter is updated inside a step transaction | Code review rule; SQL capture test of a transition shows no `UPDATE` of a statistics table |
@@ -1577,7 +1579,30 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Masked variables stay masked in activities, task context and forms | Query service | `PRE-012`, `PRE-027` (`TR-SEC-05`) |
 | Step catalogue needs `processes:author`; it lists names and schemas, never configuration values or secrets | REST | `PRE-032` |
 | Bounded reads and statement timeouts limit the cost any caller can impose | Query registry | `PRE-030` (`TR-PERF-07`) |
+| Instance variables named in the configuration are AES-256-GCM ciphertext in `pre_instance.variables` and in every store that copies a value (section 10.1); a missing or wrong key is refused by name, never read as plain; a removed rule never decrypts silently | `VariableVault` (`internal.store`), `JdbcProcessStore`, `JdbcJobStore`, `JdbcAgentReplayStore`, `JdbcVariableReencryption` | `PRE-525` to `PRE-529` (`TR-SEC-05`) |
 | No reflection: handlers are registered typed functions | `StepRegistry` | ArchUnit (`TR-SEC-01`) |
+
+### 10.1 Variable encryption (#594, `PRE-525` to `PRE-529`)
+
+A variable value is copied into more than the instance row: the stored idempotent answer, token locals, recorded step results, compensation snapshots, job payloads, start arrivals, an incident's proposed output, a task's review and the submission, output and changes of a history entry. The control therefore sits in the stores (`JdbcProcessStore`, `JdbcJobStore`, `JdbcAgentReplayStore`) in front of every statement that writes one of these columns and every mapper that reads it; `ProcessServices` and the execution kernel see plain values, so replay and every expression behave as before. The instance row is sealed variable by variable; a payload column is sealed whole as one envelope bound to its table, tenant and row id (`sealDocument`); a history entry seals only the members no query reads (`sealMembers`). The two queries that looked inside a sealed column, the output schema of a recorded answer and the changed-field check of a reviewer override, now open the value in Java. No migration: an envelope is a JSON object, which the existing `jsonb` checks accept. The stores left in the clear, and why, are listed under `PRE-525`.
+
+```mermaid
+flowchart LR
+    K[Kernel: plain variables] -->|seal: tenant, instance, name, kid as AAD| V[VariableVault]
+    V -->|envelope: kid, iv, ct| T[(pre_instance.variables)]
+    T -->|open| V
+    V -->|plain variables| K
+    R[VariableKeyring: current + earlier keys] --> V
+    S[JdbcVariableReencryption] -->|rewrite under current key, same lock_version| T
+```
+
+- Envelope: `{"$enc":"aes-256-gcm","kid":"k1","iv":"<12 random bytes>","ct":"<ciphertext and tag>"}`, Base64url. The AAD is `tenant, instance id, variable name, kid`; a value moved to another row, tenant or variable fails authentication. A random 96-bit IV is safe for about 2^32 writes under one key, so rotate a key well before that; one write encrypts a variable once.
+- Opt-in by configuration (`variable-encryption.*`, section 6.5); a variable not named is stored as before. Opening ignores the rules: a stored envelope is opened whether or not the variable is still named, and refused by name when its key is missing.
+- Removing a name from the rules never decrypts silently (`PRE-529`): the `UPDATE` of an instance carries a guard that no stored envelope is replaced by a plain value, and a refused write throws `VARIABLE_ENCRYPTION_RULE_REMOVED` (409) without changing the row. There is deliberately no engine operation that releases a variable; that is a change the bank makes under its own control, outside the engine.
+- The sweep (`PRE-526`) runs each page in a transaction (its own, or the caller's), takes a per-tenant `pg_try_advisory_xact_lock`, locks rows `FOR UPDATE SKIP LOCKED` and writes compare-and-set on the value it read. It rewrites `pre_instance.variables` only; the other sealed stores keep their key until their rows age out, so an earlier key stays listed while they exist.
+- Rotation: add the new key, make it active, run `JdbcVariableReencryption.reencrypt(tenant, afterId, limit)` per tenant until it rewrites nothing, then remove the old key. Any write of an instance also re-encrypts it under the active key. Idempotent answers (24 hours) are rewritten by their own expiry.
+- Masking is separate and unchanged: a form field or agent output marked `mask: true` shows as `***` in views. An encrypted variable is shown to an authorised reader as its plain value and kept as `{"masked": true}` in the history of a submission. A decision input is masked by the Rule Engine's `mask` setting.
+- Out of scope: token locals, recorded step results and event payloads are not encrypted (events carry no variables, AUD-01); the database and disk encryption of PD-153 stays the base layer.
 
 ## 11. Open questions
 

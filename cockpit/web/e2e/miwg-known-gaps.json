@@ -1,0 +1,10 @@
+{
+  "C.10.0.bpmn": [
+    "label on a line: \"Employee available?\"",
+    "label on a line: \"No\"",
+    "label on a line: \"No\"",
+    "label on a line: \"On-site Meeting?\"",
+    "label on a line: \"Yes\"",
+    "label on a line: \"Yes\""
+  ]
+}

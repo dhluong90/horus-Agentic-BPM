@@ -116,6 +116,9 @@ export const meAn: BpmMeV1 = {
   groups: ['loans-operations'],
 };
 
+/** The same operator who may also read the history of a case, so a completed task shows the decision as recorded (#663). */
+export const meAnReader: BpmMeV1 = { ...meAn, permissions: ['processes:read', 'processes:task:work'] };
+
 /** A supervisor of the loan queue: sees every task and hands tasks on with a reason (CKP-048, PD-110). */
 export const meSau: BpmMeV1 = {
   schemaVersion: 1,
@@ -206,7 +209,7 @@ export const LONGEST = {
 } as const;
 
 /** Named situations a test or the dev server can select. */
-export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report', 'rules-author-replay', 'rules-author-replay-no-log', 'calendar-approver', 'calendar-proposer', 'rules-author-builder', 'journey-author', 'journey-approver', 'embedded-two-tenants'] as const;
+export const SCENARIOS = ['ready', 'ready-approver', 'me-forbidden', 'me-internal-error', 'meta-internal-error', 'signed-out', 'me-bad-shape', 'me-unauthenticated', 'meta-not-found', 'registry-invalid', 'registry-duplicate-id', 'ready-longest-labels', 'registry-oidc', 'rules-author', 'rules-approver', 'rules-author-approver', 'rules-author-drafts-off', 'rules-author-drafts-default', 'rules-reader', 'me-unknown-permission', 'meta-unknown-module', 'meta-bad-known-module', 'processes-reviewer', 'processes-starter', 'processes-task-only', 'processes-approver', 'processes-requester', 'rules-auditor', 'rules-auditor-no-log', 'tasks-operator', 'tasks-operator-reader', 'tasks-supervisor', 'rules-author-simulate', 'incidents-operator', 'incidents-proposer', 'migration-operator', 'migration-approver', 'migration-reader', 'home-operations', 'rules-author-templates', 'rules-approver-report', 'rules-author-replay', 'rules-author-replay-no-log', 'calendar-approver', 'calendar-proposer', 'rules-author-builder', 'journey-author', 'journey-approver', 'embedded-two-tenants'] as const;
 export type Scenario = (typeof SCENARIOS)[number];
 
 export interface MockResponse {
@@ -301,6 +304,8 @@ export function scenarioResponses(scenario: Scenario): { registry: MockResponse;
       return { ...ok, meta: json(metaWithProcesses), me: json(meDaniel) };
     case 'tasks-operator':
       return { ...ok, meta: json(metaWithProcesses), me: json(meAn) };
+    case 'tasks-operator-reader':
+      return { ...ok, meta: json(metaWithProcesses), me: json(meAnReader) };
     case 'tasks-supervisor':
       return { ...ok, meta: json(metaWithProcesses), me: json(meSau) };
     case 'incidents-operator':
@@ -380,7 +385,7 @@ export function scenarioUser(scenario: Scenario): string {
   if (scenario === 'rules-reader') return meDan.user.id;
   if (scenario === 'processes-reviewer' || scenario === 'processes-task-only' || scenario === 'migration-reader') return meHoa.user.id;
   if (scenario === 'rules-auditor' || scenario === 'rules-auditor-no-log') return meHa.user.id;
-  if (scenario === 'tasks-operator') return meAn.user.id;
+  if (scenario === 'tasks-operator' || scenario === 'tasks-operator-reader') return meAn.user.id;
   if (scenario === 'tasks-supervisor') return meSau.user.id;
   if (scenario === 'home-operations') return meDaniel.user.id;
   if (scenario === 'incidents-operator') return meTuan.user.id;

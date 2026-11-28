@@ -44,7 +44,7 @@ public interface DecisionLogService {
 
     /**
      * Lists the caller's tenant's dead letters: decisions the asynchronous decision log could not write after its
-     * attempts (RLE-231). Needs {@code rules:log:read}.
+     * attempts (RLE-235). Needs {@code rules:log:read}.
      *
      * @param limit the most rows to return, 1 to 1,000
      * @return the dead letters, oldest first

@@ -171,7 +171,7 @@ public class ProblemDetails {
                     .contentType(PROBLEM).body(response.getBody());
         }
         if ("DECISION_LOG_BACKLOG".equals(e.code())) {
-            // RLE-230: the relay drains the queue every second or so; a client retries after a moment
+            // RLE-234: the relay drains the queue every second or so; a client retries after a moment
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {

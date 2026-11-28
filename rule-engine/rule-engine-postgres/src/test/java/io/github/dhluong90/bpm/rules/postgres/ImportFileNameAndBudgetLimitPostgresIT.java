@@ -30,7 +30,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * RLE-228 (#357) and RLE-229 (#360) on PostgreSQL: the file name an import came from is kept with the version, on its
+ * RLE-232 (#357) and RLE-233 (#360) on PostgreSQL: the file name an import came from is kept with the version, on its
  * history row and in the created event, outside every hash; and a decision that fails on the evaluation budget keeps
  * the limit it reached, which only its own tenant reads back.
  */
@@ -89,7 +89,7 @@ class ImportFileNameAndBudgetLimitPostgresIT {
     }
 
     @Test
-    void RLE_228_an_import_keeps_its_file_name_on_the_version_its_history_row_and_the_event_and_no_hash_moves() {
+    void RLE_232_an_import_keeps_its_file_name_on_the_version_its_history_row_and_the_event_and_no_hash_moves() {
         // Given alice imports card-fee from "Biểu phí thẻ 2027.yaml" and a second rule set without any name
         RuleEngines engine = engines(EngineSettings.defaults().withRequireContentHash(false));
         caller.as("bank-a", "alice", AUTHOR);
@@ -127,7 +127,7 @@ class ImportFileNameAndBudgetLimitPostgresIT {
     }
 
     @Test
-    void RLE_228_the_name_is_cleaned_to_a_bare_display_name_and_a_too_long_name_is_refused() {
+    void RLE_232_the_name_is_cleaned_to_a_bare_display_name_and_a_too_long_name_is_refused() {
         RuleEngines engine = engines(EngineSettings.defaults().withRequireContentHash(false));
         caller.as("bank-a", "alice", AUTHOR);
 
@@ -146,7 +146,7 @@ class ImportFileNameAndBudgetLimitPostgresIT {
     }
 
     @Test
-    void RLE_229_a_step_budget_failure_keeps_limit_steps_in_the_log_and_only_its_tenant_reads_it() {
+    void RLE_233_a_step_budget_failure_keeps_limit_steps_in_the_log_and_only_its_tenant_reads_it() {
         // Given a loyalty table whose twelve terms exceed a step budget of 10, approved by a second person
         EngineSettings tight = EngineSettings.defaults().withRequireContentHash(false)
                 .withEvaluationLimits(new EvaluationLimits(10, 10_000));
@@ -180,7 +180,7 @@ class ImportFileNameAndBudgetLimitPostgresIT {
                 .query(String.class).single()).isEqualTo("STEPS");
         assertThat(jdbc.sql("SELECT budget_limit FROM rle_decision WHERE id = :id").param("id", passed.decisionId())
                 .query(String.class).optional()).isEmpty();
-        // RLE-229: the limits the decision ran with are stored too, and a replay on the default host uses them
+        // RLE-233: the limits the decision ran with are stored too, and a replay on the default host uses them
         assertThat(jdbc.sql("SELECT step_budget || '/' || timeout_ms FROM rle_decision WHERE id = :id")
                 .param("id", failed.decisionId()).query(String.class).single()).isEqualTo("10/10000");
         assertThat(jdbc.sql("SELECT step_budget || '/' || timeout_ms FROM rle_decision WHERE id = :id")

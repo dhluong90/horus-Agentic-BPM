@@ -45,7 +45,7 @@ public final class SelfApprovalForbiddenException extends HorusBpmException {
     }
 
     /**
-     * The operator who asked for a retry or a resolve of a dead letter tried to approve or reject it (RLE-231).
+     * The operator who asked for a retry or a resolve of a dead letter tried to approve or reject it (RLE-235).
      *
      * @param decisionId the decision
      * @return the exception

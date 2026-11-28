@@ -22,9 +22,9 @@ describe('Calendar changes in the approvals queue (#473)', () => {
     setScenario('calendar-approver');
     open('#/approvals');
 
-    const card = await screen.findByRole('button', { name: /Calendar vn-banking-hours/ });
+    const card = await screen.findByRole('button', { name: /Calendar Vn banking hours/ });
     await userEvent.click(card);
-    const preview = await screen.findByRole('article', { name: 'Calendar vn-banking-hours' });
+    const preview = await screen.findByRole('article', { name: 'Calendar Vn banking hours' });
     expect(within(preview).getByText('Calendar')).toBeInTheDocument();
     expect(within(preview).getByText('New Year 2028 is a public holiday')).toBeInTheDocument();
     expect(within(preview).getByRole('link', { name: /Review and approve/ })).toHaveAttribute('href', `#/calendar-changes/${CHANGE}`);
@@ -35,13 +35,13 @@ describe('Calendar changes in the approvals queue (#473)', () => {
     setScenario('calendar-approver');
     open(`#/calendar-changes/${CHANGE}`);
 
-    expect(await screen.findByRole('heading', { level: 1, name: 'Calendar vn-banking-hours' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { level: 1, name: 'Calendar Vn banking hours' })).toBeInTheDocument();
     await userEvent.click(await screen.findByRole('button', { name: 'Approve' }));
     await waitFor(() => { expect(engine.calendarDecisions).toHaveLength(1); });
     const sent = engine.calendarDecisions[0];
     expect(sent?.command).toBe('approve');
     expect(sent?.body['expectedChangeHash']).toMatch(/^[0-9a-f]{64}$/);
-    expect(await screen.findByRole('status')).toHaveTextContent('Approved.');
+    expect(await screen.findByRole('status')).toHaveTextContent(/Approved by .*Proposed by/);
   });
 
   it('CKP_091_the_proposer_cannot_approve_her_own_change_and_is_told_why', async () => {
@@ -62,6 +62,6 @@ describe('Calendar changes in the approvals queue (#473)', () => {
     open('#/processes');
 
     await userEvent.click(await screen.findByRole('link', { name: 'Calendar changes' }));
-    expect(await screen.findByRole('link', { name: 'vn-banking-hours' })).toHaveAttribute('href', `#/calendar-changes/${CHANGE}`);
+    expect(await screen.findByRole('link', { name: 'Vn banking hours' })).toHaveAttribute('href', `#/calendar-changes/${CHANGE}`);
   });
 });

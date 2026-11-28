@@ -74,7 +74,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
-    void RLE_230_the_decision_log_is_transactional_by_default_and_async_only_when_the_host_asks() {
+    void RLE_234_the_decision_log_is_transactional_by_default_and_async_only_when_the_host_asks() {
         runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
             assertThat(context).hasNotFailed();
             assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog.class);
@@ -94,7 +94,7 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
-    void RLE_230_async_settings_out_of_range_stop_start_up_naming_the_property() {
+    void RLE_234_async_settings_out_of_range_stop_start_up_naming_the_property() {
         runner.withUserConfiguration(HostWithEngineStandIns.class)
                 .withPropertyValues("horus.bpm.rules.decision-log.mode=async",
                         "horus.bpm.rules.decision-log.async.max-backlog=10")

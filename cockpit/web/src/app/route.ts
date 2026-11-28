@@ -16,7 +16,7 @@ export const LENSES = ['table', 'readings', 'changes', 'report', 'history', 'sou
 export type Lens = (typeof LENSES)[number];
 
 /** The views of one process definition version: its diagram, its steps as a list, what it changes, and the cases of its key. */
-export const PROCESS_LENSES = ['diagram', 'steps', 'changes', 'cases'] as const;
+export const PROCESS_LENSES = ['diagram', 'steps', 'changes', 'cases', 'timing'] as const;
 export type ProcessLens = (typeof PROCESS_LENSES)[number];
 
 /**
@@ -40,6 +40,8 @@ export type Route =
   | { name: 'process'; key: string; version: number; lens?: ProcessLens | undefined }
   | { name: 'migrate'; key: string; version: number; from?: number | undefined }
   | { name: 'migration'; migrationId: string }
+  | { name: 'calendars' }
+  | { name: 'calendar'; calendarKey: string }
   | { name: 'calendar-changes' }
   | { name: 'calendar-change'; changeId: string }
   | { name: 'instance'; instanceId: string }
@@ -92,6 +94,8 @@ export function areaOf(route: Route): Area {
     case 'process':
     case 'migrate':
     case 'migration':
+    case 'calendars':
+    case 'calendar':
     case 'calendar-changes':
     case 'calendar-change':
     case 'instance':
@@ -148,6 +152,7 @@ export function parseRoute(hash: string, fallback: Route = { name: 'home' }): Ro
     return isProcessLens(lens) ? { name: 'process', key: ruleSet, version: Number(version), lens } : { name: 'process', key: ruleSet, version: Number(version) };
   }
   if (area === 'migrations' && ruleSet !== undefined) return { name: 'migration', migrationId: ruleSet };
+  if (area === 'calendars') return ruleSet !== undefined ? { name: 'calendar', calendarKey: ruleSet } : { name: 'calendars' };
   if (area === 'calendar-changes') return ruleSet !== undefined ? { name: 'calendar-change', changeId: ruleSet } : { name: 'calendar-changes' };
   if (area === 'instances' && ruleSet !== undefined) return { name: 'instance', instanceId: ruleSet };
   if (area === 'tasks' && ruleSet !== undefined) return { name: 'task', taskId: ruleSet };
@@ -220,6 +225,8 @@ export function formatRoute(route: Route): string {
       return `#/processes/${encodeURIComponent(route.key)}/${String(route.version)}/move${route.from !== undefined ? `?from=${String(route.from)}` : ''}`;
     case 'migration':
       return `#/migrations/${encodeURIComponent(route.migrationId)}`;
+    case 'calendar':
+      return `#/calendars/${encodeURIComponent(route.calendarKey)}`;
     case 'calendar-change':
       return `#/calendar-changes/${encodeURIComponent(route.changeId)}`;
     case 'instance':

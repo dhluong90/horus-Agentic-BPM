@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { meAn, metaWithProcesses } from '../src/mocks/fixtures';
+import { meAnReader, metaWithProcesses } from '../src/mocks/fixtures';
 import { createFakeProcessEngine } from '../src/mocks/processEngine';
 import { QUEUE_FORMS, QUEUE_TASKS, type QueueForm } from '../src/mocks/taskQueueDemo';
 import { mockHost, rememberLocale } from './mockHost';
@@ -30,25 +30,29 @@ const mutableForms = QUEUE_FORMS as Record<string, QueueForm>;
 const original = QUEUE_FORMS[QUEUE_TASKS.myCreditReview];
 test.afterEach(() => { if (original !== undefined) mutableForms[QUEUE_TASKS.myCreditReview] = original; });
 
-async function openLoanTask(page: Page, which: keyof typeof TASKS, size: { width: number; height: number }, locale: Locale = 'en', patch?: (task: Record<string, unknown>) => Record<string, unknown>) {
+async function openLoanTask(page: Page, which: keyof typeof TASKS, size: { width: number; height: number }, locale: Locale = 'en', patch?: (task: Record<string, unknown>) => Record<string, unknown>, history?: (entry: Record<string, unknown>) => Record<string, unknown>, shape?: (declared: QueueForm) => QueueForm) {
   const task = TASKS[which];
   await page.setViewportSize(size);
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await rememberLocale(page, locale);
   // The fake engine declares the credit review form for this task; for these tests it declares the loan form instead.
-  mutableForms[QUEUE_TASKS.myCreditReview] = { ...form(task.form), data: {} } as QueueForm;
+  const declared = { ...form(task.form), data: {} } as QueueForm;
+  mutableForms[QUEUE_TASKS.myCreditReview] = shape === undefined ? declared : shape(declared);
   const engine = createFakeProcessEngine({ locale });
   await mockHost(page, 'ready');
   await page.route('**/api/bpm/meta', (route) => route.fulfill({ json: metaWithProcesses }));
-  await page.route('**/api/bpm/me', (route) => route.fulfill({ json: meAn }));
+  await page.route('**/api/bpm/me', (route) => route.fulfill({ json: meAnReader }));
   await page.route('**/api/bpm/rules/v1/**', (route) => route.fulfill({ status: 403, contentType: 'application/problem+json', body: JSON.stringify({ status: 403, code: 'PERMISSION_DENIED' }) }));
   await page.route('**/api/bpm/processes/v1/**', async (route) => {
     const request = route.request();
     const url = request.url();
-    const answer = engine.handle({ method: request.method(), path: url, headers: request.headers(), body: request.postData() ?? '', user: meAn.user.id, permissions: meAn.permissions });
+    const answer = engine.handle({ method: request.method(), path: url, headers: request.headers(), body: request.postData() ?? '', user: meAnReader.user.id, permissions: meAnReader.permissions });
     const isTask = request.method() === 'GET' && url.endsWith(`/tasks/${QUEUE_TASKS.myCreditReview}`);
     const named = isTask ? { ...(JSON.parse(answer.body) as Record<string, unknown>), name: task.title[locale], nodeId: task.node, assignee: 'role:CREDIT_MANAGER' } : undefined;
-    const body = named !== undefined ? JSON.stringify(patch !== undefined ? patch(named) : named) : answer.body;
+    // The history names the step the task sits on; the e2e task wears the loan step's id.
+    const entries = url.endsWith('/activities') ? JSON.parse(answer.body) as { entries: Record<string, unknown>[] } : undefined;
+    const aged = entries === undefined ? undefined : { ...entries, entries: entries.entries.map((entry) => (entry['type'] === 'TASK_COMPLETED' ? (history ?? ((e) => e))({ ...entry, nodeId: task.node }) : entry)) };
+    const body = aged !== undefined ? JSON.stringify(aged) : named !== undefined ? JSON.stringify(patch !== undefined ? patch(named) : named) : answer.body;
     await route.fulfill({ status: answer.status, headers: { ...answer.headers, 'content-length': String(Buffer.byteLength(body)) }, body });
   });
   await page.goto(`./#/tasks/${QUEUE_TASKS.myCreditReview}`);
@@ -132,4 +136,97 @@ test('TR_UI_623_after_approval_the_result_is_shown', async ({ page }) => {
   await expect(page.getByText(L.en.done)).toBeVisible();
   await expect(page.getByRole('link', { name: /Back to/ })).toBeVisible();
   await page.screenshot({ path: `${SHOTS}/loan-approval-result-1440-en-v3.png`, fullPage: false });
+});
+
+
+for (const size of SIZES) {
+  test(`TR_UI_663_a_completed_task_shows_the_recorded_decision_${String(size.width)}`, async ({ page }) => {
+    await openLoanTask(page, 'approval', size, 'en');
+    await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+    await page.getByRole('button', { name: 'Complete task' }).click();
+    const record = page.getByRole('article', { name: 'Recorded decision' });
+    await expect(record).toBeVisible();
+    // Who and when, then the decision as the engine recorded it, with no form and no action to take.
+    await expect(record).toContainText(/Completed by Lê Thị An at /);
+    await expect(record.locator('dt', { hasText: 'Your decision' })).toBeVisible();
+    await expect(record.locator('dd').first()).toContainText('Approve');
+    await expect(page.getByText('now on the case')).toHaveCount(0);
+    await expect(page.getByRole('form')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Complete task' })).toHaveCount(0);
+    await expect(record.getByText('APPROVED', { exact: true })).toHaveCount(0);
+    await expect(record.getByText('***')).toHaveCount(0);
+    await expect(record.getByText('Not recorded:', { exact: false })).toHaveCount(0);
+    expect(await noHorizontalScroll(page)).toBe(true);
+    await page.screenshot({ path: `${SHOTS}/recorded-${String(size.width)}.png`, fullPage: false });
+  });
+}
+
+test('TR_UI_663_hidden_fields_and_paths_not_recorded_read_in_plain_text', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'en', undefined, (entry) => ({
+    ...entry, submission: { ...(entry['submission'] as object), applicantId: { masked: true } }, unrecordedFields: ['note', 'address.floor'],
+  }));
+  await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+  await page.getByRole('button', { name: 'Complete task' }).click();
+  const record = page.getByRole('article', { name: 'Recorded decision' });
+  await expect(record.getByText('Not recorded: Note, Address › Floor')).toBeVisible();
+  await expect(record.getByText('Not recorded: Note, Address › Floor')).toHaveCSS('border-top-width', '0px');
+  await page.screenshot({ path: `${SHOTS}/recorded-notes-1440.png`, fullPage: false });
+});
+
+test('TR_UI_663_a_task_completed_before_it_was_recorded_falls_back_to_current_values', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'en', undefined, (entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'submission')));
+  await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+  await page.getByRole('button', { name: 'Complete task' }).click();
+  const record = page.getByRole('article', { name: 'Current values' });
+  await expect(record).toBeVisible();
+  await expect(record.getByText('The submitted values are not available. These are the values now on the case.')).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Recorded decision' })).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/recorded-fallback-1440.png`, fullPage: false });
+});
+
+test('TR_UI_663_a_completed_task_reads_in_vietnamese', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'vi', (task) => ({ ...task, status: 'COMPLETED', completedBy: 'an', completedAt: '2026-11-20T03:20:00Z', allowedActions: [] }));
+  // The history holds no record of this task (it was not completed here), so the view says so in words.
+  const record = page.getByRole('article', { name: 'Giá trị hiện tại' });
+  await expect(record).toBeVisible();
+  await expect(record).toContainText('Lê Thị An đã hoàn thành lúc');
+  await expect(page.getByRole('form')).toHaveCount(0);
+});
+
+test('TR_UI_663_the_recorded_decision_reads_in_vietnamese', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'vi');
+  await page.getByRole('radio', { name: 'Phê duyệt', exact: true }).check();
+  await page.getByRole('button', { name: 'Hoàn thành tác vụ' }).click();
+  const record = page.getByRole('article', { name: 'Quyết định đã ghi nhận' });
+  await expect(record).toBeVisible();
+  await expect(record.locator('dd').first()).toContainText('Phê duyệt');
+  await expect(record.getByText('Khoản vay được định giá và gửi đề nghị.')).toBeVisible();
+  await page.screenshot({ path: `${SHOTS}/recorded-1440-vi.png`, fullPage: false });
+});
+
+test('TR_UI_663_one_view_shows_hidden_option_labels_consequences_units_and_money_together', async ({ page }) => {
+  // The proposal form with one masked field the case already holds.
+  const withId = (declared: QueueForm): QueueForm => {
+    if (!('schema' in declared)) return declared;
+    const schema = declared.schema as { properties: Record<string, unknown> };
+    const hints = declared.hints as { order: string[]; labels: Record<string, unknown> };
+    return {
+      schema: { ...schema, properties: { ...schema.properties, applicantId: { type: 'string', mask: true } } },
+      hints: { ...hints, order: [...hints.order, 'applicantId'], labels: { ...hints.labels, applicantId: { en: 'Applicant ID number', vi: 'Số định danh' } } },
+      data: { applicantId: '***' },
+    };
+  };
+  await openLoanTask(page, 'proposal', { width: 1440, height: 900 }, 'en', undefined, undefined, withId);
+  await page.getByLabel(L.en.amount).fill('900000000');
+  await page.getByLabel(L.en.term).fill('24');
+  await page.getByRole('radio', { name: L.en.approveRec }).check();
+  await page.getByRole('button', { name: 'Complete task' }).click();
+  const record = page.getByRole('article', { name: 'Recorded decision' });
+  await expect(record.getByText('Hidden')).toBeVisible();
+  await expect(record.getByText('Recommend approval')).toBeVisible();
+  await expect(record.getByText('Goes to an approver.')).toBeVisible();
+  await expect(record.getByText('24 months')).toBeVisible();
+  await expect(record.getByText('900,000,000 VND')).toBeVisible();
+  await expect(record.getByText('APPROVE', { exact: true })).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/recorded-full.png`, fullPage: false });
 });

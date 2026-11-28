@@ -13,7 +13,7 @@ import org.springframework.context.SmartLifecycle;
 
 /**
  * Moves queued decisions into the decision log every {@code decision-log.async.poll-interval}, on a daemon thread of
- * its own, on every replica, when the host runs {@code decision-log.mode: async} (RLE-230). Replicas may run together:
+ * its own, on every replica, when the host runs {@code decision-log.mode: async} (RLE-234). Replicas may run together:
  * a batch locks its rows with {@code SKIP LOCKED}. It starts when the application context is ready, after the schema
  * is current, drains whatever is queued, and on shutdown moves what it can before it stops, so a clean stop leaves an
  * empty queue; a decision a stopped host leaves behind stays queued, durable, for the next run on any replica.

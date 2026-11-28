@@ -4,6 +4,7 @@ import io.github.dhluong90.bpm.process.api.AgentReplayCase;
 import io.github.dhluong90.bpm.process.api.AgentReplayRun;
 import io.github.dhluong90.bpm.process.internal.json.Values;
 import io.github.dhluong90.bpm.process.internal.store.AgentReplayStore;
+import io.github.dhluong90.bpm.process.internal.store.VariableVault;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -37,11 +38,24 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
 
     private static final String ANSWERS_WHERE = ProcessListQueries.ANSWERS_WHERE;
 
+    /** The most answers searched for a schema when payloads are sealed. */
+    private static final int SCHEMA_SCAN_LIMIT = 500;
+
     private final JdbcClient jdbc;
+    private final VariableVault vault;
 
     /** @param dataSource the host's data source */
     public JdbcAgentReplayStore(DataSource dataSource) {
+        this(dataSource, VariableVault.NONE);
+    }
+
+    /**
+     * @param dataSource the host's data source
+     * @param vault opens the sealed history members and job payloads the recorded answers are read from
+     */
+    public JdbcAgentReplayStore(DataSource dataSource, VariableVault vault) {
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
+        this.vault = Objects.requireNonNull(vault, "vault must not be null");
     }
 
     @Override
@@ -53,11 +67,29 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
     @Override
     public Optional<Map<String, Object>> latestRecordedSchema(String tenant, String definitionKey, String nodeId,
             Instant from, Instant to) {
-        return jdbc.sql("SELECT (j.payload->'guard'->'outputSchema')::text " + ANSWERS_WHERE.replace("WHERE",
-                        "JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' WHERE")
-                        + "AND j.payload->'guard'->'outputSchema' IS NOT NULL ORDER BY h.occurred_at DESC, h.id DESC LIMIT 1")
-                .params(tenant, definitionKey, nodeId, ts(from), ts(to)).query(String.class).optional()
-                .map(Values::readMap);
+        // A sealed payload cannot be searched in SQL, so the guard of each answer is read after it is opened, newest
+        // first, and the search stops at the first answer that carries a schema.
+        String join = ANSWERS_WHERE.replace("WHERE",
+                "JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' WHERE");
+        if (!vault.active()) {
+            return jdbc.sql("SELECT (j.payload->'guard'->'outputSchema')::text " + join
+                            + "AND j.payload->'guard'->'outputSchema' IS NOT NULL "
+                            + "ORDER BY h.occurred_at DESC, h.id DESC LIMIT 1")
+                    .params(tenant, definitionKey, nodeId, ts(from), ts(to)).query(String.class).optional()
+                    .map(Values::readMap);
+        }
+        List<String[]> payloads = ProcessListQueries.RECORDED_PAYLOADS.list(jdbc,
+                List.of(tenant, definitionKey, nodeId, ts(from), ts(to), SCHEMA_SCAN_LIMIT),
+                (rs, n) -> new String[] {rs.getString("job_id"), rs.getString("payload")});
+        for (String[] row : payloads) {
+            Object guard = Values.readMap(vault.openDocument(tenant, "job/" + row[0], row[1])).get("guard");
+            if (guard instanceof Map<?, ?> g && g.get("outputSchema") instanceof Map<?, ?>) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> schema = (Map<String, Object>) g.get("outputSchema");
+                return Optional.of(schema);
+            }
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -70,26 +102,41 @@ public final class JdbcAgentReplayStore implements AgentReplayStore {
         }
         params.add(limit);
         ListQuery query = afterAt == null ? ProcessListQueries.RECORDED_ANSWERS : ProcessListQueries.RECORDED_ANSWERS_AFTER;
-        return query.list(jdbc, params, (rs, n) -> new RecordedAnswer(instant(rs, "occurred_at"), rs.getString("id"),
-                rs.getString("instance_id"), rs.getString("event_type"), rs.getString("attempt_id"),
-                Values.readMap(rs.getString("details")), rs.getString("payload") == null ? null
-                        : Values.readMap(rs.getString("payload"))));
+        return query.list(jdbc, params, (rs, n) -> {
+            Map<String, Object> details = Values.readMap(
+                    vault.openMembers(tenant, "history/" + rs.getString("id"), rs.getString("details")));
+            String payload = rs.getString("payload");
+            return new RecordedAnswer(instant(rs, "occurred_at"), rs.getString("id"), rs.getString("instance_id"),
+                    rs.getString("event_type"), rs.getString("attempt_id"), details,
+                    payload == null ? null : Values.readMap(vault.openDocument(tenant, "job/" + details.get("jobId"),
+                            payload)));
+        });
     }
 
     @Override
     public Set<String> overriddenAttempts(String tenant, Collection<String> instanceIds, Collection<String> attemptIds) {
         return ProcessListQueries.OVERRIDDEN_ATTEMPTS.list(jdbc,
                 List.of(tenant, instanceIds.toArray(String[]::new), attemptIds.toArray(String[]::new)),
-                (rs, n) -> rs.getString("attempt_id")).stream()
-                .collect(java.util.stream.Collectors.toCollection(HashSet::new));
+                (rs, n) -> keptValueChanged(vault.openMembers(tenant, "history/" + rs.getString("id"),
+                        rs.getString("details"))) ? rs.getString("attempt_id") : null).stream()
+                .filter(Objects::nonNull).collect(java.util.stream.Collectors.toCollection(HashSet::new));
+    }
+
+    /** True when a field whose recorded value was kept was changed; a masked field ({@code ***}) cannot be compared. */
+    private static boolean keptValueChanged(String detailsJson) {
+        if (!(Values.readMap(detailsJson).get("changes") instanceof Map<?, ?> changes)) {
+            return false;
+        }
+        return changes.values().stream().anyMatch(c -> !(c instanceof Map<?, ?> m && "***".equals(m.get("from"))));
     }
 
     @Override
     public Optional<Map<String, Object>> recordedDetails(String tenant, String instanceId, String attemptId) {
-        return jdbc.sql("SELECT details::text FROM pre_history WHERE tenant_id = ? AND instance_id = ? "
+        return jdbc.sql("SELECT id, details::text FROM pre_history WHERE tenant_id = ? AND instance_id = ? "
                         + "AND attempt_id = ? AND event_type IN ('ASYNC_RESULT_ACCEPTED','ASYNC_RESULT_REFUSED') "
                         + "ORDER BY occurred_at DESC, id DESC LIMIT 1")
-                .params(tenant, instanceId, attemptId).query(String.class).optional().map(Values::readMap);
+                .params(tenant, instanceId, attemptId).query((rs, n) -> Values.readMap(
+                        vault.openMembers(tenant, "history/" + rs.getString(1), rs.getString(2)))).optional();
     }
 
     @Override

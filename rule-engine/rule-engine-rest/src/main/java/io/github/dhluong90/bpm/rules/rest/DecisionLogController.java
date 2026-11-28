@@ -241,7 +241,7 @@ public class DecisionLogController {
 
     /**
      * {@code GET /decision-log/dead-letters}: decisions the asynchronous decision log could not write after its
-     * attempts, with the state of any request an operator made on them (RLE-231). Needs {@code rules:log:read}.
+     * attempts, with the state of any request an operator made on them (RLE-235). Needs {@code rules:log:read}.
      */
     @GetMapping("/decision-log/dead-letters")
     public ResponseEntity<byte[]> deadLetters(@RequestParam(value = "limit", defaultValue = "100") int limit) {

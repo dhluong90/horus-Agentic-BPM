@@ -5,7 +5,7 @@
 > - demo users share one password and may sign in with HTTP Basic, and `hoa` may both author and approve;
 > - traffic is plain HTTP on 127.0.0.1, with no TLS;
 > - the host connects as the database owner, which also runs the migrations (a role without superuser rights);
-> - there is one instance of each service, and no backups.
+> - there is one instance of each service, and no backups. Backup, restore and the recovery drill are in [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md).
 >
 > For anything shared, start from [Run without demo users](#run-without-demo-users). The host logs a `WARN` at start-up while demo users are on.
 
@@ -299,7 +299,7 @@ PASS  no high or critical vulnerability in horus-bpm/rule-engine-only:local (rep
 | Runtime | Alpine 3.24 reduced to musl and busybox (no package manager, no OpenSSL), Temurin JRE 21.0.13.1 checked against the Adoptium GPG signature and a pinned SHA-256 per architecture |
 | Architectures | `linux/amd64` and `linux/arm64`, built natively; the Deploy workflow builds, smoke-tests and scans both |
 | User | `horus`, uid and gid 10001; the container runs with a read-only root file system, `/tmp` in memory (64 MB, `noexec`, `nosuid`, `nodev`), all capabilities dropped, at most 512 processes |
-| Health check | `wget` on `http://127.0.0.1:$PORT/actuator/health` every 10 seconds, after a 60-second start period |
+| Health check | `wget` on `http://127.0.0.1:$PORT/actuator/health` (`$MANAGEMENT_SERVER_PORT` when set) every 10 seconds, after a 60-second start period |
 | Layers | one base layer, then the Spring Boot layers: dependencies, loader, snapshot dependencies, application |
 | Secrets | none; `.dockerignore` keeps `.env`, `secrets/`, keys and build output out of the build context |
 | Size | about 82 MB |
@@ -429,6 +429,10 @@ services:
 ```
 
 The host refuses to start with an issuer and no audience, and refuses the `dev` profile with an issuer that is not on this machine.
+
+## Metrics, alerts and dashboards
+
+An optional compose profile runs Prometheus and Grafana beside the host, with alert rules and three dashboards: see [OBSERVABILITY.md](OBSERVABILITY.md).
 
 ## Rate limits and account lockout
 

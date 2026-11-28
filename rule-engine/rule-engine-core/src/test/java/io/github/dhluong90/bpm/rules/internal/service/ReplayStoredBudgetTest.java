@@ -17,7 +17,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * RLE-229: a decision logs the limits it ran with and whether it hit one, and a replay uses those stored values and
+ * RLE-233: a decision logs the limits it ran with and whether it hit one, and a replay uses those stored values and
  * the stored outcome, never the limits of the replaying host and never its wall clock.
  */
 class ReplayStoredBudgetTest {
@@ -49,7 +49,7 @@ class ReplayStoredBudgetTest {
     }
 
     @Test
-    void RLE_229_a_decision_logs_the_step_budget_and_time_backstop_it_ran_with() {
+    void RLE_233_a_decision_logs_the_step_budget_and_time_backstop_it_ran_with() {
         publishLoyaltyScore();
 
         DecisionResult result = engines(withLimits(new EvaluationLimits(500, 7_000))).ruleEngine()
@@ -63,7 +63,7 @@ class ReplayStoredBudgetTest {
     }
 
     @Test
-    void RLE_229_a_step_failure_replays_as_a_step_failure_on_a_host_with_a_larger_budget() {
+    void RLE_233_a_step_failure_replays_as_a_step_failure_on_a_host_with_a_larger_budget() {
         // Given a decision that failed on a step budget of 10
         publishLoyaltyScore();
         DecisionResult failed = engines(withLimits(new EvaluationLimits(10, 10_000))).ruleEngine()
@@ -81,7 +81,7 @@ class ReplayStoredBudgetTest {
     }
 
     @Test
-    void RLE_229_a_decision_that_passed_replays_as_passed_on_a_host_with_a_smaller_budget() {
+    void RLE_233_a_decision_that_passed_replays_as_passed_on_a_host_with_a_smaller_budget() {
         publishLoyaltyScore();
         DecisionResult passed = engines(withLimits(EvaluationLimits.defaults())).ruleEngine()
                 .evaluate("loyalty-score", DecisionInput.of(Map.of("tier", "GOLD")));
@@ -94,7 +94,7 @@ class ReplayStoredBudgetTest {
     }
 
     @Test
-    void RLE_229_a_decision_the_clock_stopped_replays_its_stored_failure_not_the_replaying_machines_clock() {
+    void RLE_233_a_decision_the_clock_stopped_replays_its_stored_failure_not_the_replaying_machines_clock() {
         // Given a decision the time backstop stopped: the row says TIME and the 5 ms it ran with, although the table
         // is small enough to pass on any machine
         publishLoyaltyScore();
@@ -120,7 +120,7 @@ class ReplayStoredBudgetTest {
     }
 
     @Test
-    void RLE_229_a_replay_never_checks_the_clock_even_with_the_smallest_backstop() {
+    void RLE_233_a_replay_never_checks_the_clock_even_with_the_smallest_backstop() {
         // The recorded backstop is 1 ms; a replay of a decision that passed must still pass: the check is off
         publishLoyaltyScore();
         DecisionResult passed = engines(withLimits(new EvaluationLimits(100_000, 1))).ruleEngine()
