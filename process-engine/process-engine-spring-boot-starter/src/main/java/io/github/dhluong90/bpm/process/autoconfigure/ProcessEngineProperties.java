@@ -20,6 +20,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param migrateOnStart apply the {@code pre_*} migrations at start-up, recorded in {@code pre_schema_history}
  * @param definitions definition import settings
  * @param idempotencyRetention how long an idempotency record answers replays
+ * @param idempotency the wait of a request on a key another request holds (#172)
  * @param security mapping of the host's roles to engine permissions
  * @param handlers local step settings
  * @param jobs timer and job settings
@@ -48,6 +49,7 @@ public record ProcessEngineProperties(
         @DefaultValue("true") boolean migrateOnStart,
         @DefaultValue Definitions definitions,
         @DefaultValue("PT24H") Duration idempotencyRetention,
+        @DefaultValue Idempotency idempotency,
         @DefaultValue Security security,
         @DefaultValue Handlers handlers,
         @DefaultValue Jobs jobs,
@@ -198,6 +200,22 @@ public record ProcessEngineProperties(
      *     fields elsewhere
      */
     public record Classification(@DefaultValue("true") boolean warnUnclassified) {
+    }
+
+    /**
+     * @param lockTimeout the longest a request waits for an idempotency key another request still holds, before it
+     *     gets {@code 409 IDEMPOTENCY_IN_FLIGHT} with {@code Retry-After: 1}; 1 millisecond to 2 seconds (the default),
+     *     lowered only, because a waiting request holds a pool connection
+     */
+    public record Idempotency(@DefaultValue("PT2S") Duration lockTimeout) {
+
+        public Idempotency {
+            if (lockTimeout == null || lockTimeout.compareTo(Duration.ofMillis(1)) < 0
+                    || lockTimeout.compareTo(Duration.ofSeconds(2)) > 0) {
+                throw new IllegalArgumentException("horus.bpm.processes.idempotency.lock-timeout must be between 1 "
+                        + "millisecond and 2 seconds, was " + lockTimeout);
+            }
+        }
     }
 
     public ProcessEngineProperties {

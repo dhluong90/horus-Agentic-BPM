@@ -528,6 +528,7 @@ export const vi: Record<MessageKey, string> = {
   'node.complexGateway': 'Cổng phức hợp',
   'node.adHocSubProcess': 'Tiểu quy trình tùy biến',
   'node.multiple': 'Sự kiện nhiều loại',
+  'node.intermediateEvent': 'Sự kiện trung gian',
   'node.parallelMultiple': 'Sự kiện nhiều loại song song',
   'node.timer': 'Hẹn giờ',
   'node.eventSubProcess': 'Tiểu quy trình sự kiện',

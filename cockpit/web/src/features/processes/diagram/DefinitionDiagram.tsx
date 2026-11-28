@@ -13,7 +13,7 @@ import {
   MIN_SCALE,
   SYMBOL_SIZE,
   symbolCentre,
-  CLOSED_CONTAINER_EXTRA,
+  CLOSED_CONTAINER_EXTRA, MARKER_ROW,
   TASK_TEXT,
   TYPE_INDENT,
   type PlacedDataItem,
@@ -130,6 +130,17 @@ function defaultMark(points: readonly Point[]): string | undefined {
   return `M${(cx - uy * 6 - ux * 3).toFixed(1)} ${(cy + ux * 6 - uy * 3).toFixed(1)} L${(cx + uy * 6 + ux * 3).toFixed(1)} ${(cy - ux * 6 + uy * 3).toFixed(1)}`;
 }
 
+/** The small diamond at the start of a conditional flow that leaves an activity, the BPMN mark for "only when". */
+function conditionMark(points: readonly Point[]): string | undefined {
+  const [a, b] = points;
+  if (!a || !b) return undefined;
+  const length = Math.hypot(b.x - a.x, b.y - a.y) || 1;
+  const ux = (b.x - a.x) / length;
+  const uy = (b.y - a.y) / length;
+  const at = (along: number, across: number) => `${(a.x + ux * along - uy * across).toFixed(1)} ${(a.y + uy * along + ux * across).toFixed(1)}`;
+  return `M${at(0, 0)} L${at(6, 4)} L${at(12, 0)} L${at(6, -4)} Z`;
+}
+
 /** The glyph that names a mark beside its colour: a diff never rests on colour alone (WCAG 1.4.1). */
 const MARK_GLYPH: Record<Mark, string> = { added: '+', changed: '•', removed: '−' };
 
@@ -184,13 +195,15 @@ function MessageFlowLine({ flow, marker }: { flow: { id: string; label: string |
   );
 }
 
-function Edge({ edge, marker, defaultLabel, mark }: { edge: PlacedEdge; marker: string; defaultLabel: string; mark: Mark | undefined }) {
+function Edge({ edge, marker, defaultLabel, mark, fromGateway }: { edge: PlacedEdge; marker: string; defaultLabel: string; mark: Mark | undefined; fromGateway: boolean }) {
   const tick = edge.isDefault ? defaultMark(edge.points) : undefined;
+  const condition = edge.conditional === true && !edge.isDefault && !fromGateway && edge.isLink !== true && edge.isAssociation !== true ? conditionMark(edge.points) : undefined;
   const at = edge.labelAt;
   const pill = edge.label !== undefined ? Math.ceil(edge.label.length * LABEL_CHAR) + 14 : 0;
   return (
     <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}${edge.isAssociation === true ? ' dg-edge--association' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
       <path d={path(edge.points)} markerEnd={`url(#${marker}${mark !== undefined ? `-${mark}` : ''})`} />
+      {condition !== undefined ? <path className="dg-edge__condition" d={condition} data-condition="true" /> : null}
       {tick !== undefined ? <path className="dg-edge__default" d={tick}><title>{defaultLabel}</title></path> : null}
       {edge.label !== undefined && at ? (
         <g className="dg-edge__label">
@@ -274,7 +287,8 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
   const { padX, padY, nameLine, typeRow } = TASK_TEXT;
   const content = 2 * padY + node.lines.length * nameLine + node.typeLines.length * typeRow;
   // A closed sub-process keeps a row at the foot of its box for the count of its steps and the control that opens it.
-  const reserve = steps !== undefined ? CLOSED_CONTAINER_EXTRA : 0;
+  const marked = node.loop !== undefined || (node.compensation === true && node.type !== 'serviceTask:compensation');
+  const reserve = steps !== undefined ? CLOSED_CONTAINER_EXTRA : marked ? MARKER_ROW : 0;
   const top = node.y + padY + Math.max(0, (node.height - reserve - content) / 2);
   const typeTop = top + node.lines.length * nameLine;
   const extra = markProps(mark, picked);
@@ -282,6 +296,7 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
     <g className={`dg-node dg-node--${kind}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={10} />
+      {node.type === 'transaction' ? <rect className="dg-double" x={node.x + 3.5} y={node.y + 3.5} width={node.width - 7} height={node.height - 7} rx={7} /> : null}
       <text aria-hidden="true" className="dg-node__name" x={node.x + padX} y={top + 13}>
         {node.lines.map((line, index) => <tspan key={index} x={node.x + padX} dy={index === 0 ? 0 : nameLine}>{`${line} `}</tspan>)}
       </text>
@@ -289,7 +304,8 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
       <text aria-hidden="true" className="dg-node__type" x={node.x + padX + TYPE_INDENT} y={typeTop + 13}>
         {node.typeLines.map((line, index) => <tspan key={index} x={node.x + padX + TYPE_INDENT} dy={index === 0 ? 0 : typeRow}>{index < node.typeLines.length - 1 ? `${line} ` : line}</tspan>)}
       </text>
-      {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width / 2} cy={node.y + node.height - 11} /> : null}
+      {node.compensation === true && node.type !== 'serviceTask:compensation' ? <CompensationMarker cx={node.x + node.width / 2 - (node.loop !== undefined ? 14 : 4)} cy={node.y + node.height - 11} /> : null}
+      {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width / 2 + (node.compensation === true && node.type !== 'serviceTask:compensation' ? 10 : 0)} cy={node.y + node.height - 11} /> : null}
       <TriggerMark node={node} x={node.x + node.width - 28} y={node.y + 4} />
       {steps !== undefined ? <text aria-hidden="true" className="dg-node__steps" x={node.x + padX} y={node.y + node.height - 9}>{steps}</text> : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
@@ -311,6 +327,11 @@ function LoopMarker({ kind, cx, cy }: { kind: LoopKind; cx: number; cy: number }
       ? [-4, 0, 4].map((dy) => `M${(cx - half).toFixed(1)} ${(cy + dy).toFixed(1)}H${(cx + half).toFixed(1)}`).join('')
       : `M${(cx + 6).toFixed(1)} ${(cy - 2).toFixed(1)}A6.5 6.5 0 1 0 ${(cx + 4).toFixed(1)} ${(cy + 5).toFixed(1)}M${(cx + 6).toFixed(1)} ${(cy - 7).toFixed(1)}V${(cy - 2).toFixed(1)}H${(cx + 1).toFixed(1)}`;
   return <path className={`dg-loop dg-loop--${kind}`} data-loop={kind} aria-hidden="true" d={path} />;
+}
+
+/** BPMN's compensation marker, two triangles pointing left, at the foot of an activity that undoes another step. */
+function CompensationMarker({ cx, cy }: { cx: number; cy: number }) {
+  return <path className="dg-compensation" data-compensation="true" aria-hidden="true" d={`M${(cx).toFixed(1)} ${(cy - 5).toFixed(1)}L${(cx - 7).toFixed(1)} ${cy.toFixed(1)}L${(cx).toFixed(1)} ${(cy + 5).toFixed(1)}ZM${(cx + 7).toFixed(1)} ${(cy - 5).toFixed(1)}L${cx.toFixed(1)} ${cy.toFixed(1)}L${(cx + 7).toFixed(1)} ${(cy + 5).toFixed(1)}Z`} />;
 }
 
 /** The control that opens or closes a sub-process in place: a small square with a plus or a minus, reachable by keyboard. */
@@ -351,7 +372,9 @@ function Frame({ node, label, interaction, onToggle, toggleLabel }: { node: Plac
     <g className={`dg-frame${interaction.selected ? ' dg-frame--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}`} data-node={node.id} data-type={node.type} data-open="true" tabIndex={0} aria-label={label} {...interactive(interaction)}>
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={12} />
+      {node.type === 'transaction' ? <rect className="dg-double" x={node.x + 4} y={node.y + 4} width={node.width - 8} height={node.height - 8} rx={9} /> : null}
       <text aria-hidden="true" className="dg-frame__name" x={node.x + FRAME_PAD} y={node.y + FRAME_HEADER - 11}>{node.name ?? node.id}</text>
+      {node.compensation === true ? <CompensationMarker cx={node.x + node.width - FRAME_PAD - 86} cy={node.y + 15} /> : null}
       {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width - FRAME_PAD - 38} cy={node.y + 15} /> : null}
       <TriggerMark node={node} x={node.x + node.width - FRAME_PAD - 18 - 30} y={node.y + 2} />
       <Toggle x={node.x + node.width - FRAME_PAD - 18} y={node.y + 6} open label={toggleLabel} onToggle={onToggle} />
@@ -384,11 +407,14 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
           <path d={`M${String(centre.x)} ${String(centre.y - GATEWAY_HALF)} L${String(centre.x + GATEWAY_HALF)} ${String(centre.y)} L${String(centre.x)} ${String(centre.y + GATEWAY_HALF)} L${String(centre.x - GATEWAY_HALF)} ${String(centre.y)} Z`} />
           {glyph !== undefined ? <text x={centre.x} y={centre.y + 7} textAnchor="middle" className="dg-node__glyph" aria-hidden="true">{glyph}</text> : null}
           {node.type === 'eventBasedGateway' ? (
-            // #495: a double ring around a pentagon, the symbol of a gateway that waits for the first of several events.
-            <g className="dg-node__event-gateway" aria-hidden="true">
+            // #495: a ring around a pentagon, the symbol of a gateway that waits for the first of several events. A double ring
+            // waits inside a running process; a single ring starts the process. A plus replaces the pentagon when it waits for all.
+            <g className="dg-node__event-gateway" aria-hidden="true" data-parallel={String(node.eventGateway?.parallel === true)} data-instantiate={String(node.eventGateway?.instantiate === true)}>
               <circle cx={centre.x} cy={centre.y} r={11} />
-              <circle cx={centre.x} cy={centre.y} r={8.5} />
-              <path d={`M${String(centre.x)} ${String(centre.y - 5.5)} L${String(centre.x + 5.2)} ${String(centre.y - 1.7)} L${String(centre.x + 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 5.2)} ${String(centre.y - 1.7)} Z`} />
+              {node.eventGateway?.instantiate === true ? null : <circle cx={centre.x} cy={centre.y} r={8.5} />}
+              {node.eventGateway?.parallel === true
+                ? <path d={`M${String(centre.x)} ${String(centre.y - 6)} V${String(centre.y + 6)} M${String(centre.x - 6)} ${String(centre.y)} H${String(centre.x + 6)}`} />
+                : <path d={`M${String(centre.x)} ${String(centre.y - 5.5)} L${String(centre.x + 5.2)} ${String(centre.y - 1.7)} L${String(centre.x + 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 3.2)} ${String(centre.y + 4.5)} L${String(centre.x - 5.2)} ${String(centre.y - 1.7)} Z`} />}
             </g>
           ) : null}
         </>
@@ -466,6 +492,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
   // #497: pools, lanes and message flows are drawn around the laid-out steps, read only.
   const collaboration = useMemo(() => placeCollaboration(plain, graph), [plain, graph]);
   const layout = collaboration?.layout ?? plain;
+  const gateways = useMemo(() => new Set(layout.nodes.filter((node) => node.shape === 'gateway').map((node) => node.id)), [layout]);
   const [zoom, setZoom] = useState<Zoom>('fit');
   const frame = useRef<HTMLDivElement>(null);
   const [canvas, setCanvas] = useState<{ width: number; height: number } | undefined>(undefined);
@@ -626,7 +653,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
             {collaboration !== undefined ? (
               <g>{collaboration.flows.map((flow) => <MessageFlowLine key={flow.id} flow={flow} marker={marker} />)}</g>
             ) : null}
-            <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
+            <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} fromGateway={gateways.has(edge.source)} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
             {layout.data !== undefined ? (
               <g className="dg-data-layer">
                 {layout.data.links.map((link) => <DataLine key={link.id} link={link} marker={marker} />)}

@@ -703,6 +703,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                 active ? DEV_APPROVER : null, active ? now : null);
         store.insertDefinition(stored);
+        if (active) {
+            recordApproval(stored);
+        }
         if (layout != null) {
             // #445: revision 1, from the file's own diagram, in the transaction of the import.
             importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
@@ -846,6 +849,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             String approver = self ? DEV_APPROVER : caller;
             StoredDefinition updated = current.approved(approver, now, effective, note);
             write(updated);
+            recordApproval(updated);
             Map<String, Object> approvedDetails = new LinkedHashMap<>();
             approvedDetails.put("sourceHash", updated.sourceHash());
             approvedDetails.put("readerVersion", READER_VERSION);
@@ -1089,6 +1093,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (d.lockVersion() != expected) {
             throw new VersionConflictException(d.key() + " v" + d.version() + " is at lock version " + d.lockVersion());
         }
+    }
+
+    /** #172: the hashes approved, kept apart from the version row, which the integrity check compares with. */
+    private void recordApproval(StoredDefinition approved) {
+        store.recordApproval(new ProcessStore.DefinitionApproval(approved.tenantId(), approved.id(),
+                approved.approvedBy(), approved.approvedAt(), approved.sourceHash(), approved.definitionHash()));
     }
 
     private void write(StoredDefinition updated) {
@@ -5880,6 +5890,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 : reader.apply(source);
         if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
             throw integrityFailed(definition, "the stored source no longer gives the recorded definition hash");
+        }
+        if (definition.approvedBy() != null) {
+            // #172: row, source and both hashes may have been rewritten together; the approval record was not.
+            ProcessStore.DefinitionApproval approval = store.approval(definition.tenantId(), definition.id())
+                    .orElseThrow(() -> integrityFailed(definition, "the version has no approval record"));
+            if (!approval.sourceHash().equals(definition.sourceHash())
+                    || !approval.definitionHash().equals(definition.definitionHash())) {
+                throw integrityFailed(definition, "the stored hashes differ from the hashes approved");
+            }
         }
         return process;
     }

@@ -10,6 +10,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.DayOfWeek;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -38,10 +39,21 @@ public final class JdbcCalendarStore implements CalendarStore {
     private static final String CHANGE_COLUMNS = ProcessListQueries.CALENDAR_CHANGE_COLUMNS;
 
     private final JdbcClient jdbc;
+    private final Duration idempotencyLockTimeout;
 
     /** @param dataSource the host's data source */
     public JdbcCalendarStore(DataSource dataSource) {
+        this(dataSource, JdbcProcessStore.DEFAULT_IDEMPOTENCY_LOCK_TIMEOUT);
+    }
+
+    /**
+     * @param dataSource the host's data source
+     * @param idempotencyLockTimeout the longest a request waits for an idempotency key another request holds
+     *     (#172); longer is {@code 409 IDEMPOTENCY_IN_FLIGHT}
+     */
+    public JdbcCalendarStore(DataSource dataSource, Duration idempotencyLockTimeout) {
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
+        this.idempotencyLockTimeout = Objects.requireNonNull(idempotencyLockTimeout, "idempotencyLockTimeout");
     }
 
     @Override
@@ -203,13 +215,13 @@ public final class JdbcCalendarStore implements CalendarStore {
     @Override
     public boolean claimIdempotency(String tenant, String operation, String key, String requestHash,
             Instant expiresAt, Instant now) {
-        return jdbc.sql("INSERT INTO pre_idempotency (tenant_id, operation, idempotency_key, request_hash, status, "
+        return IdempotencyClaim.run(jdbc, idempotencyLockTimeout, () -> jdbc.sql("INSERT INTO pre_idempotency (tenant_id, operation, idempotency_key, request_hash, status, "
                         + "response_body, expires_at) VALUES (?, ?, ?, ?, 'PENDING', NULL, ?) "
                         + "ON CONFLICT (tenant_id, operation, idempotency_key) DO UPDATE SET "
                         + "request_hash = EXCLUDED.request_hash, status = 'PENDING', response_body = NULL, "
                         + "expires_at = EXCLUDED.expires_at WHERE pre_idempotency.expires_at <= ?")
                 .params(tenant, operation, key, requestHash, ts(expiresAt), ts(now))
-                .update() == 1;
+                .update() == 1);
     }
 
     @Override

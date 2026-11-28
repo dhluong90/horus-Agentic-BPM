@@ -11,7 +11,7 @@ export interface Rect { x: number; y: number; width: number; height: number }
 const CHAR = 6.8;
 const PILL_PAD = 14;
 const PILL_HEIGHT = 20;
-const GAPS = [6, 14, 26, 38] as const;
+const GAPS = [6, 14, 26, 38, 50] as const;
 const SHIFT = 8;
 const REACH = 12;
 
