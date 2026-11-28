@@ -27,7 +27,7 @@ The step catalogue (`GET /step-catalogue`) lists each rule set with its inputs a
 
 ## The expression language and its limits
 
-Conditions on flows and rule cells use one expression language. It follows FEEL where it overlaps, so a rule gives the same result in a FEEL implementation on the overlap, but it is a subset:
+Conditions on flows and rule cells use one expression language. It follows FEEL where it overlaps, so a rule gives the same result as a FEEL implementation on the overlap, but it is a subset:
 
 - Data only: no method calls, no reflection, no network or file access. An unknown function is refused at import.
 - Money is a first-class type with a currency: `10000 VND`. Money of two currencies compared is an error, never `false`.
