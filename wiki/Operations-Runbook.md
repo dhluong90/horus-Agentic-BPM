@@ -281,7 +281,7 @@ Never update `pre_timer` by hand. The claim and the fire are fenced by an attemp
 
 The alert fires on volume. A few refusals after a sender retry are normal; a sustained rate is a sender that uses the wrong key. See [[Guide: messages, signals and timers|Guide-Messages-Signals-and-Timers]].
 
-### Decision log backlog (`DECISION_LOG_BACKLOG`)
+### Decision log backlog (`DECISION_LOG_BACKLOG`) (from 1.1, not in 1.0.x)
 
 The code `DECISION_LOG_BACKLOG` is not in this release. It belongs to the asynchronous decision log (`decision-log.mode: async`, [#45](https://github.com/dhluong90/horus-Agentic-BPM/issues/45)), which is not built: today the engine writes each decision row in the caller's transaction, so no queue of unwritten decisions can build up. This section will describe the backlog once that mode ships.
 
@@ -386,6 +386,8 @@ BEGIN
 END $$;
 ```
 
+Tables the host creates later are not covered until the script runs again. Run this script again as `horus_owner` after any change that adds a table, or set a default for future tables with `ALTER DEFAULT PRIVILEGES FOR ROLE horus_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO horus_app;` and then rerun the script so append-only tables are tightened.
+
 The host's own tables (for example an outbox) are granted by step 1 as well. If one of them must be append-only too, revoke its rights after this script.
 
 ### Check the grants
@@ -460,7 +462,7 @@ Check: this prints 14 rows on the day you first run it (13 months and the defaul
 SELECT count(*) FROM pg_inherits WHERE inhparent = 'rle_decision'::regclass;
 ```
 
-**Known gap: retention.** With `decision-log.retention` set, the engine drops expired months and records each drop in `rle_decision_log_drop`. That is a `DROP TABLE`, so under the two-role set-up it fails and the old months are kept (nothing is lost). Until the maintainers provide an owner-side drop that writes the same record, set `keep-forever` and manage old months with your own archive process. Status: to be decided by the maintainers.
+**Known gap: retention.** With `decision-log.retention` set, the engine drops expired months and records each drop in `rle_decision_log_drop`. That is a `DROP TABLE`, so under the two-role set-up it fails and the old months are kept (nothing is lost). Until the maintainers provide an owner-side drop that writes the same record, set `keep-forever` and manage old months with your own archive process. Status: the retention-drop procedure is to be decided by the maintainers; tracked separately.
 
 These statements were run on PostgreSQL 16 against the engines' migrations `V1` and `V2` (Rule Engine and Process Engine). They have not been run through a full host start-up with the two roles, so rehearse them as listed in the [rehearsal log](#rehearsal-log).
 
