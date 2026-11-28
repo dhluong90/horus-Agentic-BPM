@@ -2855,7 +2855,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Kind:** contract
 - **Given:** A process with no `isExecutable` attribute, and one with `isExecutable="false"`.
 - **When:** Each is imported.
-- **Then:** BPMN leaves the attribute open when it is absent, and a modeller that never writes it is not saying "do not run": the first imports. `isExecutable="false"` is the author's word and stays `NOT_EXECUTABLE`; in a collaboration it is a pool kept for display. `horus:resultVariable` on a user task and `horus:correlationKey` on a message wait stay required: a result with no variable would merge into every process variable, and a message with no key could reach any instance.
+- **Then:** BPMN leaves the attribute open when it is absent, and a modeller that never writes it is not saying "do not run": the first imports, and `warnings` lists `EXECUTABLE_ASSUMED` so the approver sees that the attribute was assumed. `isExecutable="false"` is the author's word and stays `NOT_EXECUTABLE`; in a collaboration it is a pool kept for display. `horus:resultVariable` on a user task and `horus:correlationKey` on a message wait stay required: a result with no variable would merge into every process variable, and a message with no key could reach any instance.
 - **Example:** `<process id="kyc-review">` -> imports; `isExecutable="false"` -> `NOT_EXECUTABLE`.
 - **Test ID:** `PRE_388_a_process_that_does_not_say_isExecutable_is_executable_and_false_stays_refused` (`ModellerFileReadingTest`)
 

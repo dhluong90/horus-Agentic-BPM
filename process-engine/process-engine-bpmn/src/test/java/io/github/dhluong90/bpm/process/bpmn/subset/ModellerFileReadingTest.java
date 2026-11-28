@@ -138,6 +138,11 @@ class ModellerFileReadingTest {
     @Test
     void PRE_388_a_process_that_does_not_say_isExecutable_is_executable_and_false_stays_refused() {
         assertThat(codes(process("kyc-review", "", ""))).isEmpty();
+        assertThat(reader.readWithWarnings(process("kyc-review", "", "").getBytes(StandardCharsets.UTF_8)).warnings())
+                .extracting(DefinitionProblem::code).contains("EXECUTABLE_ASSUMED");
+        assertThat(reader.readWithWarnings(process("kyc-review", "isExecutable=\"true\"", "")
+                .getBytes(StandardCharsets.UTF_8)).warnings()).extracting(DefinitionProblem::code)
+                .doesNotContain("EXECUTABLE_ASSUMED");
         assertThat(codes(process("kyc-review", "isExecutable=\"false\"", ""))).contains("NOT_EXECUTABLE");
     }
 

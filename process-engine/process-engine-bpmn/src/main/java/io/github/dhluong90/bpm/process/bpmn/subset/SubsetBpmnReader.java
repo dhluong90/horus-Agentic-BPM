@@ -782,6 +782,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
             // BPMN leaves isExecutable open when it is absent; a process that does not say it is not executable is read as
             // executable, so a file from a modeller that never writes the attribute imports.
             boolean executable = !"false".equals(attr("isExecutable"));
+            if (attr("isExecutable") == null) {
+                warn("EXECUTABLE_ASSUMED", "has no isExecutable attribute and is read as executable", "process", rawId);
+            }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
             laneSink = new ArrayList<>();
