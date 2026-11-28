@@ -14,6 +14,7 @@ It extends the token table in [UX design section 6](../ux-design.md#6-design-tok
 ## Contents
 
 1. [Principles](#1-principles)
+   - [No chips](#no-chips)
 2. [Colour roles and the 60-30-10 balance](#2-colour-roles-and-the-60-30-10-balance)
 3. [New colour tokens](#3-new-colour-tokens)
 4. [Type scale](#4-type-scale)
@@ -51,7 +52,29 @@ Fonts stay system fonts only. Later sections give the same tokens in full; their
 - **One focal point per screen.** Each screen has one thing the eye lands on first and one primary action, visible at 1440x900 without scrolling.
 - **One hue, one meaning.** Colour marks state, never decoration. Every coloured state also has a word and an icon.
 - **The engine decides, the cockpit shows.** The page never computes a rule, a money amount or a status; it shows what the API returns.
-- **System grammar is locked.** The shell, type, spacing, radius, buttons, tables and pills are the same on every screen. Only each screen's centre piece (the rule table, the diff, the try-it result) gets its own treatment.
+- **No chips.** A rounded box that holds a border, a tinted fill and text is not allowed for status, counts, tags, metrics or legends. See [No chips](#no-chips).
+- **System grammar is locked.** The shell, type, spacing, radius, buttons, tables and status marks are the same on every screen. Only each screen's centre piece (the rule table, the diff, the try-it result) gets its own treatment.
+
+### No chips
+
+The product owner ruled on 28 Nov 2026: no screen, diagram, dialog or docs page shows a chip. A chip is any small rounded box that combines a border or a tinted fill with text, used for a status, a count, a tag, a metric or a legend entry. It looks like decoration, hides the number or word it carries, and turns a calm page into a field of small boxes. There is no exception, and no variant (outlined, soft, filled, square-cornered) is allowed.
+
+Colour marks meaning on the **text, a dot or an icon**, never on a box. The page ground, the card and the row stay the only surfaces.
+
+| Use | Replace with | Before | After |
+|---|---|---|---|
+| Status | Plain `--type-caption` text at 600, optionally after a 6 px dot or a 14 px icon. Colour only on the dot or the text. Word and dot or icon always appear together | A green box, `Published` | ● Published, the dot `--ok`, the word `--ink` |
+| Count or metric | The number in tabular figures at `--type-label` 600 `--ink`, then a `--muted` label. Several metrics sit on one line, separated by 24 px of space | A mint box, `47 escalated` | **47** escalated |
+| Alert or warning | One quiet accent colour in the text plus a 14 px icon. No fill, no border, no left bar. The sentence is plain; the code stays behind `Details` | A coral box with a left edge, `Step timed out` | ⚠ Step timed out, icon and sentence in `--bad` |
+| Tag or environment | Plain `--muted` text, several separated by a middot with a space on each side | Boxes `Demo`, `Preview`, `Platinum` | Demo · Retail banking, or Gold · Platinum |
+| Legend | A 8 px dot or a 16 px line swatch, then the label in `--muted`. Never a box that holds the label | Coloured boxes `n`, `p95` | ● Cases ┄ Median time, as a dot or line, then the word |
+| Diagram marker | The number or word beside the step, as text at 12 px with a dot or icon; a token count is a plain numeral. The 14 px completed-step check may stay as an icon with no ring | A rounded box over the step, `1 incident` | ⚠ 1 incident, text only, in `--bad` |
+| Count on the menu | The number in `--muted`, right aligned, in tabular figures. When the menu is collapsed, a 6 px dot | A filled box with `4` | `4` |
+| Diff mark | A leading symbol and a word in `--ok`, `--warn` or `--bad`, over the existing row tint | A box, `Added` | + Added |
+
+What stays: buttons, inputs, selects, the segmented control, tabs, the selected menu item and avatars. They are controls or identity, and a chip is a label. A button is never styled as a tag, and a tag is never made clickable; if the user can act on it, it is a button or a link with a verb.
+
+Tests: a screen fails review if any element has a `border-radius` of 4 px or more together with a background colour or a border and holds only a word or number that is not a control. The checklist in section 13 includes it. The legacy `.badge`, `.pill`, `.tag`, `.diff-tag`, `.value-pill`, `.key-chip` and `.dg-badge` classes are removed, not restyled.
 
 ## 2. Colour roles and the 60-30-10 balance
 
@@ -60,8 +83,8 @@ Every screen balances three weights. Check it on the 1440x900 screenshot: if sat
 | Weight | Share | Tokens | What it covers |
 |---|---|---|---|
 | Neutral ground | about 60 % | `--bg`, `--surface`, `--surface-2` | Page, cards, menu, table headers |
-| Structure | about 30 % | `--ink`, `--ink-2`, `--muted`, `--line`, `--surface-3`, `--surface-contrast` | Text, dividers, neutral pills, at most one contrast card per screen |
-| Accent and state | about 10 % | `--accent*`, `--primary-fill`, `--ok*`, `--warn*`, `--bad*`, `--indigo*`, `--violet*` | Primary action, selected menu item, links, status pills, diff marks |
+| Structure | about 30 % | `--ink`, `--ink-2`, `--muted`, `--line`, `--surface-3`, `--surface-contrast` | Text, dividers, at most one contrast card per screen |
+| Accent and state | about 10 % | `--accent*`, `--primary-fill`, `--ok*`, `--warn*`, `--bad*`, `--indigo*`, `--violet*` | Primary action, selected menu item, links, status dots and text, diff marks |
 
 Meaning of each hue (from UX design section 6.1, repeated here because the build depends on it):
 
@@ -115,7 +138,7 @@ Six stops. Line height is at least 1.4 on every stop that can hold Vietnamese wo
 | `--type-h2` | 16 / 1.4 / 600 / 0 | Card titles, dialog titles, rule set name in a list row |
 | `--type-body` | 14 / 1.5 / 400 / 0 | Body, table cells, inputs, buttons (buttons at 600) |
 | `--type-label` | 13 / 1.45 / 500 / 0 | Form labels, table headers, menu items, meta values |
-| `--type-caption` | 12 / 1.4 / 500 / 0.01em | Pills, timestamps, helper text, counts |
+| `--type-caption` | 12 / 1.4 / 500 / 0.01em | Status text, timestamps, helper text, counts |
 
 Rules:
 
@@ -129,7 +152,7 @@ A 4 px base. Use only these steps.
 
 | Token | px | Typical use |
 |---|---|---|
-| `--space-1` | 4 | Icon to text inside a pill |
+| `--space-1` | 4 | Dot or icon to its text in a status |
 | `--space-2` | 8 | Between a label and its field; between buttons |
 | `--space-3` | 12 | Table cell vertical padding; menu item padding |
 | `--space-4` | 16 | Card gap; table cell horizontal padding |
@@ -161,13 +184,13 @@ Nested corners are concentric: outer radius = inner radius + the padding between
 
 | Token | px | Use |
 |---|---|---|
-| `--radius-xs` | 4 | Keyboard keys, small tags inside a pill |
-| `--radius-s` | 6 | Cells in the table editor, neutral tags |
+| `--radius-xs` | 4 | Keyboard keys |
+| `--radius-s` | 6 | Cells in the table editor |
 | `--radius-m` | 8 | Buttons, inputs, selects, segmented items, menu items |
 | `--radius-seg` | 10 | Segmented control container (8 + 2 px padding) |
 | `--radius-l` | 12 | Cards, popovers, the table frame |
 | `--radius-xl` | 16 | Dialogs, the contrast card, the sign-in panel |
-| `--radius-pill` | 999 | Status pills, avatars, count badges |
+| `--radius-pill` | 999 | Avatars only. Never a box that holds a status, count, tag or legend |
 
 Never put a square input in a rounded card, or a 12 px card inside an 8 px frame.
 
@@ -194,7 +217,7 @@ The shell is the same on every screen after sign-in.
 |---|---|
 | Left, over the menu column | Product mark and `HORUS Cockpit` |
 | Left, over the content | Breadcrumb: `Rules / card-fee / Version 2`. On Home, nothing |
-| Right | Service pill: green dot, `Loan origination`, tenant `bank-a`, the Demo tag when the host is a demo; EN / VI segmented control; theme button; avatar button with the user's initials |
+| Right | Service line, plain text: green dot, `Loan origination`, tenant `bank-a`, and `· Demo` in `--warn` text when the host is a demo, with no box around any of it; EN / VI segmented control; theme button; avatar button with the user's initials |
 
 The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approver`), Sign out. The labels "Service", "Tenant" and "Signed in as" are not shown above each value; the pill and avatar make them clear and the full text is in their accessible names.
 
@@ -202,7 +225,7 @@ The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approve
 
 | Group | Items |
 |---|---|
-| (no heading) | Home · Rules · Approvals, with a count badge of the requests the user can review |
+| (no heading) | Home · Rules · Approvals, with the number of requests the user can review as plain tabular text on the right |
 | Preview | Decisions · Processes |
 
 - Each item is an icon (20 px) and one label. No subtitle under the label: the page header carries it.
@@ -212,7 +235,7 @@ The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approve
   - Processes shows only when a Process Engine host is registered;
   - a user with no rule permission sees Home only.
 - "Preview" is said once in the menu: as the group heading. The items under it carry no tag of their own. In the collapsed menu the group keeps a divider, and the tooltip reads "Decisions (Preview)".
-- Footer: Collapse menu. The collapsed menu is 72 px wide with icons and a tooltip label; the count badge becomes a dot.
+- Footer: Collapse menu. The collapsed menu is 72 px wide with icons and a tooltip label; the count becomes a 6 px dot.
 - Item height 44 px (`--target-min`), padding 0 12 px, gap 12 px between icon and label, 4 px between items.
 
 ## 9. Component states
@@ -253,27 +276,28 @@ The money field has its currency as a suffix inside the field (`VND`), not as a 
 | Cell kind | Read view | Edit view |
 |---|---|---|
 | Any value (wildcard) | `—` in `--muted` | Empty cell showing `Any` in `--muted` on hover; never an empty input box |
-| Choice (`Tier`) | Neutral pill `Gold` | Select with the allowed labels; several values show as pills |
+| Choice (`Tier`) | Plain text `Gold` | Select with the allowed labels; several values show as text separated by a middot |
 | Number or money with a comparison | `≥ 50,000,000 VND` | Comparison select (`=`, `≥`, `>`, `≤`, `<`, `between`) and the money field |
 | Yes or no | `Yes` / `No` | Two-option segmented control |
 | Row id | `R3` in `--muted` | Not editable |
 
 Row actions (move up, move down, duplicate, delete) are in one `⋯` menu at the end of the row, and in the row's context menu. They are not four visible buttons on every row.
 
-### Status pills
+### Status
 
-Height 24 px, padding 0 8 px, `--radius-pill`, `--type-caption` at 600, icon 12 px. The icon and the word always appear together.
+A status is plain text, never a box (see [No chips](#no-chips)). `--type-caption` at 600, in `--ink`, after a 6 px dot or a 14 px icon with 4 px between them. Colour only on the dot or icon; the word stays `--ink` unless the state needs attention, when the word takes the state colour too. The dot or icon and the word always appear together.
 
-| Status | Fill | Text | Icon |
-|---|---|---|---|
-| Draft | `--surface-3` | `--ink-2` | pencil |
-| Waiting for approval | `--accent-soft` | `--accent` | clock |
-| Published | `--ok-soft` | `--ok` | check |
-| Preview (page title only) | none, 1 px `--line-strong` | `--muted` | none |
-| Demo (top bar, sign-in) | `--warn-soft` | `--warn` | none |
-| Any other environment (top bar, sign-in), first letter upper case: `Production` | `--env-tag`, 1 px `--env-tag-line` | `--env-tag-ink` | none |
+| Status | Dot or icon | Colour |
+|---|---|---|
+| Draft | pencil icon | `--muted` |
+| Waiting for approval | clock icon | `--accent` |
+| Published | 6 px dot | `--ok` |
+| Failed, rejected | ✕ icon | `--bad` |
+| Preview (page title only) | none, the word in `--muted` text | `--muted` |
+| Demo (top bar, sign-in) | none, the word in `--warn` text after a middot | `--warn` |
+| Any other environment (top bar, sign-in), first letter upper case: `Production` | none, plain `--muted` text after a middot | `--muted` |
 
-A version has three states: Draft, Waiting for approval and Published. A rejected or withdrawn request sends the version back to Draft, so there is no Rejected or Withdrawn pill. Those words appear only in history rows and events, as text with an icon (`✕ Rejected by Trần Văn Minh`, `↩ Withdrawn by Nguyễn Thị Lan`), with no fill.
+A version has three states: Draft, Waiting for approval and Published. A rejected or withdrawn request sends the version back to Draft, so there is no Rejected or Withdrawn status. Those words appear only in history rows and events, as text with an icon (`✕ Rejected by Trần Văn Minh`, `↩ Withdrawn by Nguyễn Thị Lan`).
 
 ### Menu items
 
@@ -283,7 +307,7 @@ A version has three states: Draft, Waiting for approval and Published. A rejecte
 | Hover | `--select` fill; on the selected item `--primary-hover` |
 | Selected | Filled pill: `--primary-fill`, `--on-primary` label and icon at 600, 10 px radius, no edge tick, `aria-current="page"`. Collapsed, the icon sits in the same pill |
 | Focus | 3 px `--focus` ring, 2 px offset |
-| With count | Pill on the right: `--primary-fill` with `--on-primary`, `--type-caption` 600; on the selected pill it inverts to `--on-primary` with `--primary-fill` text |
+| With count | The number on the right in tabular figures, `--muted`; on the selected item `--on-primary`. No box |
 
 ### Tabs
 
@@ -296,7 +320,7 @@ Underline tabs for the views of one object (Table · Changes · History): `--typ
 | Default | `--surface`, bottom `--line` |
 | Hover | `--surface-2`, cursor pointer when the row opens something |
 | Selected | `--select` fill, 3 px `--accent` left bar |
-| Matched (Try it) | Selected treatment plus a `✓ Matched` pill in `--accent` |
+| Matched (Try it) | Selected treatment plus `✓ Matched` as `--accent` text |
 | Added (diff) | `--diff-add` fill, `+ Added` in `--ok` |
 | Changed value (diff) | `--diff-mod` on the cell, old value struck in `--ink-2`, `→`, new value in `--ink` |
 | Removed (diff) | `--diff-del` fill, values struck, `− Removed` in `--bad` |
@@ -305,10 +329,10 @@ Underline tabs for the views of one object (Table · Changes · History): `--typ
 
 | Kind | Treatment |
 |---|---|
-| Error | `--bad-soft` fill, 1 px `--bad-fill` left edge 3 px, `--ink` text, ✕ icon in `--bad`. One plain sentence. The error code and the correlation id stay one click away: a `Details` disclosure shows both, each with a Copy button |
-| Warning | Same shape with `--warn*` |
+| Error | ✕ icon and the sentence in `--bad`, on the card, with no fill, no border and no left bar. One plain sentence. The error code and the correlation id stay one click away: a `Details` disclosure shows both, each with a Copy button |
+| Warning | Same shape: ⚠ icon and sentence in `--warn` |
 | Success | Toast at level 4, bottom right, `--ok` check icon, 6 seconds, `aria-live="polite"` |
-| Information | `--accent-soft` with an info icon; there is no separate info hue |
+| Information | An info icon and the sentence in `--accent`; there is no separate info hue |
 
 ### Cards and states of a card
 
@@ -333,7 +357,7 @@ Layout at 1440x900:
 | Form column | Right, the form centred in the remaining width, 400 px wide, no card frame |
 | Form | Heading `Sign in` at `--type-h1`, one subtitle line, Username, Password, a full-width primary `Sign in` button |
 | Preferences | Top right of the form column: EN / VI and the theme button |
-| Demo accounts | Below the form, only when the host runs the dev profile, never in any other environment: a `--surface-2` box with a 1 px `--line`, the `Demo` tag, one sentence, and the demo users as a list of rows: name and role in words. Choosing a row fills the username. No amber frame and no upper-case heading |
+| Demo accounts | Below the form, only when the host runs the dev profile, never in any other environment: a `--surface-2` area with no border, the word `Demo` in `--warn` text, one sentence, and the demo users as a list of rows: name and role in words. Choosing a row fills the username. No amber frame and no upper-case heading |
 | Error | The error alert sits between the subtitle and the fields; both fields get `aria-invalid` |
 | Signed out | A success line in the same place |
 
@@ -416,7 +440,8 @@ body { background: var(--bg); background-image: none; }
 Before a screen is called done, check its screenshots at 1440x900 and 1440x1200, light and dark, English and Vietnamese:
 
 - One focal point; the primary action is visible without scrolling at 1440x900.
-- Saturated colour covers about 10 % of the screen; every coloured state has a word and an icon.
+- Saturated colour covers about 10 % of the screen; every coloured state has a word and a dot or icon.
+- No chips: no rounded box with a border or tint around a status, count, tag, metric or legend entry, in the page, the diagram or the docs site.
 - No grid on the page ground; no spec ids, raw expressions, error codes in the body, or raw JSON.
 - Cards are sized to their content; 35 to 45 % of the screen is open.
 - Vietnamese labels fit without truncation; no clipped diacritics.
