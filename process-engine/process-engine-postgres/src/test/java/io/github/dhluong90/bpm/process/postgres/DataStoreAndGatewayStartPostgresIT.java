@@ -79,6 +79,18 @@ class DataStoreAndGatewayStartPostgresIT {
             </bpmn:process>
             """;
 
+    /** PRE-384: the receive task is the start; the message's key becomes the business key. */
+    private static final String RECEIVE_START = """
+            <bpmn:message id="m-app" name="loan-application"/>
+            <bpmn:process id="loan-intake" isExecutable="true">
+              <bpmn:receiveTask id="receive-application" instantiate="true" messageRef="m-app"/>
+              <bpmn:userTask id="review" horus:assignee="role:OPS" horus:resultVariable="r1"/>
+              <bpmn:endEvent id="end"/>
+              <bpmn:sequenceFlow id="f1" sourceRef="receive-application" targetRef="review"/>
+              <bpmn:sequenceFlow id="f2" sourceRef="review" targetRef="end"/>
+            </bpmn:process>
+            """;
+
     /** The parallel type (#499): the message starts the instance and the signal and the second message are awaited. */
     private static final String ONBOARDING = """
             <bpmn:message id="m-kyc" name="kyc-documents"/>
@@ -322,6 +334,39 @@ class DataStoreAndGatewayStartPostgresIT {
                 .isInstanceOf(io.github.dhluong90.bpm.process.api.MessageNotCorrelatedException.class);
         assertThatThrownBy(() -> start("bank-a", "loan-intake", "BK-1", Map.of())).hasMessageContaining("START_TRIGGER_REQUIRED");
         assertThat(count("SELECT count(*) FROM pre_instance")).isZero();
+    }
+
+    @Test
+    void PRE_384_a_receive_task_that_instantiates_starts_the_process_on_the_first_message_and_a_repeat_starts_no_second() {
+        // Given a loan intake whose first element is a receive task with instantiate="true"
+        deploy("bank-a", "loan-intake", RECEIVE_START);
+        engine.identity.as("bank-a", "intake-consumer", PIPELINE);
+
+        // When the loan-application message for APP-9001 arrives, and again with the same key
+        MessageDelivery first = engine.services.correlate("loan-application", "APP-9001",
+                Map.of("applicant", "Tran Thi Mai", "amount", 300_000_000), "app-1");
+        MessageDelivery repeat = engine.services.correlate("loan-application", "APP-9001",
+                Map.of("applicant", "Tran Thi Mai", "amount", 300_000_000), "app-2");
+        MessageDelivery other = engine.services.correlate("loan-application", "APP-9002", Map.of(), "app-3");
+
+        // Then the first creates one instance that waits at the review, the key is its business key, the repeat
+        // returns the same instance, and another key creates another
+        assertThat(first.outcome()).isEqualTo(MessageDelivery.Outcome.STARTED);
+        assertThat(text("SELECT current_node_id FROM pre_token WHERE instance_id = ? AND status = 'WAITING_USER'",
+                first.instanceId())).isEqualTo("review");
+        assertThat(text("SELECT business_key FROM pre_instance WHERE id = ?", first.instanceId())).isEqualTo("APP-9001");
+        assertThat(text("SELECT variables::text FROM pre_instance WHERE id = ?", first.instanceId()))
+                .contains("Tran Thi Mai");
+        assertThat(repeat.instanceId()).isEqualTo(first.instanceId());
+        assertThat(other.instanceId()).isNotEqualTo(first.instanceId());
+        assertThat(count("SELECT count(*) FROM pre_instance")).isEqualTo(2);
+        assertThat(count("SELECT count(*) FROM pre_history WHERE instance_id = ? AND event_type = 'RECEIVE_TASK_STARTED'",
+                first.instanceId())).isOne();
+
+        // When a plain start is asked for, or another message arrives
+        assertThatThrownBy(() -> start("bank-a", "loan-intake", "BK-1", Map.of())).hasMessageContaining("START_TRIGGER_REQUIRED");
+        assertThatThrownBy(() -> engine.services.correlate("walk-in-application", "APP-1", Map.of(), "w-1"))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.MessageNotCorrelatedException.class);
     }
 
     @Test
