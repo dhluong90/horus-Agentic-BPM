@@ -4,6 +4,8 @@ import { chunksOf, displayNames, DISPLAY_NAMES_PATH, mergeNames, namesQuery, NO_
 import type { Page } from '../rules/schemas';
 import {
   definitionSummaryPage,
+  layoutRevision,
+  type DefinitionLayout,
   definitionVersion,
   calendarChange,
   calendarChangePage,
@@ -117,6 +119,8 @@ export interface ProcessesClient {
   rejectDefinition(key: string, version: number, lockVersion: number, reason: string, idempotencyKey: string): Promise<DefinitionVersion>;
   /** withdrawDefinition: the requester takes a pending version back to draft, with an optional reason (PRE-052) */
   withdrawDefinition(key: string, version: number, lockVersion: number, reason: string | undefined, idempotencyKey: string): Promise<DefinitionVersion>;
+  /** getDefinitionLayout: the latest stored layout of the version, or undefined when it has none (204) */
+  getLayout(key: string, version: number, signal?: AbortSignal): Promise<DefinitionLayout | undefined>;
   /** exportDefinition (format=bpmn): the version's graph as BPMN 2.0 XML; writes nothing */
   exportBpmn(key: string, version: number, signal?: AbortSignal): Promise<string>;
   /** getTask: the task with the actions this caller may take, and the review context of a refused agent answer */
@@ -252,6 +256,15 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async withdrawDefinition(key, version, lockVersion, reason, idempotencyKey) {
       const body = { contentType: 'application/json', text: JSON.stringify(reason === undefined ? {} : { reason }) };
       return (await call({ method: 'POST', path: `${versionPath(key, version)}:withdraw`, headers: command(lockVersion, idempotencyKey), body }, definitionVersion)).data;
+    },
+    async getLayout(key, version, signal) {
+      const answer = await downloadFromHost(fetchImpl, baseUrl, { method: 'GET', path: `${versionPath(key, version)}/layout`, ...withSignal(signal) }, 'application/json');
+      const text = await answer.file.text();
+      if (text.trim() === '') return undefined;
+      let body: unknown;
+      try { body = JSON.parse(text); } catch { return undefined; }
+      const parsed = layoutRevision.safeParse(body);
+      return parsed.success ? parsed.data.layout : undefined;
     },
     async exportBpmn(key, version, signal) {
       const answer = await downloadFromHost(fetchImpl, baseUrl, { method: 'GET', path: `${versionPath(key, version)}/export?format=bpmn`, ...withSignal(signal) }, 'application/bpmn+xml');
