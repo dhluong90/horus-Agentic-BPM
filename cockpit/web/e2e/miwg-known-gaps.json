@@ -1,0 +1,63 @@
+{
+  "A.2.0.bpmn": [
+    "label on a line: \"End Event\""
+  ],
+  "A.2.1.bpmn": [
+    "label on a line: \"End Event\""
+  ],
+  "A.4.1.bpmn": [
+    "label on a line: \"Start Event 1\""
+  ],
+  "C.3.0.bpmn": [
+    "label on a line: \"Regular repair service\"",
+    "label on a line: \"Repair completed\""
+  ],
+  "C.4.0.bpmn": [
+    "label on a line: \"Non-exclusiv e Gateway\"",
+    "not drawn: participant _1422af8d-518b-49f1-9563-9b6939de2818",
+    "not drawn: participant _b5172765-a1c1-4c6e-8e57-9eabaf8cecdf",
+    "not drawn: participant _fab40827-7808-470a-93b6-4a3318bf0c0e"
+  ],
+  "C.6.0.bpmn": [
+    "label on a line: \"Booking\"",
+    "not drawn: dataInput _e8347f3a-e1a1-41d1-b2e1-4089c02028bc",
+    "not drawn: dataOutput _1a713fab-bf18-4975-afe3-d2bd2820023b"
+  ],
+  "C.7.0.bpmn": [
+    "label on a line: \"Advertisemen t approved?\"",
+    "not drawn: dataInput _d08869ef-4951-4592-bb73-363cee03cb90",
+    "not drawn: dataOutput _b6464e75-dd3d-45d9-84cd-861c42a3bedf"
+  ],
+  "C.8.0.bpmn": [
+    "not drawn: dataInput dataInputdataInput_103fd816-b422-420d-aec9-c28b54f620db",
+    "not drawn: dataInput dataInputdataInput_2bed4da9-f468-4fe0-a37c-ae5d4c17e323",
+    "not drawn: dataInput dataInputdataInput_8b9aa28f-5974-4087-9895-0467c25635dc",
+    "not drawn: dataOutput dataOutputdataOutput_c2d108b2-e6c0-47e6-a3cb-aa5321bcaeaf",
+    "not drawn: dataOutput dataOutputdataOutput_dac8ee76-f637-4fd9-8357-6a87fd11ef41"
+  ],
+  "C.8.1.bpmn": [
+    "label on a line: \"Approved\"",
+    "not drawn: dataInput _103fd816-b422-420d-aec9-c28b54f620db",
+    "not drawn: dataInput _2bed4da9-f468-4fe0-a37c-ae5d4c17e323",
+    "not drawn: dataInput _8b9aa28f-5974-4087-9895-0467c25635dc",
+    "not drawn: dataOutput _c2d108b2-e6c0-47e6-a3cb-aa5321bcaeaf",
+    "not drawn: dataOutput _dac8ee76-f637-4fd9-8357-6a87fd11ef41"
+  ],
+  "C.9.0.bpmn": [
+    "label on a line: \"Application accepted\"",
+    "label on a line: \"Application declined\"",
+    "label on a line: \"Customer notified about successful cancelation\"",
+    "label on a line: \"Yellow (moderate risk)\""
+  ],
+  "C.10.0.bpmn": [
+    "label on a line: \"Employee available?\"",
+    "label on a line: \"No\"",
+    "label on a line: \"No\"",
+    "label on a line: \"On-site Meeting?\"",
+    "label on a line: \"Yes\"",
+    "label on a line: \"Yes\"",
+    "not drawn: dataInput _48",
+    "not drawn: dataOutput _49",
+    "not drawn: dataOutput _59"
+  ]
+}

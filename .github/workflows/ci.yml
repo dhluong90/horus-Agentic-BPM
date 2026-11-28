@@ -697,6 +697,10 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The BPMN MIWG reference models (miwg-render.spec.ts): pinned, checksum-checked, build-time data only.
+      - name: Fetch the BPMN MIWG suite
+        run: ../../tools/conformance/fetch.sh miwg ../../target/conformance/suites
+
       - name: Playwright smoke (pull request, 1440x900, light, English)
         if: github.event_name == 'pull_request'
         # One worker per vCPU; Playwright's default is half of them. Names carry their size, theme and language.

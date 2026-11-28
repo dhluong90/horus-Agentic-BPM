@@ -1,0 +1,64 @@
+name: Upgrade test
+
+# #658: a populated v1.0.0 database is upgraded to the commit under test. Too slow for every pull request
+# (two Maven builds, two host start-ups and a one-minute timer), so it runs
+#   - nightly, against main;
+#   - for a release candidate tag (v1.1.0-rc.1 and the like);
+#   - on a pull request that changes a migration or the test itself;
+#   - on demand, from the Actions tab, with any older tag as the starting point.
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  push:
+    tags: ["v*-rc*"]
+  pull_request:
+    paths:
+      - "**/db/migration/**"
+      - "**/postgres/migration/**"
+      - "tools/upgrade-test/**"
+      - ".github/workflows/upgrade-test.yml"
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Tag or commit to upgrade from
+        default: v1.0.0
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upgrade:
+    name: Upgrade from ${{ inputs.from || 'v1.0.0' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          fetch-tags: true
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+
+      - name: Seed 1.0.0, upgrade, check data, seals, replay, in-flight instances and audit
+        env:
+          UPGRADE_TEST_LOGS: ${{ runner.temp }}/upgrade-test-logs
+          FROM: ${{ inputs.from || 'v1.0.0' }}
+        run: tools/upgrade-test/run.sh "$FROM"
+
+      - name: Upload the host logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: upgrade-test-logs
+          path: ${{ runner.temp }}/upgrade-test-logs/
+          if-no-files-found: ignore
+          retention-days: 14

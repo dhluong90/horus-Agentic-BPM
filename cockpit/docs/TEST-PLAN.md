@@ -88,6 +88,13 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 - **Compare.** `npm run e2e:visual` from `cockpit/web`. A failure writes the actual, expected and difference images to `cockpit/web/test-results/`; CI uploads them as `cockpit-visual-diff`.
 - **Update after a reviewed visual change.** `npm run e2e:visual:update`, then look at each changed image (`git diff --stat` lists them), commit them with the change that caused it, and say in the pull request which screens changed and why. A new screen is one entry in the `SCREENS` list followed by the same command. When the Playwright image is updated (tag and digest in `.github/workflows/ci.yml`), redraw every image in the same pull request.
 
+## BPMN MIWG render spec
+`cockpit/web/e2e/miwg-render.spec.ts` (`TR_UI_209_miwg_*`, 1440x900 and 1440x1200) draws every reference model of the pinned BPMN MIWG suite in the cockpit, each as a definition with its own diagram as the stored layout, and checks that no step falls back to the dashed "other step" box, that every shape the diagram lists is drawn (sub-processes opened first), and that no flow name or caption has a line through it.
+
+- The suite is build-time data (`tools/conformance/pins.env`). Fetch it with `tools/conformance/fetch.sh miwg ../../target/conformance/suites` from `cockpit/web`, or point `MIWG_DIR` at an unpacked copy. Without a copy the spec skips on a developer machine and fails in CI.
+- `cockpit/web/e2e/miwg-known-gaps.json` lists what is not yet drawn or placed cleanly, by model. It is a ratchet: a model's gaps must equal its entry, so a new gap fails and a fixed one fails until its line is removed. To rewrite the list from the current drawing, run `MIWG_UPDATE_GAPS=1 npx playwright test e2e/miwg-render.spec.ts --workers=1` and review the diff.
+- The cockpit draws one process of a file (the first executable one, else the first); the shapes of the other processes are not owed.
+
 ## Known gaps
 | Gap | Plan |
 |---|---|
@@ -95,4 +102,5 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | Federation envelope (`TR-UI-05`) is pending PD-046 | Stub-host load test designed with the process engine load harness |
 | Identity providers without refresh tokens for browser clients (DESIGN open question 15.2) | A second sign-in test profile once the fallback is decided |
 | The process engine sends no label for a definition's inputs and outputs, so the process review names a changed input (`highRiskAmount`) and an unclassified field (`documentType`) by its identifier spelled out in words, in the engine's language, also on a Vietnamese screen (#415, #438) | Show the engine's label when the definition carries one; no text is invented in the cockpit |
+| BPMN data inputs and outputs, participants of processes the cockpit does not draw, and some flow names and captions that a line crosses (`cockpit/web/e2e/miwg-known-gaps.json`, #209) | Each entry is removed from the list when the drawing is fixed |
 | Tenant names are slugs when the host sends no display name | The host supplies tenant names |

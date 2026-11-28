@@ -39,6 +39,7 @@ final class ProcessEngineMetrics implements MeterBinder, ProcessMetrics {
     static final String STEP_DURATION = "horus.pre.step.duration";
     static final String ASYNC_ATTEMPTS = "horus.pre.async.attempts";
     static final String JOBS_OLDEST_AGE = "horus.pre.jobs.due.oldest.age";
+    static final String MESSAGES_REFUSED = "horus.pre.messages.refused";
 
     /** Tag value for anything outside a fixed set. */
     static final String OTHER = "OTHER";
@@ -47,6 +48,7 @@ final class ProcessEngineMetrics implements MeterBinder, ProcessMetrics {
     static final Set<String> STEP_OUTCOMES = Set.of("OK", "FAILED");
     static final Set<String> ATTEMPT_OUTCOMES = Set.of("ACCEPTED", "REFUSED", "FAILED", "DISCARDED", "DUPLICATE");
     static final Set<String> JOB_KINDS = Set.copyOf(io.github.dhluong90.bpm.process.postgres.JdbcGaugeStore.JOB_KINDS);
+    static final Set<String> MESSAGE_REASONS = Set.of("NOT_CORRELATED", "AMBIGUOUS");
     static final Set<String> ASYNC_KINDS = Set.of("ASYNC_SERVICE", "ASYNC_AGENT");
     /** Engine error codes of incidents; a code outside the set, a host's own included, is {@code OTHER}. */
     static final Set<String> ERROR_CODES = Set.of("ADAPTER_ERROR", "ADAPTER_NOT_REGISTERED", "ADAPTER_NULL_RESULT",
@@ -160,6 +162,15 @@ final class ProcessEngineMetrics implements MeterBinder, ProcessMetrics {
             Counter.builder(ASYNC_ATTEMPTS).description("Async attempt results handled, by job kind and outcome")
                     .tag("kind", pick(kind, ASYNC_KINDS)).tag("outcome", pick(outcome, ATTEMPT_OUTCOMES))
                     .register(meters).increment();
+        }
+    }
+
+    @Override
+    public void messageRefused(String reason) {
+        MeterRegistry meters = registry.get();
+        if (meters != null) {
+            Counter.builder(MESSAGES_REFUSED).description("Message correlations refused, by reason")
+                    .tag("reason", pick(reason, MESSAGE_REASONS)).register(meters).increment();
         }
     }
 
