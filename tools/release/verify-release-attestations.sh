@@ -9,6 +9,9 @@
 # Env:     REPO             owner/name                                       (default $GITHUB_REPOSITORY)
 #          SIGNER_WORKFLOW  owner/name/.github/workflows/release.yml         (default "$REPO/.github/workflows/release.yml")
 #          SOURCE_REF       refs/tags/vX.Y.Z the statements must name        (default refs/tags/$BPM_RELEASE_TAG)
+#          SOURCE_DIGEST    commit the statements must name (--source-digest)  (default $GITHUB_SHA when set, else unchecked)
+#          VERIFY_METADATA  true (default): SHA256SUMS, BUILD-INFO.json and bom-release.json need a provenance
+#                           statement too; false for releases before they were attested (v1.0.0)
 #          GH               the GitHub CLI to run                            (default gh; tests put a fake in its place)
 #          VERIFY_RETRIES   tries per statement, the attestation API can lag  (default 5)
 #          VERIFY_SLEEP     seconds between tries                             (default 10)
@@ -25,6 +28,8 @@ REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
 SIGNER_WORKFLOW="${SIGNER_WORKFLOW:-$REPO/.github/workflows/release.yml}"
 SOURCE_REF="${SOURCE_REF:-${BPM_RELEASE_TAG:+refs/tags/$BPM_RELEASE_TAG}}"
 [[ -n "$SOURCE_REF" ]] || { echo "ERROR: SOURCE_REF (refs/tags/vX.Y.Z) is not set." >&2; exit 2; }
+SOURCE_DIGEST="${SOURCE_DIGEST:-${GITHUB_SHA:-}}"
+VERIFY_METADATA="${VERIFY_METADATA:-true}"
 GH="${GH:-gh}"
 RETRIES="${VERIFY_RETRIES:-5}"
 SLEEP="${VERIFY_SLEEP:-10}"
@@ -41,6 +46,7 @@ verify() {
   local args=(attestation verify "$file" --repo "$REPO" --signer-workflow "$SIGNER_WORKFLOW"
               --source-ref "$SOURCE_REF" --format json)
   [[ -z "$type" ]] || args+=(--predicate-type "$type")
+  [[ -z "$SOURCE_DIGEST" ]] || args+=(--source-digest "$SOURCE_DIGEST")
   while true; do
     if "$GH" "${args[@]}" > "$out" 2> "$out.err"; then return 0; fi
     (( try < RETRIES )) || { sed 's/^/    | /' "$out.err"; return 1; }
@@ -62,7 +68,14 @@ import json, sys
 bom = json.load(open(sys.argv[1], encoding="utf-8"))
 assert bom.get("bomFormat") == "CycloneDX" and bom.get("specVersion") and bom.get("components"), "not CycloneDX"
 PY
-echo "Verifying ${#artefacts[@]} artefact(s) (${#jars[@]} jar(s)) of $REPO against $SIGNER_WORKFLOW at $SOURCE_REF."
+# SHA256SUMS and BUILD-INFO.json are the files adopters check the rest against; they get provenance too.
+if [[ "$VERIFY_METADATA" == true ]]; then
+  for name in SHA256SUMS BUILD-INFO.json bom-release.json; do
+    [[ -f "$ARCHIVE/$name" ]] || { echo "ERROR: no $name in $ARCHIVE; the gate cannot verify it."; exit 1; }
+    artefacts+=("$ARCHIVE/$name")
+  done
+fi
+echo "Verifying ${#artefacts[@]} artefact(s) (${#jars[@]} jar(s)) of $REPO against $SIGNER_WORKFLOW at $SOURCE_REF${SOURCE_DIGEST:+, commit $SOURCE_DIGEST}."
 
 # 1. Build provenance for every jar and POM.
 for f in "${artefacts[@]}"; do

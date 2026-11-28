@@ -261,12 +261,15 @@ jobs:
           (( jars > 0 )) || { echo "ERROR: no jar under maven-repo; nothing is attested."; exit 1; }
           echo "SHA256SUMS: $(wc -l < SHA256SUMS | tr -d ' ') file(s) match. Subjects: $jars jar(s), $poms POM(s)."
 
-      - name: Build provenance for every staged jar and POM
+      - name: Build provenance for every staged jar and POM, SHA256SUMS, BUILD-INFO.json and bom-release.json
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             ${{ runner.temp }}/archive/release/maven-repo/**/*.jar
             ${{ runner.temp }}/archive/release/maven-repo/**/*.pom
+            ${{ runner.temp }}/archive/release/SHA256SUMS
+            ${{ runner.temp }}/archive/release/BUILD-INFO.json
+            ${{ runner.temp }}/archive/release/bom-release.json
 
       - name: SBOM attestation, bom-release.json over every staged jar
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -282,6 +285,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           SOURCE_REF: ${{ github.ref }}
+          SOURCE_DIGEST: ${{ github.sha }}
           ARCHIVE: ${{ runner.temp }}/archive/release
           SCRIPT_REF: ${{ github.sha }}
         run: |

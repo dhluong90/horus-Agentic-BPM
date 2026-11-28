@@ -8,6 +8,7 @@
 # Cases:   1 good archive passes   2 a POM without provenance   3 a jar without an SBOM statement
 #          4 a jar missing from the statement's subjects   5 SBOM in the statement differs from bom-release.json
 #          6 no bom-release.json   7 bom-release.json is not CycloneDX   8 statements of another tag
+#          8b another commit  8c unattested SHA256SUMS  8d no BUILD-INFO.json
 #          9 an attestation that appears on the second try passes   10 no jar at all
 # Exit:    0 when every case behaves as expected, 1 otherwise.
 
@@ -20,6 +21,7 @@ trap 'status=$?; rm -rf "$WORK"; exit $status' EXIT
 
 REPO="example/horus"
 REF="refs/tags/v0.1.0"
+DIGEST="0123456789abcdef0123456789abcdef01234567"
 
 # The fake CLI: answers `attestation verify FILE ... --format json` from the files in $FAKE_STATE.
 #   prov/<sha256>      exists when the file has a provenance statement (the content is ignored)
@@ -36,6 +38,8 @@ if args[:2] != ["attestation", "verify"]:
 path = args[2]
 opt = lambda name: args[args.index(name) + 1] if name in args else None
 digest = hashlib.sha256(open(path, "rb").read()).hexdigest()
+if opt("--source-digest") != open(f"{state}/digest").read().strip():
+    sys.exit("Error: no attestation matched the source digest")
 if opt("--source-ref") != open(f"{state}/ref").read().strip() or opt("--signer-workflow") != open(f"{state}/signer").read().strip():
     sys.exit("Error: no attestation matched the policy")
 flaky = f"{state}/flaky"
@@ -65,7 +69,9 @@ fixture() {
   echo "<project>rest</project>" > "$repo/rest/0.1.0/rest-0.1.0.pom"
   echo "<metadata/>" > "$repo/core/maven-metadata.xml"
   echo '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"core"},{"name":"rest"}]}' > "$dir/bom-release.json"
+  echo "sums" > "$dir/SHA256SUMS"; echo '{"tag":"v0.1.0"}' > "$dir/BUILD-INFO.json"
   echo "$REF" > "$dir.state/ref"
+  echo "$DIGEST" > "$dir.state/digest"
   echo "$REPO/.github/workflows/release.yml" > "$dir.state/signer"
   python3 - "$dir" "$dir.state" <<'PY'
 import hashlib, json, os, sys
@@ -74,7 +80,7 @@ jars, files = [], []
 for root, _, names in os.walk(dir_):
     for n in names:
         p = os.path.join(root, n)
-        if n.endswith((".jar", ".pom")):
+        if n.endswith((".jar", ".pom")) or n in ("SHA256SUMS", "BUILD-INFO.json", "bom-release.json"):
             files.append(p)
         if n.endswith(".jar"):
             jars.append(p)
@@ -96,7 +102,7 @@ failures=0
 expect() {
   local name="$1" dir="$2" want="$3"; shift 3
   local out="$WORK/out.txt" got=0 ok=true text
-  env FAKE_STATE="$dir.state" GH="$WORK/gh" REPO="$REPO" SOURCE_REF="$REF" VERIFY_RETRIES="${RETRIES:-1}" VERIFY_SLEEP=0 \
+  env FAKE_STATE="$dir.state" GH="$WORK/gh" REPO="$REPO" SOURCE_REF="$REF" SOURCE_DIGEST="${DIGEST_USED:-$DIGEST}" VERIFY_RETRIES="${RETRIES:-1}" VERIFY_SLEEP=0 \
     bash "$GATE" "$dir" > "$out" 2>&1 || got=$?
   [[ "$got" == "$want" ]] || ok=false
   for text in "$@"; do grep -qF -- "$text" "$out" || { ok=false; echo "  missing: $text"; }; done
@@ -112,7 +118,7 @@ expect() {
 digest_of() { shasum -a 256 "$1" | cut -d' ' -f1; }
 
 fixture "$WORK/good"
-expect "1 a good archive passes" "$WORK/good" 0 "Verified: provenance for 4 artefact(s), SBOM attestation for 2 jar(s)."
+expect "1 a good archive passes" "$WORK/good" 0 "Verified: provenance for 7 artefact(s), SBOM attestation for 2 jar(s)."
 
 fixture "$WORK/pom"
 rm "$WORK/pom.state/prov/$(digest_of "$WORK/pom/maven-repo/io/example/bpm/rest/0.1.0/rest-0.1.0.pom")"
@@ -148,6 +154,17 @@ fixture "$WORK/ref"
 echo "refs/tags/v9.9.9" > "$WORK/ref.state/ref"
 expect "8 statements of another tag are refused" "$WORK/ref" 1 "no valid build provenance for" "no valid SBOM attestation for"
 
+fixture "$WORK/digest"
+DIGEST_USED="ffffffffffffffffffffffffffffffffffffffff" expect "8b statements of another commit are refused" "$WORK/digest" 1 "no valid build provenance for"
+
+fixture "$WORK/sums"
+rm "$WORK/sums.state/prov/$(digest_of "$WORK/sums/SHA256SUMS")"
+expect "8c an unattested SHA256SUMS is refused" "$WORK/sums" 1 "no valid build provenance for SHA256SUMS"
+
+fixture "$WORK/nobuildinfo"
+rm "$WORK/nobuildinfo/BUILD-INFO.json"
+expect "8d a missing BUILD-INFO.json is refused" "$WORK/nobuildinfo" 1 "no BUILD-INFO.json"
+
 fixture "$WORK/flaky"
 touch "$WORK/flaky.state/flaky"
 RETRIES=1 expect "9a an attestation not yet visible fails with one try" "$WORK/flaky" 1 "no valid build provenance for"
@@ -156,7 +173,7 @@ touch "$WORK/flaky2.state/flaky"
 RETRIES=2 expect "9b the same, visible on the second try, passes" "$WORK/flaky2" 0 "Verified:"
 
 mkdir -p "$WORK/empty" "$WORK/empty.state"
-echo '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"x"}]}' > "$WORK/empty/bom-release.json"
+echo '{"bomFormat":"CycloneDX","specVersion":"1.6","components":[{"name":"x"}]}' > "$WORK/empty/bom-release.json"; echo "$DIGEST" > "$WORK/empty.state/digest"
 expect "10 an archive with no jar is refused" "$WORK/empty" 1 "no jar under"
 
 if (( failures > 0 )); then echo "$failures case(s) failed."; exit 1; fi

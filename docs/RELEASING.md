@@ -198,13 +198,13 @@ The gate above runs the same checks on every file during the tag run (#258 recor
 
 The last step of the job `attest` runs `tools/release/verify-release-attestations.sh` on the archive it just signed (`TR-SEC-06`, #664). Because `github-release` needs `attest`, a failure here leaves no Release. The script runs the two commands above on every file, not only the cockpit starter:
 
-- every jar and POM must have a provenance statement signed by `release.yml` at this tag;
-- every jar must have a CycloneDX statement with the same signer and tag, whose subject digests are exactly the staged jars and whose content equals `bom-release.json`;
+- every jar and POM, and `SHA256SUMS`, `BUILD-INFO.json` and `bom-release.json`, must have a provenance statement signed by `release.yml` at this tag and this commit (`--source-ref` and `--source-digest`);
+- every jar must have a CycloneDX statement with the same signer, tag and commit, whose subject digests are exactly the staged jars and whose content equals `bom-release.json`;
 - `bom-release.json` must exist and be a CycloneDX document with components.
 
 A missing, unsigned, wrong-tag or mismatched statement prints the file and exits `1`. The attestation service can lag a few seconds behind the signature, so each statement is tried up to five times, ten seconds apart.
 
-Dry run, with no tag and no signing: `tools/release/test-release-verify.sh` runs the script against a fake GitHub CLI and fixture archives, and the job "Release guard tests" runs it on every pull request that changes the release files. To try the real command against a published Release, download its jars, POMs and `bom-release.json` into one folder and run `REPO=dhluong90/horus-Agentic-BPM SOURCE_REF=refs/tags/v1.0.0 tools/release/verify-release-attestations.sh <folder>`. That only reads; it never creates a tag.
+Dry run, with no tag and no signing: `tools/release/test-release-verify.sh` runs the script against a fake GitHub CLI and fixture archives, and the job "Release guard tests" runs it on every pull request that changes the release files. To try the real command against a published Release, download its jars, POMs and `bom-release.json` into one folder and run `REPO=dhluong90/horus-Agentic-BPM SOURCE_REF=refs/tags/v1.0.0 tools/release/verify-release-attestations.sh <folder>`. That only reads; it never creates a tag. Releases up to `v1.0.0` did not attest `SHA256SUMS` and `BUILD-INFO.json`: add `VERIFY_METADATA=false` and `SOURCE_DIGEST=<tag commit>` for them. From the first release after this change, those two files and `bom-release.json` carry a provenance statement like the jars, so the checksum list adopters verify against is itself signed.
 
 ## After a release: weekly rescan
 
