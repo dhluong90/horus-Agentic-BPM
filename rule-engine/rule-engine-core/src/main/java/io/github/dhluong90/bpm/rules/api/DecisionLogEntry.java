@@ -33,12 +33,13 @@ import java.util.Objects;
  * @param pinned true when the caller named the version ({@code rules:pin}) instead of the engine selecting the
  *     version in force; set by the engine on the row, never read from a request
  * @param onBehalfOf the human an embedded engine evaluated for, as in {@link LoggedDecision}, or null
+ * @param errorMode the error mode the decision was evaluated in, as in {@link LoggedDecision}, or null
  */
 public record DecisionLogEntry(
         String decisionId, String ruleSet, int version, String hitPolicy, Outcome outcome, List<String> matchedRuleIds,
         Map<String, Object> inputs, Map<String, Object> outputs, String callerId, String correlationId,
         Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros, boolean pinned,
-        String onBehalfOf) {
+        String onBehalfOf, String errorMode) {
 
     /**
      * A decision made for its caller alone, with no {@code onBehalfOf}.
@@ -64,7 +65,35 @@ public record DecisionLogEntry(
             String correlationId, Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros,
             boolean pinned) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, matchedRuleIds, inputs, outputs, callerId,
-                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, null);
+                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, null, null);
+    }
+
+    /**
+     * A decision whose error mode was not recorded.
+     *
+     * @param decisionId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param hitPolicy see the record
+     * @param outcome see the record
+     * @param matchedRuleIds see the record
+     * @param inputs see the record
+     * @param outputs see the record
+     * @param callerId see the record
+     * @param correlationId see the record
+     * @param evalClock see the record
+     * @param evaluatedAt see the record
+     * @param loggedAt see the record
+     * @param durationMicros see the record
+     * @param pinned see the record
+     * @param onBehalfOf see the record
+     */
+    public DecisionLogEntry(String decisionId, String ruleSet, int version, String hitPolicy, Outcome outcome,
+            List<String> matchedRuleIds, Map<String, Object> inputs, Map<String, Object> outputs, String callerId,
+            String correlationId, Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros,
+            boolean pinned, String onBehalfOf) {
+        this(decisionId, ruleSet, version, hitPolicy, outcome, matchedRuleIds, inputs, outputs, callerId,
+                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, onBehalfOf, null);
     }
 
     public DecisionLogEntry {

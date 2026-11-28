@@ -88,11 +88,11 @@ public class DecisionController {
             CorrelationSearch search = new CorrelationSearch(correlationId, ruleSet, instant("from", from),
                     instant("to", to));
             return RestSupport.json(HttpStatus.OK, RestSupport.page(log.searchByCorrelationId(search, page),
-                    entry -> RestSupport.withErrorMode(EngineValues.decisionLogEntry(entry), null)));
+                    EngineValues::decisionLogEntry));
         }
         DecisionSearch search = DecisionSearch.of(ruleSet, instant("from", from), instant("to", to));
         Page<DecisionLogEntry> result = log.search(search, page);
-        return RestSupport.json(HttpStatus.OK, RestSupport.page(result, entry -> RestSupport.withErrorMode(EngineValues.decisionLogEntry(entry), null)));
+        return RestSupport.json(HttpStatus.OK, RestSupport.page(result, EngineValues::decisionLogEntry));
     }
 
     private static Instant instant(String name, String value) {

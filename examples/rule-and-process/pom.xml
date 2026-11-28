@@ -75,6 +75,11 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk-testing</artifactId>
+      <scope>test</scope>
+    </dependency>
     <!-- A stub agent adapter for the guarded agent step's end-to-end test (#52). Tests only. -->
     <dependency>
       <groupId>io.github.dhluong90.bpm</groupId>
@@ -142,6 +147,11 @@
           <groupId>org.springframework.boot</groupId>
           <artifactId>spring-boot-starter-webmvc</artifactId>
         </dependency>
+        <!-- Traces (#114): the Tracer, the OTLP exporter and its properties. The exporter is off until an endpoint is set. -->
+        <dependency>
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-starter-opentelemetry</artifactId>
+        </dependency>
         <dependency>
           <groupId>org.springframework.boot</groupId>
           <artifactId>spring-boot-starter-flyway</artifactId>
@@ -160,6 +170,15 @@
         <dependency>
           <groupId>org.springframework.boot</groupId>
           <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!-- Traces (#114) on Spring Boot 3.5: the OpenTelemetry bridge and the OTLP exporter. -->
+        <dependency>
+          <groupId>io.micrometer</groupId>
+          <artifactId>micrometer-tracing-bridge-otel</artifactId>
+        </dependency>
+        <dependency>
+          <groupId>io.opentelemetry</groupId>
+          <artifactId>opentelemetry-exporter-otlp</artifactId>
         </dependency>
         <dependency>
           <groupId>org.flywaydb</groupId>

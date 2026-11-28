@@ -151,6 +151,35 @@ class DecisionLogSearchPostgresIT {
         assertThat(entries.get(0).pinned()).isTrue();
     }
 
+    @Test
+    void RLE_232_the_mode_is_stored_with_the_decision_and_an_older_row_shows_none() {
+        // Given one decision stored with its mode, and one row as an earlier release wrote it, without the column
+        Instant at = Instant.parse("2027-01-20T10:00:00Z");
+        String evaluated = Ulid.next(at);
+        log.append(new DecisionRecord("bank-a", evaluated, at, "card-fee", 1, "FIRST", "OK", null,
+                "{\"tier\":\"SILVER\"}", "{\"fee\":10000}", "[\"R2\"]", "teller-01", null, at, 31, false, null, null,
+                "strict"));
+        String earlier = Ulid.next(at.plusSeconds(60));
+        JdbcClient.create(plain).sql("""
+                INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy,
+                    outcome, masked_inputs, outputs, matched_rule_ids, eval_clock, duration_micros, log_mode)
+                VALUES ('bank-a', :at, :id, 'card-fee', 1, 'FIRST', 'OK', '{}', '{}', '["R2"]', :at, 42,
+                    'TRANSACTIONAL')
+                """).param("at", java.sql.Timestamp.from(at.plusSeconds(60))).param("id", earlier).update();
+        auditor.as("bank-a", "dan");
+
+        // When both are read from the log
+        List<DecisionLogEntry> entries = engines.decisionLogQuery().search(DecisionSearch.of("card-fee", JAN, FEB),
+                PageRequest.first()).items();
+
+        // Then the first carries strict, as stored, and the older row carries no mode at all
+        assertThat(entries).extracting(DecisionLogEntry::decisionId).containsExactly(earlier, evaluated);
+        assertThat(entries.get(0).errorMode()).isNull();
+        assertThat(entries.get(1).errorMode()).isEqualTo("strict");
+        assertThat(engines.decisionLog().get(evaluated).errorMode()).isEqualTo("strict");
+        assertThat(engines.decisionLog().get(earlier).errorMode()).isNull();
+    }
+
     private static DecisionRecord row(String tenant, String id, Instant at, Instant evalClock, boolean pinned) {
         return new DecisionRecord(tenant, id, at, "card-fee", 1, "FIRST", "OK", null,
                 "{\"tier\":\"SILVER\",\"txCount\":5}", "{\"fee\":{\"currency\":\"VND\",\"amount\":10000}}",

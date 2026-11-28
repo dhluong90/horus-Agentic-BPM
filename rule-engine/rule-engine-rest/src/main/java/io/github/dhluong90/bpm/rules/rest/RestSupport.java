@@ -44,7 +44,7 @@ final class RestSupport {
     /**
      * Adds {@code errorMode} to a version or decision row (RLE-232). The mode is read from the canonical document
      * when it names one, and is {@code strict} otherwise; a row that has no document at hand is strict, the only mode
-     * this release accepts.
+     * this release accepts. A decision row does not use this: it carries the mode it was evaluated in.
      */
     static ObjectNode withErrorMode(ObjectNode node, String canonicalDocument) {
         String mode = ERROR_MODE_STRICT;

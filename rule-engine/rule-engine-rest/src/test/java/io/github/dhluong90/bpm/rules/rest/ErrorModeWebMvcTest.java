@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.JsonNode;
 
-/** RLE-232: a version and a decision row carry the error mode they evaluate in, which is strict in this release. */
+/** RLE-232: a version and a decision row carry the error mode they evaluate in, the decision row as stored with the decision. */
 class ErrorModeWebMvcTest {
 
     static final String RULES = "/api/bpm/rules/v1";
@@ -62,17 +62,17 @@ class ErrorModeWebMvcTest {
                     if (!method.getName().equals("get")) {
                         throw new UnsupportedOperationException(method.getName());
                     }
-                    return new LoggedDecision("D1", "card-fee", 1, "FIRST", "OK", null, "{}", "{}", List.of("R1"),
-                            "pricing", null, AT, AT, 40, false, null);
+                    // D1 was made in strict; D0 is a row logged before the mode was stored
+                    String mode = args[0].equals("D0") ? null : "strict";
+                    return new LoggedDecision(args[0].toString(), "card-fee", 1, "FIRST", "OK", null, "{}", "{}",
+                            List.of("R1"), "pricing", null, AT, AT, 40, false, null, mode);
                 });
         DecisionLogQuery log = (DecisionLogQuery) Proxy.newProxyInstance(getClass().getClassLoader(),
                 new Class<?>[] {DecisionLogQuery.class}, (self, method, args) -> {
                     if (!method.getName().equals("search")) {
                         throw new UnsupportedOperationException(method.getName());
                     }
-                    return new Page<>(List.of(new DecisionLogEntry("D1", "card-fee", 1, "FIRST",
-                            DecisionLogEntry.Outcome.MATCHED, List.of("R1"), Map.of(), Map.of(), "pricing", null, AT,
-                            AT, AT, 40, false)), null);
+                    return new Page<>(List.of(entry("D1", "strict"), entry("D0", null)), null);
                 });
         mvc = MockMvcBuilders.standaloneSetup(new RuleSetController(versions, callers),
                 new DecisionLogController(decisions, log, callers), new DecisionController((RuleEngine) Proxy.newProxyInstance(getClass().getClassLoader(),
@@ -80,6 +80,11 @@ class ErrorModeWebMvcTest {
                             throw new UnsupportedOperationException(method.getName());
                         }), log, callers))
                 .setControllerAdvice(new ProblemDetails()).build();
+    }
+
+    static DecisionLogEntry entry(String id, String mode) {
+        return new DecisionLogEntry(id, "card-fee", 1, "FIRST", DecisionLogEntry.Outcome.MATCHED, List.of("R1"),
+                Map.of(), Map.of(), "pricing", null, AT, AT, AT, 40, false, null, mode);
     }
 
     JsonNode read(String url) throws Exception {
@@ -100,6 +105,15 @@ class ErrorModeWebMvcTest {
     void RLE_232_a_decision_row_shows_the_error_mode_it_was_made_in() throws Exception {
         assertThat(read(RULES + "/decisions/D1").get("errorMode").asString()).isEqualTo("strict");
         assertThat(read(RULES + "/decisions").get("data").get(0).get("errorMode").asString()).isEqualTo("strict");
+    }
+
+    @Test
+    void RLE_232_a_decision_row_without_a_stored_mode_shows_unknown_never_strict() throws Exception {
+        // Given decision D0 logged before the mode was stored
+        // When it is read alone and in the list
+        // Then the mode is unknown
+        assertThat(read(RULES + "/decisions/D0").get("errorMode").asString()).isEqualTo("unknown");
+        assertThat(read(RULES + "/decisions").get("data").get(1).get("errorMode").asString()).isEqualTo("unknown");
     }
 
     @Test

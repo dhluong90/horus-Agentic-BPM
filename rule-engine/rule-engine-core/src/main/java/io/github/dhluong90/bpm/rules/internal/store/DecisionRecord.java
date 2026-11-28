@@ -26,12 +26,46 @@ import java.time.Instant;
  *     point (ADR-0027), never from a request
  * @param functionVersions the host functions the rule set calls, each as {@code name@version} in name order, comma
  *     separated, with the version label registered when the decision ran (RLE-058); null when it calls none
+ * @param errorMode the error mode the decision was evaluated in ({@code strict} or {@code spec}), as the engine
+ *     used it (RLE-232); null for a row written before the mode was stored and for a decision refused before any
+ *     evaluation
  */
 public record DecisionRecord(
         String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson, String callerId,
         String correlationId, Instant evalClock, long durationMicros, boolean pinned, String onBehalfOf,
-        String functionVersions) {
+        String functionVersions, String errorMode) {
+
+    /**
+     * Creates the row of a decision whose error mode was not recorded.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param createdAt see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param hitPolicy see the record
+     * @param outcome see the record
+     * @param errorCode see the record
+     * @param maskedInputsJson see the record
+     * @param outputsJson see the record
+     * @param matchedRuleIdsJson see the record
+     * @param callerId see the record
+     * @param correlationId see the record
+     * @param evalClock see the record
+     * @param durationMicros see the record
+     * @param pinned see the record
+     * @param onBehalfOf see the record
+     * @param functionVersions see the record
+     */
+    public DecisionRecord(String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy,
+            String outcome, String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson,
+            String callerId, String correlationId, Instant evalClock, long durationMicros, boolean pinned,
+            String onBehalfOf, String functionVersions) {
+        this(tenantId, id, createdAt, ruleSet, version, hitPolicy, outcome, errorCode, maskedInputsJson, outputsJson,
+                matchedRuleIdsJson, callerId, correlationId, evalClock, durationMicros, pinned, onBehalfOf,
+                functionVersions, null);
+    }
 
     /**
      * Creates the row of a decision that calls no host function.

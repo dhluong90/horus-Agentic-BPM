@@ -1573,7 +1573,20 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Kind:** semantics
 - **Given:** `card-fee` v1 imported from a DMN table, which keeps the strict error mode (`RLE-081`), published and evaluated once.
 - **When:** A reader gets the version, lists the versions of `card-fee`, gets the logged decision and lists the decisions.
-- **Then:** Each of the four answers carries `errorMode`, a string. It is `strict` in this release, because the canonical document leaves `strict` out and `spec` is refused until stage S1. When a canonical document names a mode, the version shows that mode. The member is added to `RuleSetVersion`, `VersionSummary`, `LoggedDecision` and `DecisionLogEntry` of the OpenAPI document and is not required, so an idempotent replay of an older answer and an existing client are unaffected. A client reads it as a label and ignores a value it does not know.
-- **Example:** `GET /rule-sets/card-fee/versions/1 -> {"version": 1, "errorMode": "strict", ...}`
-- **Test IDs:** `RLE_232_a_version_and_a_version_row_show_strict_for_an_imported_table`, `RLE_232_a_decision_row_shows_the_error_mode_it_was_made_in`, `RLE_232_a_version_whose_document_names_a_mode_shows_that_mode`
+- **Then:** Each of the four answers carries `errorMode`, a string. A version row shows the mode of its canonical document, which is `strict` when the document names none (`spec` is refused until stage S1). A decision row shows the mode the engine used when it made the decision: migration `V6` adds `rle_decision.error_mode`, and the engine writes it with the row. A row logged before the column existed, or refused before any evaluation, has no stored mode and shows `unknown`; it is never shown as `strict`. The member is added to `RuleSetVersion`, `VersionSummary`, `LoggedDecision` and `DecisionLogEntry` of the OpenAPI document and is not required, so an idempotent replay of an older answer and an existing client are unaffected. A client reads it as a label and ignores a value it does not know.
+- **Example:** `GET /rule-sets/card-fee/versions/1 -> {"version": 1, "errorMode": "strict", ...}`; `GET /decisions/<id of a January 2027 row, logged before V6> -> {..., "errorMode": "unknown"}`
+- **Test IDs:** `RLE_232_a_version_and_a_version_row_show_strict_for_an_imported_table`, `RLE_232_a_decision_row_shows_the_error_mode_it_was_made_in`, `RLE_232_a_version_whose_document_names_a_mode_shows_that_mode`, `RLE_232_a_decision_row_without_a_stored_mode_shows_unknown_never_strict`, `RLE_232_a_decision_row_stores_the_mode_the_engine_evaluated_in`, `RLE_232_a_row_logged_before_the_mode_was_stored_shows_unknown_and_not_strict`, `RLE_232_the_mode_is_stored_with_the_decision_and_an_older_row_shows_none`
 
+### RLE-228 Each evaluation call is one span with the rule set, its version, the decision id and the outcome
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A host with a Micrometer `Tracer` and a host request span. Inside it the host evaluates `card-fee` version 3, which matches rule `R2`.
+- **When:** The finished spans are read.
+- **Then:**
+  - One span `horus.rule.evaluate` is a child of the request span, with `horus.rule_set` (`card-fee`), `horus.rule_set.version` (`3`), `horus.decision_id`, `horus.outcome` (`MATCHED`, `NO_MATCH`, `FAILED` or `REFUSED`) and, for a match, `horus.matched_count` (`1`).
+  - A refused call or failed evaluation adds `horus.error_code` (and `horus.error_type` for a refusal); the span's error carries the code, never the exception message.
+  - No attribute holds an input or an output value. `horus.tenant_id` is present only when `horus.bpm.tracing.tenant-attribute` is `true` (default).
+  - Without a tracer the engine uses a no-op port and creates no span. A tracer that throws never fails the call.
+- **Example:** `evaluate card-fee v3 -> horus.rule.evaluate MATCHED, matched_count 1, no output value`.
+- **Test ID:** `RLE_228_a_matched_evaluation_is_one_span_with_rule_set_version_decision_and_count_but_no_value`, `RLE_228_a_refused_call_records_an_error_code_and_the_exception_type_never_its_message` (`RuleEngineTracingTest`)

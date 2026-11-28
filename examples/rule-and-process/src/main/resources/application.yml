@@ -18,6 +18,14 @@ server:
         same-site: lax
 
 management:
+  tracing:
+    export:
+      # Spans leave the process only when a bank turns this on and names its collector: set
+      # HORUS_TRACING_EXPORT_ENABLED=true and the OTLP endpoint (docs/OBSERVABILITY.md). Spans of the engines exist
+      # in the host's tracer either way.
+      enabled: ${HORUS_TRACING_EXPORT_ENABLED:false}
+    sampling:
+      probability: ${HORUS_TRACING_SAMPLING:0.1}
   endpoints:
     web:
       exposure:

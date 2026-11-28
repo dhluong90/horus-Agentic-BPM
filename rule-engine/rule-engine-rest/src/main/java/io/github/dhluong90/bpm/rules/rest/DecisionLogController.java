@@ -257,6 +257,6 @@ public class DecisionLogController {
     }
 
     static ObjectNode decision(LoggedDecision d) {
-        return RestSupport.withErrorMode(EngineValues.loggedDecision(d), null);
+        return EngineValues.loggedDecision(d);
     }
 }
