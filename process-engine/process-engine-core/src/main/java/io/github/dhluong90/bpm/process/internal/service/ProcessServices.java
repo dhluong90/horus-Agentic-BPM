@@ -650,26 +650,48 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         // Parse, validate and hash before any transaction opens (DESIGN section 4).
         List<DefinitionProblem> warnings = List.of();
+        List<DefinitionProblem> openBindings = List.of();
         List<Process> processes;
         if (reader instanceof DefinitionReader withWarnings) {
             DefinitionReader.Result read = withWarnings.readWithWarnings(bytes);
             processes = read.processes();
-            warnings = read.warnings();
+            openBindings = read.openBindings();
+            // PRE-391: what is still open is told to the importer with the other warnings.
+            warnings = new java.util.ArrayList<>(read.warnings());
+            warnings.addAll(openBindings);
         } else {
             processes = List.of(reader.apply(bytes));
         }
         final List<DefinitionProblem> importWarnings = warnings;
-        record Prepared(Process process, String canonical, String hash, int nodeCount, String layout) { }
+        final List<DefinitionProblem> finalOpen = openBindings;
+        record Prepared(Process process, String canonical, String hash, int nodeCount, String layout,
+                boolean draftOnly) { }
         List<Prepared> prepared = new java.util.ArrayList<>();
         for (Process process : processes) {
-            compiler.compile("validation", process);
-            checkBindings(process);
+            // PRE-391, PRE-392: a process with a binding still open, or one that says it is not executable, is stored as
+            // a draft to view and export; it never becomes active on import, whatever the auto-approve setting.
+            java.util.Set<String> ownIds = process.allFlowElements().stream().map(FlowElement::id)
+                    .collect(java.util.stream.Collectors.toSet());
+            boolean draftOnly = !process.isExecutable() || openBindings.stream()
+                    .anyMatch(b -> b.elementId() == null || ownIds.contains(b.elementId()));
+            try {
+                compiler.compile("validation", process);
+            } catch (ValidationFailedException e) {
+                // A problem the reader already listed as an open binding is not refused again; any other one is.
+                List<DefinitionProblem> others = e.problems().stream().filter(c -> finalOpen.stream().noneMatch(
+                        b -> b.code().equals(c.code()) && java.util.Objects.equals(b.elementId(), c.elementId())))
+                        .toList();
+                if (!others.isEmpty()) {
+                    throw new ValidationFailedException(others);
+                }
+            }
+            checkBindings(process, draftOnly);
             checkForms(tenant, process);
             checkGuardrailContracts(tenant, process);
             String canonical = CanonicalProcessWriter.canonicalText(process);
             prepared.add(new Prepared(process, canonical, Hashes.sha256(canonical),
                     (int) process.allFlowElements().stream().filter(FlowNode.class::isInstance).count(),
-                    importedLayout(request, process)));
+                    importedLayout(request, process), draftOnly));
         }
         String requestHash = Hashes.sha256Parts("import", caller, request.format().name(), Hashes.sha256(bytes));
         return transactions.inTransaction(() -> idempotent(tenant, "import", request.idempotencyKey(), requestHash,
@@ -678,7 +700,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     List<DefinitionVersion> stored = new java.util.ArrayList<>();
                     for (Prepared p : prepared) {
                         stored.add(storeImported(tenant, caller, request, source, text, p.process(), p.canonical(),
-                                p.hash(), p.nodeCount(), p.layout()));
+                                p.hash(), p.nodeCount(), p.layout(), p.draftOnly()));
                     }
                     DefinitionVersion first = stored.get(0);
                     List<DefinitionRef> also = stored.stream().skip(1)
@@ -688,7 +710,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private DefinitionVersion storeImported(String tenant, String caller, ImportRequest request, String source,
-            String text, Process process, String canonical, String hash, int nodeCount, String layout) {
+            String text, Process process, String canonical, String hash, int nodeCount, String layout,
+            boolean draftOnly) {
         // Locks the key, so concurrent imports and lifecycle commands of one key serialise.
         List<StoredDefinition> versions = store.lockDefinitions(tenant, process.id());
         StoredDefinition latest = versions.isEmpty() ? null : versions.getLast();
@@ -696,7 +719,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return view(latest);
         }
         Instant now = clock.instant();
-        boolean active = settings.definitionsAutoApprove();
+        boolean active = settings.definitionsAutoApprove() && !draftOnly;
         StoredDefinition stored = new StoredDefinition(tenant, Ulid.next(now), process.id(),
                 latest == null ? 1 : latest.version() + 1, active ? "ACTIVE" : "DRAFT", process.name(),
                 canonical, hash, request.format().name(), text,
@@ -753,7 +776,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             requireLock(current, expectedLockVersion);
             // PRE-016: the guardrail rule set may have changed since import; checked again before anything is written.
             Process stored = storedProcess(current);
-            checkServiceRegistrations(tenant, stored);
+            checkServiceRegistrations(tenant, current, stored);
             checkGuardrailContracts(tenant, stored);
             Instant now = clock.instant();
             if (effectiveFrom != null && effectiveFrom.isBefore(now)) {
@@ -832,7 +855,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             // PRE-016: and again at approval, against the rule set version in effect now; PRE-072: and the host's
             // handlers and adapters, which may have been removed since the request.
             Process stored = storedProcess(current);
-            checkServiceRegistrations(tenant, stored);
+            checkServiceRegistrations(tenant, current, stored);
             checkGuardrailContracts(tenant, stored);
             // An older version never overtakes a newer active one (PRE-021).
             for (StoredDefinition other : locked.all()) {
@@ -1704,9 +1727,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * (PRE-072), so a pipeline can import a draft before the host registers them; an import that activates at once
      * (dev auto-approve) checks them too.
      */
-    private void checkBindings(Process process) {
+    private void checkBindings(Process process, boolean draftOnly) {
         List<DefinitionProblem> problems = new ArrayList<>();
-        if (settings.definitionsAutoApprove()) {
+        if (settings.definitionsAutoApprove() && !draftOnly) {
             problems.addAll(serviceRegistrationProblems(process));
         }
         for (FlowElement element : process.allFlowElements()) {
@@ -1729,7 +1752,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * PRE-072: every handler and adapter a service step names is registered in this host. Checked at request-approval
      * and approval, before anything is written; one problem per step, naming {@code step -> name}.
      */
-    private void checkServiceRegistrations(String tenant, Process process) {
+    private void checkServiceRegistrations(String tenant, StoredDefinition current, Process process) {
+        // PRE-391, PRE-392: a draft with a binding still open, or one that is not executable, is never requested or
+        // approved; the refusal names every open binding. Checked first, before the registrations are read.
+        List<DefinitionProblem> open = new ArrayList<>();
+        if (!process.isExecutable()) {
+            open.add(new DefinitionProblem("NOT_EXECUTABLE", "The process says isExecutable=\"false\" and is kept to be"
+                    + " viewed and exported; it cannot be published", "process", process.id(), 0));
+        }
+        if (readers.get(SourceFormat.valueOf(current.sourceFormat())) instanceof DefinitionReader keyed) {
+            open.addAll(keyed.openBindingsOf(current.sourceDocument().getBytes(StandardCharsets.UTF_8), current.key()));
+        }
+        if (!open.isEmpty()) {
+            throw new ValidationFailedException(open);
+        }
         List<DefinitionProblem> problems = serviceRegistrationProblems(process);
         problems.addAll(escalationRoleProblems(tenant, process));
         problems.addAll(forms.check(tenant, process));
