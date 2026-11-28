@@ -1,0 +1,4 @@
+# DMN TCK policy exclusions (#203): one test id per line, `level/folder/test-file/case-id | reason`.
+# Empty on purpose. The only exclusions the architecture allows are external Java and PMML function cases
+# (docs/architecture/standards-compliance.md, section 10.1); none has been reviewed and listed yet, so every
+# case counts. A listed case is reported as EXCLUDED and leaves the denominator.

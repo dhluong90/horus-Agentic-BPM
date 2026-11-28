@@ -1,0 +1,28 @@
+{
+  "pins": {
+    "dmnTck": "22f109c37cb55d5ac9bc84feaa1bb51b156f76ba",
+    "miwg": "ebfa3e545b9765a39ece3fc861b3cdf7b3c15bf8"
+  },
+  "dmnTck": {
+    "compliance-level-2": {
+      "models": 28,
+      "modelsRead": 0,
+      "cases": 116,
+      "passed": 0
+    },
+    "compliance-level-3": {
+      "models": 122,
+      "modelsRead": 0,
+      "cases": 3321,
+      "passed": 0
+    }
+  },
+  "bpmnMiwg": {
+    "models": 22,
+    "read": 0,
+    "semantic": 0,
+    "diagram": 0,
+    "schema": 0,
+    "all": 0
+  }
+}

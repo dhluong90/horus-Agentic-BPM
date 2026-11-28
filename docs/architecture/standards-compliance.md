@@ -555,6 +555,8 @@ P1 to P4 and P6 to P9 were decided on 2026-11-19; P5 (release dates) is with the
 | 10.4 Differential FEEL testing | v1 and HORUS FEEL agree with a reference FEEL | The project's seeded generator (PD-090) generates expressions and inputs, and a failure prints its seed; results compared with `camunda/feel-scala` (Apache 2.0) in test scope only. From M1 it checks that every v1 expression's FEEL translation gives the same result, null cases included (PD-058); from S1 it checks the HORUS FEEL engine | `TR-STD-02`, `TR-STD-27` |
 | 10.5 Graph invariants | No lost tokens, joins fire exactly once, every token ends or waits | Property tests over generated BPMN graphs with all S1 to S3 elements | `TR-STD-11` |
 
+Sections 10.1 and 10.2 run daily in the `Conformance` workflow (`tools/conformance`, #203, #204): the pinned suites are fetched with the archive SHA-256 checked, run by the test classes `DmnTckConformanceRun` and `MiwgRoundTripRun` (build-time test data; there is no separate `rule-engine-tck` module), and a ratchet fails the run only when a number falls below `tools/conformance/baseline.json`. [How to read the numbers](../../wiki/Standards-Conformance.md).
+
 ## 11. Staging after 1.0
 
 ![Staging](images/standards-staging.svg)
