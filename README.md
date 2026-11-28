@@ -76,12 +76,8 @@ Generic by design: every business behaviour is optional and configurable per hos
 |---|---|
 | Try it | [Getting Started](../../wiki/Getting-Started) |
 | Run the example host in Docker with one command | [Deploying with Docker Compose](docs/DEPLOYING.md) |
-<<<<<<< HEAD
 | Know which versions are supported, what counts as breaking, and how to report a vulnerability | [Support and versioning policy](../../wiki/Support-and-Versioning-Policy) |
-||||||| 0bc38104
-=======
 | Operate the engines: alerts, backup and restore, upgrade, seal key | [Operations runbook](../../wiki/Operations-Runbook) |
->>>>>>> origin/main
 | Do a task: author a table, publish a version, simulate, read the log, use the cockpit | How-to guides listed on the wiki [Home](../../wiki) |
 | Look up an endpoint, a property, an operator | [Decision API](../../wiki/Rule-Engine-Decision-API), [Configuration](../../wiki/Rule-Engine-Configuration), [Expression Language](../../wiki/Rule-Engine-Expression-Language) |
 | Understand the design | [Concepts](../../wiki/Concepts), [Principles](../../wiki/Principles), [Architecture](../../wiki/Architecture), [Roadmap](../../wiki/Roadmap) |
