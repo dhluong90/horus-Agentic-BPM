@@ -17,7 +17,8 @@ async function open(page: Page, locale: 'en' | 'vi'): Promise<void> {
     await route.fulfill({ status: answer.status, headers: answer.headers, body: answer.body });
   });
   await page.goto('/#/processes/kyc-onboarding/2/timing');
-  await expect(page.getByRole('table', { name: /./ })).toBeVisible();
+  await expect(page.getByRole('list', { name: /./ }).first()).toBeVisible();
+  await expect(page.locator('[data-heat]').first()).toBeVisible();
   await page.evaluate(async () => { await document.fonts.ready; });
 }
 
@@ -29,7 +30,12 @@ for (const height of [900, 1200]) {
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true);
       expect((await new AxeBuilder({ page }).analyze()).violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')).toEqual([]);
       const folder = process.env['WAVE_SHOTS'];
-      if (folder !== undefined) await page.screenshot({ path: `${folder}/timing-${locale}-1440x${String(height)}.png` });
+      if (folder !== undefined) await page.screenshot({ path: `${folder}/heat-${locale}-1440x${String(height)}.png` });
+      if (folder !== undefined) {
+        await page.getByRole('button', { name: /table|bảng/i }).click();
+        await expect(page.getByRole('table', { name: /./ })).toBeVisible();
+        await page.screenshot({ path: `${folder}/timing-table-${locale}-1440x${String(height)}.png` });
+      }
     });
   }
 }

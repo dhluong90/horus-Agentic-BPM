@@ -17,6 +17,7 @@ describe('Step timing (#123)', () => {
     setScenario('processes-reviewer');
     open('#/processes/kyc-onboarding/2/timing');
 
+    await userEvent.click(await screen.findByRole('button', { name: 'As a table' }));
     const table = await screen.findByRole('table', { name: 'How long each step takes' });
     const rows = within(table).getAllByRole('row').slice(1);
     expect(rows.map((row) => within(row).getByRole('rowheader').textContent)).toEqual([
@@ -29,6 +30,17 @@ describe('Step timing (#123)', () => {
     expect(cells).toEqual(['187', '1 h 20 min', '2 h 45 min', '—', '—']);
     expect(engine.requests.some((request) => /node-stats\?.*mode=window/.test(request.path))).toBe(true);
     expect(screen.getByText(/Figures up to .*newer cases are not counted yet/)).toBeInTheDocument();
+  });
+
+  it('CKP_026_the_diagram_tints_each_step_by_slow_time_and_names_the_key', async () => {
+    resetProcessEngine();
+    setScenario('processes-reviewer');
+    open('#/processes/kyc-onboarding/2/timing');
+
+    const box = await screen.findByLabelText(/Approve high-risk customer.*slow time 2 h 45 min/);
+    expect(box).toHaveAttribute('data-heat', '4');
+    const key = screen.getByRole('list', { name: 'Slow time against the slowest step' });
+    expect(within(key).getAllByRole('listitem').map((item) => item.textContent)).toEqual(['Under 25%', '25 to 50%', '50 to 75%', '75% and over']);
   });
 
   it('CKP_026_a_longer_period_asks_the_engine_again', async () => {

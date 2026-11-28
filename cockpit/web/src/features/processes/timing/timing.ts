@@ -49,3 +49,8 @@ export function shareOfSlowest(value: number | null | undefined, slowest: number
 
 /** The steps that run slowest take the warm colour: the top quarter of the list's slowest 95th percentile. */
 export const HOT_SHARE = 75;
+
+/** The heat of a step, 1 to 4, from its share of the slowest: under 25, under 50, under 75, and 75 or more. */
+export function heatLevel(share: number): 1 | 2 | 3 | 4 {
+  return share >= HOT_SHARE ? 4 : share >= 50 ? 3 : share >= 25 ? 2 : 1;
+}

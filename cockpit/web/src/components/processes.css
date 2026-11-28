@@ -417,3 +417,19 @@
 .timing__fill--w90 { width: 90%; }
 .timing__fill--w95 { width: 95%; }
 .timing__fill--w100 { width: 100%; }
+
+/* The heat on the diagram: a tint and an edge on each box, the figure written on it; the key is swatches and words. */
+.timing__period { flex-wrap: wrap; }
+.timing__views { margin-left: auto; }
+.timing__key { display: flex; align-items: center; gap: var(--space-4); margin: 0; padding: 0; list-style: none; font: var(--type-caption); color: var(--ink-2); }
+.timing__key-item { display: inline-flex; align-items: center; gap: var(--space-2); }
+.timing__swatch { display: inline-block; width: 14px; height: 10px; border: 1px solid var(--node-stroke); }
+.timing__swatch--1 { background: color-mix(in srgb, var(--chart-bar) 18%, var(--node)); }
+.timing__swatch--2 { background: color-mix(in srgb, var(--chart-bar) 55%, var(--node)); }
+.timing__swatch--3 { background: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); border-color: var(--warn-fill); }
+.timing__swatch--4 { background: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); border-color: var(--warn-fill); }
+.dg-node--heat-1 > rect:first-of-type { fill: color-mix(in srgb, var(--chart-bar) 18%, var(--node)); }
+.dg-node--heat-2 > rect:first-of-type { fill: color-mix(in srgb, var(--chart-bar) 55%, var(--node)); }
+.dg-node--heat-3 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); stroke: var(--warn-fill); }
+.dg-node--heat-4 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); stroke: var(--warn-fill); stroke-width: 2.25; }
+.dg-node .dg-node__heat { fill: var(--ink); font: var(--type-caption); font-weight: 600; stroke: var(--canvas); stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; }

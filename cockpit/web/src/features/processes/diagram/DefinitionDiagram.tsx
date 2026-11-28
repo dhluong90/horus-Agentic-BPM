@@ -59,6 +59,13 @@ export interface StepBadge {
   hint?: string;
 }
 
+/** The heat of one step on the Timing view: how slow it is against the slowest step (1 coolest, 4 hottest) and its slow time in words. */
+export interface StepHeat {
+  level: 1 | 2 | 3 | 4;
+  text: string;
+  label: string;
+}
+
 /** What the instance view adds to the diagram: badges, the selected step and how to select one. */
 export interface DiagramOverlay {
   badges: ReadonlyMap<string, StepBadge>;
@@ -326,9 +333,9 @@ function markProps(mark: Mark | undefined, picked: boolean) {
   };
 }
 
-interface NodeProps { node: PlacedNode; label: string; interaction: Interaction; mark: Mark | undefined; picked: boolean }
+interface NodeProps { node: PlacedNode; label: string; interaction: Interaction; mark: Mark | undefined; picked: boolean; heat?: StepHeat | undefined }
 
-function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggle, toggleLabel }: NodeProps & { kind: string; steps?: string | undefined; onToggle?: (() => void) | undefined; toggleLabel?: string | undefined }) {
+function TaskNode({ node, kind, label, interaction, mark, picked, heat, steps, onToggle, toggleLabel }: NodeProps & { kind: string; steps?: string | undefined; onToggle?: (() => void) | undefined; toggleLabel?: string | undefined }) {
   const { padX, padY, nameLine, typeRow } = TASK_TEXT;
   const content = 2 * padY + node.lines.length * nameLine + node.typeLines.length * typeRow;
   // A closed sub-process keeps a row at the foot of its box for the count of its steps and the control that opens it.
@@ -338,7 +345,7 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
   const typeTop = top + node.lines.length * nameLine;
   const extra = markProps(mark, picked);
   return (
-    <g className={`dg-node dg-node--${kind}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
+    <g className={`dg-node dg-node--${kind}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}${heat !== undefined ? ` dg-node--heat-${String(heat.level)}` : ''}`} data-node={node.id} data-type={node.type} {...(heat !== undefined ? { 'data-heat': String(heat.level) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
       <rect x={node.x} y={node.y} width={node.width} height={node.height} rx={10} />
       {node.type === 'transaction' ? <rect className="dg-double" x={node.x + 3.5} y={node.y + 3.5} width={node.width - 7} height={node.height - 7} rx={7} /> : null}
@@ -352,6 +359,7 @@ function TaskNode({ node, kind, label, interaction, mark, picked, steps, onToggl
       {node.compensation === true && node.type !== 'serviceTask:compensation' ? <CompensationMarker cx={node.x + node.width / 2 - (node.loop !== undefined ? 14 : 4)} cy={node.y + node.height - 11} /> : null}
       {node.loop !== undefined ? <LoopMarker kind={node.loop} cx={node.x + node.width / 2 + (node.compensation === true && node.type !== 'serviceTask:compensation' ? 10 : 0)} cy={node.y + node.height - 11} /> : null}
       <TriggerMark node={node} x={node.x + node.width - 28} y={node.y + 4} />
+      {heat !== undefined ? <text aria-hidden="true" className="dg-node__heat tnum" x={node.x + node.width / 2} y={node.y + node.height + 15} textAnchor="middle">{heat.text}</text> : null}
       {steps !== undefined ? <text aria-hidden="true" className="dg-node__steps" x={node.x + padX} y={node.y + node.height - 9}>{steps}</text> : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={node.x + node.width - 2} y={node.y + 2} /> : null}
       {onToggle !== undefined && toggleLabel !== undefined ? <Toggle x={node.x + node.width - 26} y={node.y + node.height - 24} open={false} label={toggleLabel} onToggle={onToggle} /> : null}
@@ -476,20 +484,20 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   );
 }
 
-function Node({ node, typeLabel, loopLabel, badge, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
-  node: PlacedNode; typeLabel: string; loopLabel: string | undefined; badge: StepBadge | undefined; interaction: Interaction;
+function Node({ node, typeLabel, loopLabel, badge, heat, interaction, mark, markLabel, picked, steps, onToggle, toggleLabel }: {
+  node: PlacedNode; typeLabel: string; loopLabel: string | undefined; badge: StepBadge | undefined; heat: StepHeat | undefined; interaction: Interaction;
   mark: Mark | undefined; markLabel: ((mark: Mark) => string) | undefined; picked: boolean;
   steps: string | undefined; onToggle: (() => void) | undefined; toggleLabel: string | undefined;
 }) {
   const known = isKnownNodeType(node.type);
   // A selectable step's name starts with the words drawn on it, in order, so speech input can name it (WCAG 2.5.3).
   const label = interaction.onSelect !== undefined
-    ? `${node.name ?? node.id} ${typeLabel}${[loopLabel, badge?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
-    : `${node.name ?? node.id}, ${typeLabel}${loopLabel !== undefined ? `, ${loopLabel}` : ''}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
+    ? `${node.name ?? node.id} ${typeLabel}${[loopLabel, badge?.label, heat?.label, mark !== undefined && markLabel !== undefined ? markLabel(mark) : undefined].filter((part) => part !== undefined).map((part) => `, ${part}`).join('')}`
+    : `${node.name ?? node.id}, ${typeLabel}${loopLabel !== undefined ? `, ${loopLabel}` : ''}${heat !== undefined ? `, ${heat.label}` : ''}${mark !== undefined && markLabel !== undefined ? `, ${markLabel(mark)}` : ''}`;
   if (node.shape === 'task' || !known) {
     // A type this cockpit does not draw is laid out and drawn as a dashed box, named in words.
     const kind = node.type === 'serviceTask:agentTask' ? 'agent' : known ? 'task' : 'generic';
-    return <TaskNode node={node} kind={kind} label={label} interaction={interaction} mark={mark} picked={picked} steps={steps} onToggle={onToggle} toggleLabel={toggleLabel} />;
+    return <TaskNode node={node} kind={kind} label={label} interaction={interaction} mark={mark} picked={picked} heat={heat} steps={steps} onToggle={onToggle} toggleLabel={toggleLabel} />;
   }
   return <SymbolNode node={node} label={label} interaction={interaction} mark={mark} picked={picked} />;
 }
@@ -501,10 +509,12 @@ function Node({ node, typeLabel, loopLabel, badge, interaction, mark, markLabel,
  * `reserve` is the room kept under the canvas, for a docked decision; `fill` makes the canvas take that height, so the
  * change list beside it keeps the same frame.
  */
-export default function DefinitionDiagram({ graph, label, overlay, marks, markLabel, selected: picked, toolbar, reserve = BELOW_CANVAS, fill = false, fitAll = false, sharedScale, onFitAll }: {
+export default function DefinitionDiagram({ graph, label, overlay, heat, marks, markLabel, selected: picked, toolbar, reserve = BELOW_CANVAS, fill = false, fitAll = false, sharedScale, onFitAll }: {
   graph: DiagramGraph;
   label: string;
   overlay?: DiagramOverlay | undefined;
+  /** Timing: the slow time of each step drawn on its box, by step id. */
+  heat?: ReadonlyMap<string, StepHeat> | undefined;
   marks?: DiagramMarks | undefined;
   markLabel?: ((mark: Mark) => string) | undefined;
   selected?: string | undefined;
@@ -722,7 +732,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
               </g>
             ) : null}
             <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (
-              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} loopLabel={node.loop !== undefined ? t(`diagram.loop.${node.loop}`) : undefined} badge={overlay?.badges.get(node.id)}
+              <Node key={node.id} node={node} typeLabel={nodeTypeLabel(node.type, t)} loopLabel={node.loop !== undefined ? t(`diagram.loop.${node.loop}`) : undefined} badge={overlay?.badges.get(node.id)} heat={heat?.get(node.id)}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
                 mark={marks?.nodes.get(node.id)} markLabel={markLabel} picked={picked === node.id}
                 steps={node.container !== undefined ? t('diagram.stepCount', { count: String(node.container.steps) }) : undefined}
