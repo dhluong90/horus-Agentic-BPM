@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:modeler="http://camunda.org/schema/modeler/1.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" id="Definitions_1p6j2xk" name="Overdraft" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.22.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.5.0">
+  <decision id="overdraft-approval" name="Overdraft approval">
+    <decisionTable id="DecisionTable_0v1c3dd" hitPolicy="FIRST">
+      <input id="Input_1" label="Salary account" biodi:width="192">
+        <inputExpression id="InputExpression_1" typeRef="boolean"><text>hasSalaryAccount</text></inputExpression>
+      </input>
+      <input id="InputClause_1abc9q" label="Opened on" camunda:inputVariable="openedOn">
+        <inputExpression id="LiteralExpression_0z8w1xa" typeRef="date"><text>openedOn</text></inputExpression>
+      </input>
+      <input id="InputClause_0k4m7re" label="Branch">
+        <inputExpression id="LiteralExpression_1m3n5pb" typeRef="string"><text>branch</text></inputExpression>
+      </input>
+      <output id="Output_1" label="Limit (VND)" name="limit" typeRef="number" />
+      <output id="OutputClause_0r2t6yu" label="Reviewer" name="reviewer" typeRef="string" />
+      <rule id="DecisionRule_10uqk3w">
+        <description>Salary account for over a year</description>
+        <inputEntry id="UnaryTests_0a1"><text>true</text></inputEntry>
+        <inputEntry id="UnaryTests_0a2"><text>&lt; date("2025-11-28")</text></inputEntry>
+        <inputEntry id="UnaryTests_0a3"><text>not("HQ-PREMIER")</text></inputEntry>
+        <outputEntry id="LiteralExpression_0b1"><text>30000000</text></outputEntry>
+        <outputEntry id="LiteralExpression_0b2"><text>"branch-manager"</text></outputEntry>
+      </rule>
+      <rule id="DecisionRule_1qw8n5c">
+        <inputEntry id="UnaryTests_0c1"><text>true</text></inputEntry>
+        <inputEntry id="UnaryTests_0c2"><text></text></inputEntry>
+        <inputEntry id="UnaryTests_0c3"><text></text></inputEntry>
+        <outputEntry id="LiteralExpression_0d1"><text>5000000</text></outputEntry>
+        <outputEntry id="LiteralExpression_0d2"><text>"credit-officer"</text></outputEntry>
+      </rule>
+      <rule id="DecisionRule_0m5v2xe">
+        <inputEntry id="UnaryTests_0e1"><text></text></inputEntry>
+        <inputEntry id="UnaryTests_0e2"><text></text></inputEntry>
+        <inputEntry id="UnaryTests_0e3"><text></text></inputEntry>
+        <outputEntry id="LiteralExpression_0f1"><text>0</text></outputEntry>
+        <outputEntry id="LiteralExpression_0f2"><text>"none"</text></outputEntry>
+      </rule>
+    </decisionTable>
+  </decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram>
+      <dmndi:DMNShape dmnElementRef="overdraft-approval"><dc:Bounds height="80" width="180" x="160" y="100" /></dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</definitions>

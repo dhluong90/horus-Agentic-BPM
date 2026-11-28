@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<dmn:definitions xmlns:dmn="http://www.omg.org/spec/DMN/20180521/MODEL/" xmlns="https://kiegroup.org/dmn/_9D1B5C0A-7E3F-4C3B-8A55-5A1E0B6C2F11" xmlns:feel="http://www.omg.org/spec/DMN/20180521/FEEL/" xmlns:kie="http://www.drools.org/kie/dmn/1.2" xmlns:dmndi="http://www.omg.org/spec/DMN/20180521/DMNDI/" xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" id="_9D1B5C0A-7E3F-4C3B-8A55-5A1E0B6C2F11" name="loan-rate" typeLanguage="http://www.omg.org/spec/DMN/20180521/FEEL/" namespace="https://kiegroup.org/dmn/_9D1B5C0A-7E3F-4C3B-8A55-5A1E0B6C2F11">
+  <dmn:extensionElements/>
+  <dmn:inputData id="_A1" name="score">
+    <dmn:extensionElements/>
+    <dmn:variable id="_A2" name="score" typeRef="number"/>
+  </dmn:inputData>
+  <dmn:decision id="loan-rate" name="Loan rate">
+    <dmn:extensionElements/>
+    <dmn:variable id="_B1" name="Loan rate"/>
+    <dmn:informationRequirement id="_B2">
+      <dmn:requiredInput href="#_A1"/>
+    </dmn:informationRequirement>
+    <dmn:decisionTable id="_C1" hitPolicy="UNIQUE" preferredOrientation="Rule-as-Row">
+      <dmn:input id="_C2">
+        <dmn:inputExpression id="_C3" typeRef="number">
+          <dmn:text>score</dmn:text>
+        </dmn:inputExpression>
+      </dmn:input>
+      <dmn:input id="_C4" label="Product">
+        <dmn:inputExpression id="_C5" typeRef="string">
+          <dmn:text>product</dmn:text>
+        </dmn:inputExpression>
+      </dmn:input>
+      <dmn:output id="_C6" name="rate" typeRef="number"/>
+      <dmn:annotation name="Comment"/>
+      <dmn:rule id="Rule_D1">
+        <dmn:inputEntry id="_D2"><dmn:text>[300..600)</dmn:text></dmn:inputEntry>
+        <dmn:inputEntry id="_D3"><dmn:text>"PERSONAL"</dmn:text></dmn:inputEntry>
+        <dmn:outputEntry id="_D4"><dmn:text>18.5</dmn:text></dmn:outputEntry>
+        <dmn:annotationEntry><dmn:text>subprime</dmn:text></dmn:annotationEntry>
+      </dmn:rule>
+      <dmn:rule id="Rule_E1">
+        <dmn:inputEntry id="_E2"><dmn:text>[600..750)</dmn:text></dmn:inputEntry>
+        <dmn:inputEntry id="_E3"><dmn:text>"PERSONAL"</dmn:text></dmn:inputEntry>
+        <dmn:outputEntry id="_E4"><dmn:text>12.25</dmn:text></dmn:outputEntry>
+        <dmn:annotationEntry><dmn:text></dmn:text></dmn:annotationEntry>
+      </dmn:rule>
+      <dmn:rule id="Rule_F1">
+        <dmn:inputEntry id="_F2"><dmn:text>&gt;= 750</dmn:text></dmn:inputEntry>
+        <dmn:inputEntry id="_F3"><dmn:text>"PERSONAL"</dmn:text></dmn:inputEntry>
+        <dmn:outputEntry id="_F4"><dmn:text>9.9</dmn:text></dmn:outputEntry>
+        <dmn:annotationEntry><dmn:text></dmn:text></dmn:annotationEntry>
+      </dmn:rule>
+    </dmn:decisionTable>
+  </dmn:decision>
+  <dmndi:DMNDI>
+    <dmndi:DMNDiagram id="_G1">
+      <dmndi:DMNShape id="_G2" dmnElementRef="loan-rate">
+        <dc:Bounds x="300" y="200" width="160" height="80"/>
+      </dmndi:DMNShape>
+    </dmndi:DMNDiagram>
+  </dmndi:DMNDI>
+</dmn:definitions>

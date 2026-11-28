@@ -130,6 +130,7 @@ public final class DmnReader {
         description.ifPresent(d -> doc.put("description", d));
         horus(root, "timeZone").ifPresent(zone -> doc.put("timeZone", zone));
         horus(root, "moneyRounding").ifPresent(r -> doc.put("moneyRounding", r));
+        refuseErrorModeSpec(root);
 
         XmlTree table = null;
         for (XmlTree child : decision.children()) {
@@ -433,6 +434,22 @@ public final class DmnReader {
             }
         }
         return texts;
+    }
+
+    /**
+     * {@code horus:errorMode} on the root: {@code strict} is what every imported table evaluates in and is not
+     * stored; {@code spec} is refused with the stage that adds it, never read as if absent (RLE-081, PD-125).
+     */
+    private static void refuseErrorModeSpec(XmlTree root) {
+        horus(root, "errorMode").ifPresent(mode -> {
+            if ("spec".equals(mode)) {
+                throw invalid("horus:errorMode spec is added in stage S1; this release evaluates every imported table"
+                        + " in errorMode strict", root);
+            }
+            if (!"strict".equals(mode)) {
+                throw invalid("horus:errorMode must be strict or spec", root);
+            }
+        });
     }
 
     /** A {@code horus:} extension attribute in {@code urn:horus-bpm:dmn:extensions:v1}. */
