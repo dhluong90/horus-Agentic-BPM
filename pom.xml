@@ -95,10 +95,10 @@
       sets the PostgreSQL image per leg (14, 16 and 18), also pinned; tools/check-image-pins.py refuses
       an image reference without a digest.
     -->
-    <!-- postgres:16-alpine, PostgreSQL 16.16, resolved 20 Nov 2026 (the image docker-compose.yml pins). -->
-    <bpm.test.postgres.image>postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857</bpm.test.postgres.image>
-    <!-- edoburu/pgbouncer:v1.26.1-p0, resolved 20 Nov 2026. -->
-    <bpm.test.pgbouncer.image>edoburu/pgbouncer@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624</bpm.test.pgbouncer.image>
+    <!-- postgres:16-alpine, PostgreSQL 16.16, resolved 27 Nov 2026 from the registry and Docker Hub, rebuilt 22 Nov (the image docker-compose.yml pins). -->
+    <bpm.test.postgres.image>postgres@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d</bpm.test.postgres.image>
+    <!-- ghcr.io/cloudnative-pg/pgbouncer:1.26.1-202611251233-trixie (PgBouncer 1.26.1, Debian trixie), resolved 27 Nov 2026 from the registry; the floating tag 1.26.1-trixie gave the same digest. Reads pgbouncer.ini and userlist.txt, not environment variables (#548). -->
+    <bpm.test.pgbouncer.image>ghcr.io/cloudnative-pg/pgbouncer@sha256:9f648625e11f67f5171f1edd31648c7d02a1a4a5e1b8adf7d4a9db30dce8c22b</bpm.test.pgbouncer.image>
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>

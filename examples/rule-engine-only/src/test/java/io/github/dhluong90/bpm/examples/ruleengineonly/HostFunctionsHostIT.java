@@ -186,7 +186,7 @@ class HostFunctionsHostIT {
     }
 
     private static JsonNode meta(int port, String bearer) throws Exception {
-        HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/bpm/meta"))
+        HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/bpm/meta"))
                 .header("Authorization", bearer).GET().build(), HttpResponse.BodyHandlers.ofString());
         assertThat(meta.statusCode()).isEqualTo(200);
         for (JsonNode module : JSON.readTree(meta.body()).path("modules")) {
@@ -224,7 +224,7 @@ class HostFunctionsHostIT {
     private static Reply send(int port, String bearer, String method, String path, String body, String contentType)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(
-                        URI.create("http://localhost:" + port + "/api/bpm/rules/v1" + path))
+                        URI.create("http://127.0.0.1:" + port + "/api/bpm/rules/v1" + path))
                 .header("Authorization", bearer)
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));

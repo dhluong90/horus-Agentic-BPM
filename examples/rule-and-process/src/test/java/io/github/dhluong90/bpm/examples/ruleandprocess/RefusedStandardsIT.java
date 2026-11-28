@@ -131,7 +131,7 @@ class RefusedStandardsIT {
     }
 
     private HttpResponse<String> post(String path, String contentType, String body) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Basic " + Base64.getEncoder().encodeToString("lan:it-pass".getBytes(StandardCharsets.UTF_8)))
                 .header("Content-Type", contentType).POST(HttpRequest.BodyPublishers.ofString(body)).build();
         return HTTP.send(request, HttpResponse.BodyHandlers.ofString());

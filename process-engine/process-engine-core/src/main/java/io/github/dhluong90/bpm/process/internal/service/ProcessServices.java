@@ -4434,6 +4434,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
                         "COMPENSATION_STEP_COMPLETED", entry.stepId(), job.tokenId(), attemptId, reportedBy, now,
                         details)));
+                publishUndoCompleted(row, entry, attemptId, false, now);
                 closeRetried(tenant, row.id(), job.tokenId(), now);
                 advanceWalk(store.definition(tenant, row.definitionId()).orElseThrow(), tenant, row.id(),
                         job.tokenId());
@@ -4443,6 +4444,33 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     reportedBy);
         }
         return StepCompletion.Outcome.ACCEPTED;
+    }
+
+    /**
+     * PRE-377: one {@code processes.compensation.step-completed.v1} when an undo step is {@code DONE}, in the transaction
+     * that wrote its {@code COMPENSATION_STEP_COMPLETED} history entry. {@code nodeId} is the forward step that was
+     * undone, {@code handler} the compensation handler that ran, {@code outcome} {@code COMPLETED} or, for an undo an
+     * approver marked done by hand, {@code COMPLETED_MANUALLY}. Ids and codes only, never a variable or an output.
+     */
+    private void publishUndoCompleted(InstanceRow row, ProcessStore.CompensationEntry entry, String attemptId,
+            boolean manual, Instant now) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("instanceId", row.id());
+        payload.put("scopeId", entry.scopeTokenId());
+        payload.put("nodeId", entry.stepId());
+        payload.put("handler", entry.handler());
+        payload.put("outcome", manual ? "COMPLETED_MANUALLY" : "COMPLETED");
+        payload.put("seq", entry.seq());
+        if (attemptId != null) {
+            payload.put("attemptId", attemptId);
+        }
+        payload.put("definitionKey", row.definitionKey());
+        payload.put("version", row.definitionVersion());
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        publish(new ProcessEventPublisher.Event(Ids.child(entry.id() + "/undo-completed", 1),
+                "processes.compensation.step-completed.v1", row.tenantId(), now, payload), row.id());
     }
 
     /** PRE-074: an undo failed for good. Its entry is {@code FAILED}, an incident holds the walk, nothing else moves. */
@@ -4563,6 +4591,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("manual", true);
         store.appendHistory(tenant, pending.instanceId(), pending.definitionId(), List.of(new HistoryEntry(
                 "COMPENSATION_STEP_COMPLETED", entry.stepId(), pending.tokenId(), null, approver, now, details)));
+        store.findInstance(tenant, pending.instanceId()).ifPresent(r -> publishUndoCompleted(r, entry, null, true, now));
         ProcessStore.IncidentRow current = store.lockIncident(tenant, pending.id()).orElseThrow();
         ProcessStore.IncidentRow resolved = current.resolved(COMPLETED_MANUALLY, approver, now);
         writeIncident(resolved);

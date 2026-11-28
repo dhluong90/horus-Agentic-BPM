@@ -2798,3 +2798,16 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The `TASK_COMPLETED` row, written in the completing transaction, holds `submission` with the validated values and `idNumber` as `***`; the plain id number is in no history row. `GET /instances/{id}/activities` returns `submission` on that entry and it does not change when the variables change. A task without a form, a link task and a task completed before this was recorded have no `submission`. The kernel only copies the submission, so replaying a command gives the same state and the same hash as before; no migration is needed because `details` is JSONB.
 - **Example:** `submission = {decision: REJECT, reason: income not verified, idNumber: ***}`.
 - **Test ID:** `PRE_390_the_submission_is_recorded_masked_and_later_variable_changes_do_not_alter_it`, `PRE_390_a_task_without_a_form_records_no_submission` (`TaskFormTest`), `PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304` (`ProcessRestContractTest`)
+
+### PRE-377 Each undo step that finishes raises an event naming the handler, the step it undid and the outcome
+- **Traces to:** `TR-COMP-01`, `PRE-073`, `PRE-085`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The fund transfer of `PRE-073`: `hold-funds` (undone by `release-hold`), `debit-source` (undone by `credit-back`) and `credit-target`, which fails with `ACCOUNT_CLOSED`. `25,000,000 VND` is moved from `0011-223344`.
+- **When:** Both undo steps complete.
+- **Then:**
+  - `processes.compensation.step-completed.v1` is published twice, newest first: first `nodeId` `debit-source` with `handler` `credit-back`, then `nodeId` `hold-funds` with `handler` `release-hold`; each has `outcome` `COMPLETED`, the instance id, the saga `scopeId` and the undo `attemptId`.
+  - Each event is published in the transaction that writes the matching `COMPENSATION_STEP_COMPLETED` history entry, and carries no variable or output. An undo an approver marks done by hand has `outcome` `COMPLETED_MANUALLY` and no `attemptId`.
+  - A failed undo step publishes no such event.
+- **Example:** `credit-back undoes debit-source -> step-completed(nodeId=debit-source, handler=credit-back, COMPLETED)`.
+- **Test ID:** `PRE_377_each_finished_undo_step_raises_an_event_newest_first` (`SagaCompensationTest`)
