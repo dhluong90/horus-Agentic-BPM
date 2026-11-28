@@ -369,3 +369,9 @@
 .taskform__masked { display: flex; align-items: center; gap: 12px; min-height: var(--target-min); }
 .taskform__keep { align-self: flex-start; }
 .taskform .review-dock { margin-top: 16px; max-width: 960px; }
+.taskform__unit { flex: none; align-self: center; color: var(--ink-2); font: var(--type-label); white-space: nowrap; }
+.taskform__effects { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font: var(--type-label); }
+.taskform__effects li.is-chosen { color: var(--ink); }
+.taskform__effects strong { font-weight: 600; color: var(--ink); }
+/* On a phone the action card follows the fields instead of floating over them, so it never covers a field. */
+@media (max-width: 640px) { .taskform .review-dock { position: static; } }

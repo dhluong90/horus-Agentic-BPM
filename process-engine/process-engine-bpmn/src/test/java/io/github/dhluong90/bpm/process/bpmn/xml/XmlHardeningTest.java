@@ -4,11 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import io.github.dhluong90.bpm.process.api.BpmnUnsafeXmlException;
-import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import javax.xml.XMLConstants;
 import javax.xml.stream.XMLInputFactory;
-import javax.xml.stream.XMLStreamReader;
 import org.junit.jupiter.api.Test;
 
 class XmlHardeningTest {
@@ -31,16 +29,37 @@ class XmlHardeningTest {
     }
 
     @Test
-    void only_utf8_is_accepted() throws Exception {
+    void the_declared_encoding_decides_how_the_bytes_are_read() {
+        // 0xE9 is "e acute" in ISO-8859-1 and not valid UTF-8
         assertThatThrownBy(() -> XmlHardening.utf8(new byte[] {'<', 'a', '>', (byte) 0xE9, '<', '/', 'a', '>'}))
                 .isInstanceOf(BpmnUnsafeXmlException.class);
-        assertThat(XmlHardening.utf8("﻿<a>café</a>".getBytes(StandardCharsets.UTF_8))).isEqualTo("<a>café</a>");
+        assertThat(XmlHardening.utf8("\uFEFF<a>caf\u00e9</a>".getBytes(StandardCharsets.UTF_8))).isEqualTo("<a>caf\u00e9</a>");
 
-        XMLStreamReader latin1 = XmlHardening.newInputFactory(Limits.DEFAULTS)
-                .createXMLStreamReader(new StringReader("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a/>"));
-        assertThatThrownBy(() -> XmlHardening.requireUtf8Declaration(latin1)).isInstanceOf(BpmnUnsafeXmlException.class);
-        XMLStreamReader utf8 = XmlHardening.newInputFactory(Limits.DEFAULTS)
-                .createXMLStreamReader(new StringReader("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>"));
-        XmlHardening.requireUtf8Declaration(utf8);
+        byte[] latin1 = "<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a>Nguy\u00e9n</a>"
+                .getBytes(StandardCharsets.ISO_8859_1);
+        assertThat(XmlHardening.decode(latin1)).endsWith("<a>Nguy\u00e9n</a>");
+        byte[] windows = "<?xml version='1.0' encoding='windows-1252'?><a>\u20ac</a>"
+                .getBytes(java.nio.charset.Charset.forName("windows-1252"));
+        assertThat(XmlHardening.decode(windows)).endsWith("<a>\u20ac</a>");
+        assertThat(XmlHardening.decode("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a>caf\u00e9</a>"
+                .getBytes(StandardCharsets.UTF_8))).endsWith("<a>caf\u00e9</a>");
+        assertThat(XmlHardening.decode("<a>caf\u00e9</a>".getBytes(StandardCharsets.UTF_8))).isEqualTo("<a>caf\u00e9</a>");
+    }
+
+    @Test
+    void an_encoding_that_hides_the_markup_or_does_not_match_the_bytes_is_refused() {
+        assertThatThrownBy(() -> XmlHardening.decode("<?xml version=\"1.0\" encoding=\"UTF-16\"?><a/>"
+                .getBytes(StandardCharsets.UTF_8))).isInstanceOf(BpmnUnsafeXmlException.class)
+                .hasMessageContaining("does not read");
+        assertThatThrownBy(() -> XmlHardening.decode("<?xml version=\"1.0\" encoding=\"NO-SUCH\"?><a/>"
+                .getBytes(StandardCharsets.UTF_8))).isInstanceOf(BpmnUnsafeXmlException.class);
+        // US-ASCII declared, a byte above 0x7F
+        assertThatThrownBy(() -> XmlHardening.decode(new byte[] {'<', '?', 'x', 'm', 'l', ' ', 'e', 'n', 'c', 'o', 'd', 'i',
+                'n', 'g', '=', '"', 'U', 'S', '-', 'A', 'S', 'C', 'I', 'I', '"', '?', '>', '<', 'a', '>', (byte) 0xE9,
+                '<', '/', 'a', '>'})).isInstanceOf(BpmnUnsafeXmlException.class);
+        // a byte order mark says UTF-8
+        byte[] bomAndLatin1 = ("\u00ef\u00bb\u00bf<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?><a/>")
+                .getBytes(StandardCharsets.ISO_8859_1);
+        assertThatThrownBy(() -> XmlHardening.decode(bomAndLatin1)).isInstanceOf(BpmnUnsafeXmlException.class);
     }
 }

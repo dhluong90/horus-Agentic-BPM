@@ -101,18 +101,18 @@
       </bpmn:extensionElements>
     </bpmn:businessRuleTask>
     <bpmn:exclusiveGateway id="g-grade" name="Risk route" default="f-grade-decline"/>
-    <bpmn:userTask id="prepare-proposal" name="Prepare the credit proposal (maker)" horus:assignee="role:CREDIT_ANALYST" horus:resultVariable="proposal"/>
+    <bpmn:userTask id="prepare-proposal" name="Prepare the credit proposal (maker)" horus:assignee="role:CREDIT_ANALYST" horus:form="loan-proposal" horus:resultVariable="proposal"/>
     <bpmn:businessRuleTask id="determine-authority" name="Find who may approve" horus:ruleSet="approval-authority" horus:resultVariable="authority" default="f-authority-committee">
       <bpmn:extensionElements>
         <horus:input name="amountMinor" value="${instance.proposal.amountMinor}"/>
         <horus:input name="riskGrade" value="${instance.scoring.riskGrade}"/>
       </bpmn:extensionElements>
     </bpmn:businessRuleTask>
-    <bpmn:userTask id="approve-manager" name="Approve (credit manager, four eyes)" horus:assignee="role:CREDIT_MANAGER" horus:fourEyes="true" horus:resultVariable="approval" default="f-mgr-reject"/>
+    <bpmn:userTask id="approve-manager" name="Approve (credit manager, four eyes)" horus:assignee="role:CREDIT_MANAGER" horus:fourEyes="true" horus:form="loan-approval" horus:resultVariable="approval" default="f-mgr-reject"/>
     <bpmn:boundaryEvent id="manager-sla" name="4 hours" attachedToRef="approve-manager" cancelActivity="false">
       <bpmn:timerEventDefinition><bpmn:timeDuration>PT4H</bpmn:timeDuration></bpmn:timerEventDefinition>
     </bpmn:boundaryEvent>
-    <bpmn:userTask id="approve-committee" name="Approve (credit committee, four eyes)" horus:assignee="role:CREDIT_COMMITTEE" horus:fourEyes="true" horus:resultVariable="approval" default="f-com-reject"/>
+    <bpmn:userTask id="approve-committee" name="Approve (credit committee, four eyes)" horus:assignee="role:CREDIT_COMMITTEE" horus:fourEyes="true" horus:form="loan-approval" horus:resultVariable="approval" default="f-com-reject"/>
     <bpmn:boundaryEvent id="committee-sla" name="1 day" attachedToRef="approve-committee" cancelActivity="false">
       <bpmn:timerEventDefinition><bpmn:timeDuration>P1D</bpmn:timeDuration></bpmn:timerEventDefinition>
     </bpmn:boundaryEvent>

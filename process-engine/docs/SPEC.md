@@ -568,6 +568,16 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Example:** `formLink https://evil.example/t/{taskId} -> 422 FORM_LINK_NOT_ALLOWED; with the origin listed -> 201`.
 - **Test ID:** `PRE_219_an_unregistered_form_a_bad_schema_and_bad_hints_are_each_refused_with_their_code`, `PRE_219_a_task_declares_at_most_one_form_and_a_reference_stays_inside_the_form_folder`, `PRE_219_the_same_link_is_accepted_once_its_origin_is_listed`, `PRE_219_the_form_is_part_of_the_definition_hash_so_changing_it_needs_a_new_approval`, `PRE_219_request_approval_checks_the_registry_again_so_a_form_removed_since_import_blocks_it` (`TaskFormTest`), `PRE_219_a_link_is_relative_or_on_a_listed_origin_and_nothing_else`, `PRE_219_a_schema_outside_the_task_form_subset_is_named_by_path_and_rule` (`TaskFormsTest`), `PRE_219_a_schema_path_is_read_as_the_schema_without_hints`, `PRE_219_a_form_key_is_read_from_its_envelope_with_the_hints`, `PRE_219_a_name_outside_the_folder_or_not_plain_is_not_registered`, `PRE_219_the_settings_accept_relative_origins_and_a_relative_folder_only` (`ClasspathFormRegistryTest`)
 
+### PRE-393 Form hints carry option labels with consequences, unit suffixes and money formats
+- **Traces to:** `TR-UI-02`, `TR-STD-03`, #639
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan approval form with `decision` (`APPROVE`, `REJECT`), `termMonths`, `amount` and `currency`, and hints `options.decision.APPROVE = {label: {en: "Approve", vi: "Phê duyệt"}, consequence: {en: "The loan is disbursed.", vi: "Khoản vay được giải ngân."}}`, `units.termMonths = {en: "months", vi: "tháng"}`, `formats.amount = {currencyFrom: "currency", grouping: true}`.
+- **When:** The definition is imported; then variants are imported with an option for `MAYBE` (not in the enum), an option on a non-enum field, a unit for an undeclared field, a lower-case `currency`, a well-formed but unassigned code such as `ZZZ`, both `currency` and `currencyFrom`, a `currencyFrom` that names its own field or a masked field, and a member `palette`.
+- **Then:** The first is accepted and the form is returned with the hints as written; each variant is `422 VALIDATION_FAILED` with one `FORM_HINTS_INVALID` problem (the unknown member named). Completion validation is unchanged: the value sent is `APPROVE`, never its label. The hints are part of the form in the definition hash, as `labels` are.
+- **Example:** `options.decision.APPROVE.label.vi -> "Phê duyệt"; amount 250000000 + currency VND -> shown "250.000.000 ₫" in vi`.
+- **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named`, `PRE_393_a_currency_must_be_a_real_iso_4217_code`, `PRE_393_currency_from_must_name_another_field_that_is_not_masked` (`TaskFormsTest`)
+
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
 - **Milestone:** M2
@@ -2789,6 +2799,16 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
 - **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)
 
+### PRE-390 The history of a completed task records what was submitted, masked as the form says
+- **Traces to:** `TR-SEC-05`, `TR-AUD-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The credit review task `approve` has a form whose field `idNumber` is `mask: true`; the officer `an` has claimed it.
+- **When:** `an` completes it with `decision = REJECT`, `reason = income not verified` and `idNumber = 079012345678`, and the case's variables change afterwards.
+- **Then:** The `TASK_COMPLETED` row, written in the completing transaction, holds `submission` with the validated values and `idNumber` as the marker `{"masked": true}`, so an audit tells a masked value from the text `***`; the plain id number is in no history row. A submitted field the form does not declare (`note`) is not stored: its path only is in `unrecordedFields`. `GET /instances/{id}/activities` returns `submission` on that entry and it does not change when the variables change. A task without a form, a link task and a task completed before this was recorded have no `submission`. The kernel only copies the submission, so replaying a command gives the same state and the same hash as before; no migration is needed because `details` is JSONB.
+- **Example:** `submission = {decision: REJECT, reason: income not verified, idNumber: {masked: true}}`, `unrecordedFields = [note]`.
+- **Test ID:** `PRE_390_the_submission_is_recorded_masked_and_later_variable_changes_do_not_alter_it`, `PRE_390_a_field_the_form_does_not_declare_is_named_but_never_stored`, `PRE_390_a_task_without_a_form_records_no_submission` (`TaskFormTest`), `PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304` (`ProcessRestContractTest`)
+
 ### PRE-377 Each undo step that finishes raises an event naming the handler, the step it undid and the outcome
 - **Traces to:** `TR-COMP-01`, `PRE-073`, `PRE-085`
 - **Milestone:** M3
@@ -2881,3 +2901,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The reader binds the step to the handler `kyc.check` by name, as `horus:handler` does: the canonical form and the hash are equal for the two files, and the export writes `horus:handler` and no `implementation`. Naming the same handler in both is allowed; two different names are `IMPLEMENTATION_HANDLER_CONFLICT`; a name that is not a letter followed by letters, digits, `_`, `.` or `-` (at most 100) is `IMPLEMENTATION_HANDLER_INVALID`. The engine never loads a class or calls a service from this value. `##WebService`, any other URL or URN, and the urn form on a task that is not a service task stay refused (`BPMN_UNSUPPORTED_ELEMENT`, `not planned`).
 - **Example:** `urn:horus-bpm:handler:kyc.check` -> handler `kyc.check`; `##WebService` -> refused, element `implementation`.
 - **Test ID:** `PRE_385_implementation_urn_names_the_handler_and_gives_the_same_definition_as_horus_handler`, `PRE_385_two_different_names_or_an_invalid_name_are_refused`, `PRE_385_every_other_implementation_value_and_the_urn_on_other_tasks_stay_refused` (`RefusalsLiftedTest`)
+
+### PRE-386 A file may declare an encoding other than UTF-8: ISO-8859-n, windows-125n or US-ASCII
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process file whose declaration says `encoding="ISO-8859-1"` and whose task is named `Kiém tra ho so`, written in those bytes; the same with `windows-1252` and a euro sign; UTF-8 bytes under `US-ASCII`; a `UTF-16` declaration.
+- **When:** Each is imported.
+- **Then:** The bytes are decoded once, strictly, in the declared encoding and the parser reads that text, so the stored source and the parsed document never differ: the task name is `Kiém tra ho so`, and the export is UTF-8 with its own declaration. Bytes that are not valid in the declared encoding, an encoding the JVM does not know, UTF-16 and UTF-32 (which hide the markup from the declaration check), and a byte order mark with a non-UTF-8 declaration are refused with `BPMN_UNSAFE_XML`. A file with no declaration is UTF-8 as before.
+- **Example:** `encoding="ISO-8859-1"`, byte `0xE9` -> `é`; `encoding="UTF-16"` -> `422 BPMN_UNSAFE_XML`.
+- **Test ID:** `PRE_386_a_file_in_iso_8859_1_is_read_as_the_text_it_declares_and_exports_as_utf_8`, `PRE_386_windows_1252_and_us_ascii_declarations_are_read_and_a_mismatch_is_refused` (`ModellerFileReadingTest`), `the_declared_encoding_decides_how_the_bytes_are_read`, `an_encoding_that_hides_the_markup_or_does_not_match_the_bytes_is_refused` (`XmlHardeningTest`)
+
+### PRE-387 A process id that is not a key, a message with no name and a lane set with no id are read; the export restores the process id
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process `_3d1ef204-2d4c-4643-8fc5-c319cc032ec0` and a process `Loan_Review`; two processes `Loan_Review` and `loan-review` in one collaboration; messages `Message_1404332496319` and `_9f` with no name; a message `m1` named `Message_9` beside an unnamed `Message_9`; a `laneSet` with no id.
+- **When:** They are imported, and the first is exported.
+- **Then:** The definition key is the id in lower case with every run of other characters as one hyphen, `p-` in front when it would not start with a letter, at most 100 characters: `p-3d1ef204-2d4c-4643-8fc5-c319cc032ec0`, `loan-review`. The same id always gives the same key; a key that is already kebab-case is never changed. The reader keeps the original id with the process, the export writes it back (the process, its participant `processRef`, the diagram plane), and it is not in the canonical form, so the hash is the same. Two ids that map to one key are `422 VALIDATION_FAILED`, `PROCESS_ID_COLLISION`. A message with no `name` takes its id as the name, with other characters as `_` and `m` in front when it would not start with a letter; if another message has that name the file is refused with `MESSAGE_NAME_COLLISION`. The export writes the name it took; message ids are not restored, because the engine writes a message by its name. A lane set or lane with no id gets `laneSet_line<n>` or `lane_line<n>`.
+- **Example:** `_3d1ef204-...` -> key `p-3d1ef204-...`, export `<process id="_3d1ef204-...">`; `Loan_Review` + `loan-review` -> `PROCESS_ID_COLLISION`.
+- **Test ID:** `PRE_387_a_process_id_that_is_not_a_key_is_mapped_deterministically_and_the_export_restores_it`, `PRE_387_two_processes_that_map_to_one_key_are_refused_and_a_key_is_never_changed`, `PRE_387_a_message_with_no_name_takes_its_mapped_id_and_a_lane_set_without_an_id_is_read` (`ModellerFileReadingTest`)
+
+### PRE-388 A process that does not say isExecutable is executable
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process with no `isExecutable` attribute, and one with `isExecutable="false"`.
+- **When:** Each is imported.
+- **Then:** BPMN leaves the attribute open when it is absent, and a modeller that never writes it is not saying "do not run": the first imports, and `warnings` lists `EXECUTABLE_ASSUMED` so the approver sees that the attribute was assumed. `isExecutable="false"` is the author's word and stays `NOT_EXECUTABLE`; in a collaboration it is a pool kept for display. `horus:resultVariable` on a user task and `horus:correlationKey` on a message wait stay required: a result with no variable would merge into every process variable, and a message with no key could reach any instance.
+- **Example:** `<process id="kyc-review">` -> imports; `isExecutable="false"` -> `NOT_EXECUTABLE`.
+- **Test ID:** `PRE_388_a_process_that_does_not_say_isExecutable_is_executable_and_false_stays_refused` (`ModellerFileReadingTest`)
+
+### PRE-389 An import and an item definition are ignored with a warning
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A file with `<import importType="http://www.w3.org/2001/XMLSchema" location="types.xsd"/>` and `<itemDefinition id="i1" structureRef="string"/>`.
+- **When:** It is imported.
+- **Then:** The file imports and `warnings` lists `BPMN_IMPORT_IGNORED` and `ITEM_DEFINITION_IGNORED`: the engine's variables are typed by their values and it fetches no other file. The stored source keeps both. `startQuantity` and `completionQuantity` of 1 (the default) were already accepted; any other value stays refused (a token carries no quantity).
+- **Example:** `import` -> warning `BPMN_IMPORT_IGNORED`, `201`.
+- **Test ID:** `PRE_389_an_import_and_an_item_definition_are_ignored_with_a_warning_and_not_refused` (`ModellerFileReadingTest`)

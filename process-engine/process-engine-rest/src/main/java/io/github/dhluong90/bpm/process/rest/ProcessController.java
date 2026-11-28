@@ -696,6 +696,14 @@ public class ProcessController {
                 });
             }
             putIfPresent(item, "resultVariable", entry.resultVariable());
+            if (entry.submission() != null) {
+                // #663: stored masked; written as it is.
+                item.set("submission", io.github.dhluong90.bpm.process.internal.json.Values.toJson(entry.submission()));
+            }
+            if (entry.unrecordedFields() != null) {
+                tools.jackson.databind.node.ArrayNode left = item.putArray("unrecordedFields");
+                entry.unrecordedFields().forEach(left::add);
+            }
         }
         tools.jackson.databind.node.ArrayNode compensations = body.putArray("compensations");
         for (InstanceActivities.Compensation c : activities.compensations()) {

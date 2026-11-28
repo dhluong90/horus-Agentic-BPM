@@ -1,0 +1,32 @@
+{
+  "schema": {
+    "type": "object",
+    "required": ["amountMinor", "recommendation"],
+    "properties": {
+      "amountMinor": { "type": "integer", "minimum": 1 },
+      "tenorMonths": { "type": "integer", "minimum": 1, "maximum": 360 },
+      "recommendation": { "enum": ["APPROVE", "DECLINE"] },
+      "note": { "type": "string", "maxLength": 500 }
+    },
+    "if": { "required": ["recommendation"], "properties": { "recommendation": { "const": "DECLINE" } } },
+    "then": { "required": ["note"] }
+  },
+  "hints": {
+    "order": ["amountMinor", "tenorMonths", "recommendation", "note"],
+    "widgets": { "note": "textarea", "recommendation": "radio" },
+    "labels": {
+      "amountMinor": { "en": "Proposed amount", "vi": "Số tiền đề xuất" },
+      "tenorMonths": { "en": "Term", "vi": "Kỳ hạn" },
+      "recommendation": { "en": "Your recommendation", "vi": "Đề xuất của bạn" },
+      "note": { "en": "Reason for the approver (required when declining)", "vi": "Lý do gửi người phê duyệt (bắt buộc khi từ chối)" }
+    },
+    "options": {
+      "recommendation": {
+        "APPROVE": { "label": { "en": "Recommend approval", "vi": "Đề nghị phê duyệt" }, "consequence": { "en": "Goes to an approver.", "vi": "Chuyển cho người phê duyệt." } },
+        "DECLINE": { "label": { "en": "Recommend decline", "vi": "Đề nghị từ chối" }, "consequence": { "en": "Goes to an approver with your reason.", "vi": "Chuyển người phê duyệt kèm lý do." } }
+      }
+    },
+    "units": { "tenorMonths": { "en": "months", "vi": "tháng" } },
+    "formats": { "amountMinor": { "grouping": true, "currency": "VND" } }
+  }
+}

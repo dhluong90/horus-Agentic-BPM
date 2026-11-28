@@ -11,7 +11,7 @@ import { fieldLabel, isMoney } from '../model/review';
 
 export type FieldKind =
   | { kind: 'text'; multiline: boolean; maxLength: number | undefined }
-  | { kind: 'number'; integer: boolean }
+  | { kind: 'number'; integer: boolean; grouped: boolean }
   | { kind: 'money'; currencies: readonly string[] }
   | { kind: 'date' }
   | { kind: 'datetime' }
@@ -24,6 +24,14 @@ export interface FormField {
   kind: FieldKind;
   required: boolean;
   readOnly: boolean;
+  /** What each choice is called in the user's language, from the hints; a code with no label is shown in words (see `optionText`). */
+  optionLabels: Readonly<Record<string, string>>;
+  /** What choosing each option leads to, one short sentence per option, from the hints. */
+  effects: Readonly<Record<string, string>>;
+  /** A unit or currency shown after the input ("VND", "months"), from the `units` and `formats` hints. */
+  unit: string | undefined;
+  /** The schema's `if`/`then` makes this field required while another field has the given value. */
+  requiredWhen: { field: string; equals: string } | undefined;
   /** The schema marks it `mask: true` and the task holds a value: the screen never shows or sends it. */
   masked: boolean;
 }
@@ -33,7 +41,7 @@ type Json = Readonly<Record<string, unknown>>;
 const asRecord = (value: unknown): Json | undefined => (typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Json) : undefined);
 const asStrings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : []);
 
-function kindOf(property: Json, widget: string | undefined): FieldKind | undefined {
+function kindOf(property: Json, widget: string | undefined, grouping = false): FieldKind | undefined {
   const options = asStrings(property['enum']);
   if (options.length > 0) return { kind: 'choice', options, radio: widget === 'radio' || (widget === undefined && options.length <= 3) };
   switch (property['type']) {
@@ -44,9 +52,9 @@ function kindOf(property: Json, widget: string | undefined): FieldKind | undefin
       return { kind: 'text', multiline: widget === 'textarea' || (typeof max === 'number' && max > 120), maxLength: typeof max === 'number' ? max : undefined };
     }
     case 'integer':
-      return { kind: 'number', integer: true };
+      return { kind: 'number', integer: true, grouped: grouping || widget === 'grouped' };
     case 'number':
-      return { kind: 'number', integer: false };
+      return { kind: 'number', integer: false, grouped: grouping || widget === 'grouped' };
     case 'boolean':
       return { kind: 'yesno' };
     case 'object': {
@@ -64,6 +72,47 @@ function isMoneySchema(property: Json): boolean {
   return properties !== undefined && Object.keys(properties).sort().join() === 'amount,currency';
 }
 
+const localized = (value: unknown, locale: Locale): string | undefined => {
+  if (typeof value === 'string') return value;
+  const named = asRecord(value);
+  return typeof named?.[locale] === 'string' ? named[locale] : typeof named?.['en'] === 'string' ? named['en'] : undefined;
+};
+
+/** The `options` hint of one enum field: per value, a `label` and an optional `consequence`, each per language. */
+const optionTexts = (value: unknown, member: 'label' | 'consequence', locale: Locale): Record<string, string> => {
+  const out: Record<string, string> = {};
+  for (const [code, entry] of Object.entries(asRecord(value) ?? {})) {
+    const text = localized(asRecord(entry)?.[member], locale);
+    if (text !== undefined) out[code] = text;
+  }
+  return out;
+};
+
+/** The currency a `formats` hint names: a fixed code, or the code held by another field of the task's data. */
+const currencyOf = (format: Json | undefined, data: Json): string | undefined => {
+  if (typeof format?.['currency'] === 'string') return format['currency'];
+  const from = format?.['currencyFrom'];
+  const held = typeof from === 'string' ? data[from] : undefined;
+  return typeof held === 'string' ? held : undefined;
+};
+
+/** `if: {required:[x], properties:{x:{const:v}}}, then: {required:[y]}` as "y is required while x is v". */
+function requiredWhenOf(schema: Json): Map<string, { field: string; equals: string }> {
+  const out = new Map<string, { field: string; equals: string }>();
+  const condition = asRecord(schema['if']);
+  const properties = asRecord(condition?.['properties']);
+  const entry = properties === undefined ? undefined : Object.entries(properties)[0];
+  const equals = asRecord(entry?.[1])?.['const'];
+  if (entry === undefined || typeof equals !== 'string') return out;
+  for (const name of asStrings(asRecord(schema['then'])?.['required'])) out.set(name, { field: entry[0], equals });
+  return out;
+}
+
+/** A field is required by the schema, or while the field its `if` names has the value it names. */
+export function isRequired(field: FormField, drafts: Drafts): boolean {
+  return field.required || (field.requiredWhen !== undefined && drafts[field.requiredWhen.field] === field.requiredWhen.equals);
+}
+
 /** The fields of the form in the hints' order, then the rest in the schema's order. A field the cockpit cannot draw is left out. */
 export function fieldsOf(form: { schema: Json; hints: Json; data: Json }, locale: Locale): FormField[] {
   const properties = asRecord(form.schema['properties']) ?? {};
@@ -74,11 +123,16 @@ export function fieldsOf(form: { schema: Json; hints: Json; data: Json }, locale
   const order = asStrings(form.hints['order']).filter((name) => name in properties);
   const names = [...order, ...Object.keys(properties).filter((name) => !order.includes(name))];
   const fields: FormField[] = [];
+  const conditional = requiredWhenOf(form.schema);
+  const options = asRecord(form.hints['options']) ?? {};
+  const units = asRecord(form.hints['units']) ?? {};
+  const formats = asRecord(form.hints['formats']) ?? {};
   for (const name of names) {
     const property = asRecord(properties[name]);
     if (property === undefined) continue;
     const widget = typeof widgets[name] === 'string' ? widgets[name] : undefined;
-    const kind = kindOf(property, widget);
+    const format = asRecord(formats[name]);
+    const kind = kindOf(property, widget, format?.['grouping'] === true);
     if (kind === undefined) continue;
     const named = asRecord(labels[name]);
     const label = typeof named?.[locale] === 'string' ? named[locale] : typeof named?.['en'] === 'string' ? named['en'] : fieldLabel(name);
@@ -88,6 +142,10 @@ export function fieldsOf(form: { schema: Json; hints: Json; data: Json }, locale
       kind,
       required: required.has(name),
       readOnly: readOnly.has(name) || widget === 'readonly',
+      optionLabels: optionTexts(options[name], 'label', locale),
+      effects: optionTexts(options[name], 'consequence', locale),
+      unit: localized(units[name], locale) ?? currencyOf(format, form.data),
+      requiredWhen: conditional.get(name),
       masked: property['mask'] === true && form.data[name] !== undefined && form.data[name] !== null,
     });
   }
@@ -96,6 +154,15 @@ export function fieldsOf(form: { schema: Json; hints: Json; data: Json }, locale
 
 /** What the operator typed, by field name; money keeps its currency apart under `<name>.currency`. */
 export type Drafts = Readonly<Record<string, string>>;
+
+/** What a choice is called: its hinted label, else the code in words ("APPROVED" is "Approved"), never the raw code. */
+export const optionText = (field: Pick<FormField, 'optionLabels'>, code: string): string => field.optionLabels[code] ?? inWords(code);
+
+/** "APPROVED" as "Approved", "NEEDS_REVIEW" as "Needs review": a code with no label is still read as words. */
+const inWords = (code: string): string => {
+  const text = code.split(/[\s_-]+/).filter((word) => word !== '').join(' ').toLowerCase();
+  return text === '' ? code : text.charAt(0).toUpperCase() + text.slice(1);
+};
 
 export const currencyKey = (name: string) => `${name}.currency`;
 
@@ -134,7 +201,9 @@ export function initialDrafts(fields: readonly FormField[], data: Json, locale: 
     }
     if (value === undefined || value === null) continue;
     if (typeof value === 'string') drafts[field.name] = field.kind.kind === 'datetime' ? localInput(value) : value;
-    else if (typeof value === 'number') drafts[field.name] = locale === 'vi' ? String(value).replace('.', ',') : String(value);
+    else if (typeof value === 'number') {
+      drafts[field.name] = field.kind.kind === 'number' && field.kind.grouped ? (formatDecimalText(String(value), locale) ?? String(value)) : locale === 'vi' ? String(value).replace('.', ',') : String(value);
+    }
     else if (typeof value === 'boolean') drafts[field.name] = String(value);
   }
   return drafts;
@@ -169,13 +238,14 @@ export function build(fields: readonly FormField[], drafts: Drafts, data: Json, 
       if (!field.masked && data[name] !== undefined && data[name] !== null) result[name] = data[name];
       continue;
     }
+    const required = isRequired(field, drafts);
     if (field.masked && !replaced.has(name)) {
-      if (field.required) problems[name] = 'required';
+      if (required) problems[name] = 'required';
       continue;
     }
     const text = (drafts[name] ?? '').trim();
     if (text === '') {
-      if (field.required) problems[name] = 'required';
+      if (required) problems[name] = 'required';
       continue;
     }
     switch (field.kind.kind) {
@@ -184,7 +254,8 @@ export function build(fields: readonly FormField[], drafts: Drafts, data: Json, 
         else result[name] = text;
         break;
       case 'number': {
-        const plain = locale === 'vi' ? text.replace(',', '.') : text;
+        const ungrouped = field.kind.grouped ? text.split(locale === 'vi' ? '.' : ',').join('') : text;
+        const plain = locale === 'vi' ? ungrouped.replace(',', '.') : ungrouped;
         if (!DECIMAL.test(plain)) problems[name] = 'number';
         else if (field.kind.integer && (!/^-?\d+$/.test(plain) || !Number.isSafeInteger(Number(plain)))) problems[name] = 'integer';
         else result[name] = Number(plain);
