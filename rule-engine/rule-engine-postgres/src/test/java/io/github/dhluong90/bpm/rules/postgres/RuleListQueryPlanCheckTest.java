@@ -74,7 +74,7 @@ class RuleListQueryPlanCheckTest {
                             + "CASE WHEN v = 4 THEN 'PUBLISHED' WHEN v = 3 AND s <= 10 THEN 'PENDING_APPROVAL' ELSE 'DRAFT' END, 'FIRST', ?, "
                             + "'{\"inputs\":[{\"name\":\"tier\"}]}'::jsonb, repeat('a', 64), 'JSON', '{}', repeat('b', 64), 1, "
                             + "CASE WHEN v >= 3 THEN 'ana' END, CASE WHEN v >= 3 THEN ?::timestamptz + (s || ' minutes')::interval END, "
-                            + "CASE WHEN v = 4 THEN 'minh' END, CASE WHEN v = 4 THEN ?::timestamptz END, CASE WHEN v = 4 THEN 'legacy:pre-seal' END, 'ana', ? "
+                            + "CASE WHEN v = 4 THEN 'minh' END, CASE WHEN v = 4 THEN ?::timestamptz END, CASE WHEN v = 4 THEN 'sha256:' || repeat('a', 64) END, 'ana', ? "
                             + "FROM generate_series(1, 40) s, generate_series(1, 4) v")
                     .params(tenant, p, p, at, at, at, at).update();
             seed.sql("INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor, "

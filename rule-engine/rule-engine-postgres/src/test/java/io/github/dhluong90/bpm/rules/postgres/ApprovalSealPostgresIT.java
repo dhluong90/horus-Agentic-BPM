@@ -259,7 +259,22 @@ class ApprovalSealPostgresIT {
             }
         };
         RuleEngines engines = engines(window);
+        java.util.concurrent.atomic.AtomicInteger accepted = new java.util.concurrent.atomic.AtomicInteger();
+        engines.meters().bind(new io.github.dhluong90.bpm.rules.internal.service.EngineMeters.Recorder() {
+            public void evaluation(io.github.dhluong90.bpm.rules.internal.service.EngineMeters.Outcome o, String c,
+                    long n) {
+            }
+
+            public void retired(io.github.dhluong90.bpm.rules.internal.service.EngineMeters.RetireReason r, int n) {
+            }
+
+            public void unkeyedSealAccepted() {
+                accepted.incrementAndGet();
+            }
+        });
         assertThat(evaluate(engines, NOV_20).outcome()).isNotInstanceOf(DecisionResult.Failed.class);
+        // the window is counted (and logged without the seal value) for each version served on an unkeyed seal
+        assertThat(accepted.get()).isEqualTo(1);
         caller.as("bank-a", "omar", APPROVER);
         engines.versionService().reseal("card-fee", 1, WriteOptions.none());
 
@@ -291,6 +306,13 @@ class ApprovalSealPostgresIT {
         publish(engines(ApprovalSealKey.none()), "50000 VND", null);
         assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal'"
                 + " WHERE version_num = 1").update()).hasMessageContaining("rle_version_legacy_seal_guard");
+
+        // and an approved row cannot be inserted with the marker either
+        assertThatThrownBy(() -> jdbc.sql("""
+                INSERT INTO rle_version SELECT (jsonb_populate_record(NULL::rle_version, to_jsonb(s)
+                  || '{"id":"X0000000000000000000000000","version_num":9,"approval_seal":"legacy:pre-seal"}'::jsonb)).*
+                FROM rle_version s WHERE s.version_num = 1""").update())
+                .hasMessageContaining("rle_version_legacy_seal_guard");
 
         // A version the migration marked (simulated by switching the guard off) is served in plain mode, as before
         jdbc.sql("ALTER TABLE rle_version DISABLE TRIGGER rle_version_legacy_seal_guard").update();

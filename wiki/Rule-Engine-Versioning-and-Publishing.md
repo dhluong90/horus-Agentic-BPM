@@ -72,7 +72,9 @@ A host that must also resist a database administrator registers an `ApprovalSeal
 2. Re-seal each approved version, published or retired, with `VersionService.reseal(ruleSet, version, options)`. A second approver does it: not the approver, author or requester of that version. The old seal must verify first, so a version whose date was changed is refused with `SEAL_MISMATCH` and is not blessed. Each re-seal adds one `RESEALED` entry to the history.
 3. When `SELECT DISTINCT split_part(approval_seal, ':', 2) FROM rle_version` no longer lists the old id, remove the old key from `previous()`.
 
-To switch a key on after versions were approved, return `acceptUnkeyedSeals() = true` while you re-seal, then set it back to false; with a key set and the window closed, plain seals and the pre-`V2` marker are refused.
+What the database cannot stop: the check constraint and the trigger that guard the `legacy:pre-seal` marker stop mistakes and casual edits, but a database administrator can drop them, or change the date of a version that already carries the marker, which has nothing to verify. Only keyed seals resist that, so use a key in production and re-seal the marked versions.
+
+To switch a key on after versions were approved, return `acceptUnkeyedSeals() = true` while you re-seal, then set it back to false. While the window is open the engine logs a WARN at start-up and for each version it serves on an unkeyed seal (never the seal value) and counts them in the `horus.rle.seal.unkeyed.accepted` meter; with a key set and the window closed, plain seals and the pre-`V2` marker are refused.
 
 ## Prove a past decision: clock, pin and replay
 

@@ -71,6 +71,15 @@ final class ApprovalSeal {
         return unkeyedOk && constantTime(stored, PLAIN + Hashes.sha256(message));
     }
 
+    /**
+     * Tells whether a version that {@link #matches} did so only because the {@code acceptUnkeyedSeals} window is open:
+     * a key is set and the seal is plain or the pre-seal marker.
+     */
+    boolean acceptedUnkeyed(StoredVersion version) {
+        String stored = version.approvalSeal();
+        return keys.current().isPresent() && stored != null && !stored.startsWith(KEYED);
+    }
+
     /** Tells whether the stored seal is not what {@link #seal} writes now, so the version should be re-sealed. */
     boolean isStale(StoredVersion version) {
         return version.approvalSeal() == null || !version.approvalSeal().equals(seal(version));

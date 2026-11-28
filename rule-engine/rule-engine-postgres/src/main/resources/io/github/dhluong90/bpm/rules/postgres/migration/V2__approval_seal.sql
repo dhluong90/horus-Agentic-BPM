@@ -13,16 +13,22 @@ ALTER TABLE rle_version ADD CONSTRAINT rle_version_approval_seal_check CHECK (
     OR (approved_at IS NOT NULL AND approval_seal IS NOT NULL AND (approval_seal = 'legacy:pre-seal'
         OR approval_seal ~ '^(sha256:[0-9a-f]{64}|hmac-sha256:[A-Za-z0-9_.-]{1,32}:[0-9a-f]{64})$')));
 
--- Nothing writes the marker after this migration: an update that sets it on another seal is refused.
+-- Nothing writes the marker after this migration: an insert with it, or an update that sets it on another seal, is
+-- refused. This stops a mistake and a casual edit; an administrator can still drop the trigger or the constraint.
 CREATE FUNCTION rle_version_legacy_seal_guard() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF NEW.approval_seal = 'legacy:pre-seal' AND OLD.approval_seal IS DISTINCT FROM NEW.approval_seal THEN
-        RAISE EXCEPTION 'rle_version_legacy_seal_guard: the legacy seal marker is written only by migration V2'
-            USING ERRCODE = '23514';
+    IF NEW.approval_seal = 'legacy:pre-seal' THEN
+        IF TG_OP = 'INSERT' THEN
+            RAISE EXCEPTION 'rle_version_legacy_seal_guard: the legacy seal marker is written only by migration V2'
+                USING ERRCODE = '23514';
+        ELSIF OLD.approval_seal IS DISTINCT FROM NEW.approval_seal THEN
+            RAISE EXCEPTION 'rle_version_legacy_seal_guard: the legacy seal marker is written only by migration V2'
+                USING ERRCODE = '23514';
+        END IF;
     END IF;
     RETURN NEW;
 END $$;
-CREATE TRIGGER rle_version_legacy_seal_guard BEFORE UPDATE OF approval_seal ON rle_version
+CREATE TRIGGER rle_version_legacy_seal_guard BEFORE INSERT OR UPDATE OF approval_seal ON rle_version
     FOR EACH ROW EXECUTE FUNCTION rle_version_legacy_seal_guard();
 
 ALTER TABLE rle_version_history ADD COLUMN effective_from timestamp with time zone;
