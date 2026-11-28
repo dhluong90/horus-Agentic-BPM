@@ -44,11 +44,12 @@ public final class RuleEngineLifecycleSweeper implements DisposableBean {
     }
 
     /**
-     * Runs one sweep now and logs what it retired.
+     * Runs one sweep now and logs what it retired. A host that schedules the sweep itself, and a test that starts
+     * two sweeps at the same moment, call it.
      *
-     * @return the number of versions this replica retired
+     * @return the number of versions this replica retired; another replica's retirements are not counted
      */
-    int runOnce() {
+    public int runOnce() {
         int retired = sweep.getAsInt();
         if (retired > 0) {
             LOG.info("Rule Engine lifecycle sweep retired " + retired + " superseded version(s)");

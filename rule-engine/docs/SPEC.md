@@ -446,6 +446,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `clock 2026-12-01T00:00:01Z -> evaluate selects v2; after the sweep on 2 replicas -> v1 RETIRED, 1 retired event (actor system, reason SUPERSEDED)`.
 - **Test ID:** `RLE_027_previous_version_retires_once_when_newer_becomes_effective`
 - **Also tested:** `RLE_027_copies_behind_a_transaction_pooler_retire_a_superseded_version_once` (the pooler leg, two copies, tag `pooler`)
+- **Also tested:** `RLE_027_two_sweeps_started_at_the_same_moment_behind_a_transaction_pooler_retire_each_version_once` (two sweeps released together, tag `pooler`)
 
 ### RLE-028 The engine returns a row-level diff between two versions of a rule set
 - **Traces to:** `TR-UI-02`, `TR-STD-28`, `TR-STD-03`
