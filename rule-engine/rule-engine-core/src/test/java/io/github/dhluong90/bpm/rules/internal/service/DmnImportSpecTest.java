@@ -239,7 +239,7 @@ class DmnImportSpecTest {
     }
 
     @Test
-    void RLE_082_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written() {
+    void RLE_224_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written() {
         // Given a table whose rules carry ids that start with an underscore
         String dmn = new String(CardFee.resource(MODELLER), StandardCharsets.UTF_8)
                 .replace("DecisionRule_0fk2x7a", "_5f3a1").replace("DecisionRule_1lh0wd3", "_9c2b7");
@@ -266,7 +266,7 @@ class DmnImportSpecTest {
     }
 
     @Test
-    void RLE_082_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code() {
+    void RLE_224_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code() {
         String dmn = new String(CardFee.resource(MODELLER), StandardCharsets.UTF_8)
                 .replace("DecisionRule_0fk2x7a", "_a1").replace("DecisionRule_1lh0wd3", "r_a1");
 

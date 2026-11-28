@@ -298,7 +298,7 @@ public final class DmnReader {
     private static final Pattern DMN_ID = Pattern.compile("^[A-Za-z0-9_.-]{1,200}$");
 
     /**
-     * Maps a DMN rule id to a v1 rule id, deterministically (RLE-082). A valid id is unchanged. Otherwise characters
+     * Maps a DMN rule id to a v1 rule id, deterministically (RLE-224). A valid id is unchanged. Otherwise characters
      * outside letters, digits, underscore and hyphen are removed, {@code r} is put in front when the result does not
      * start with a letter ({@code _5f3a} becomes {@code r_5f3a}) and the result is cut at 64 characters.
      *

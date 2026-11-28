@@ -1297,7 +1297,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - Rule ids are those of the file, labels are kept, a DMN `number` becomes `decimal`.
   - `{ tier: GOLD, txCount: 5 }` gives `fee 0`, `{ tier: SILVER, txCount: 3 }` gives 10000, `{ tier: SILVER, txCount: 2 }` gives 50000.
   - Every corpus file imports and gives exactly its expected outputs and matched rules; export as DMN and import again keeps the canonical hash (`RLE-045`). Extension elements and foreign attributes change neither the table nor the hash.
-  - A rule id that does not start with a letter is mapped on import (`RLE-082`).
+  - A rule id that does not start with a letter is mapped on import (`RLE-224`).
 - **Example:** `card-fee-modeller.dmn -> card-fee v1 DRAFT, fee 10000 for SILVER with 3 transactions`.
 - **Test ID:** `RLE_078_a_modeller_decision_table_imports_as_a_draft_and_evaluates_as_expected`
 
@@ -1318,7 +1318,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 ### RLE-080 A DMN file is read safely and within limits, in the caller's tenant only
 - **Traces to:** `TR-SEC-07`, `TR-TEN-01`, #121
 - **Milestone:** M3
-- **Kind:** security
+- **Kind:** control
 - **Given:** Files with a DTD declaring an external entity, a billion-laughs entity chain, elements nested 40 deep, a 70,000-character cell, 1,048,577 bytes, and text that is not well-formed; callers `dan` with `rules:read` only and `binh` of `bank-b`.
 - **When:** Each file is imported; `dan` imports the valid table; `binh` reads `card-fee` after `lan`'s import in `bank-a`.
 - **Then:**
@@ -1339,7 +1339,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `horus:errorMode="spec" -> 422 "horus:errorMode spec is added in stage S1" (line 2)`.
 - **Test ID:** `RLE_081_imported_model_records_its_error_mode_and_keeps_hash_identity`
 
-### RLE-082 A DMN rule id that does not start with a letter is mapped on import, and export gives the original id back
+### RLE-224 A DMN rule id that does not start with a letter is mapped on import, and export gives the original id back
 - **Traces to:** `TR-STD-25`, `RLE-024`, #121
 - **Milestone:** M3
 - **Kind:** semantics
@@ -1352,7 +1352,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - Export writes the original id and the description without the note; importing that file again gives the same canonical hash.
   - An id with other characters (a space, a non-ASCII letter) is refused as before.
 - **Example:** `_5f3a1 -> r_5f3a1 with description "(DMN id _5f3a1)"; _a1 with r_a1 -> DMN_RULE_ID_COLLISION`.
-- **Test ID:** `RLE_082_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written`, `RLE_082_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code`
+- **Test ID:** `RLE_224_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written`, `RLE_224_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code`
 
 ## Host-Registered Functions (RE-F-27, PD-119)
 

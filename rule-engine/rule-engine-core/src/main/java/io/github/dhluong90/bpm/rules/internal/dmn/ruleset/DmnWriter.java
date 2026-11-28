@@ -156,7 +156,7 @@ public final class DmnWriter {
                     + ", which has no decision table form; split it into rows, then export");
         }
         String description = rule.has("description") ? rule.get("description").stringValue() : null;
-        // a rule id mapped at import (RLE-082) goes back out as the id of the file
+        // a rule id mapped at import (RLE-224) goes back out as the id of the file
         if (description != null) {
             var marker = java.util.regex.Pattern.compile("(?:^|\\s)\\(DMN id ([A-Za-z0-9_.-]{1,200})\\)$").matcher(description);
             if (marker.find() && DmnReader.mapRuleId(marker.group(1)).filter(rule.get("id").stringValue()::equals).isPresent()) {
