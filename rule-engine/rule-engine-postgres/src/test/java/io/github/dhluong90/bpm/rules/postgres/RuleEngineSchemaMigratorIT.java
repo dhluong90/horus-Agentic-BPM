@@ -62,15 +62,23 @@ class RuleEngineSchemaMigratorIT {
         JdbcClient jdbc = JdbcClient.create(db);
         String columns = "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE "
                 + "(column_name = 'source_file_name' AND table_name IN ('rle_version', 'rle_version_history')) "
-                + "OR (column_name = 'budget_limit' AND table_name = 'rle_decision') ORDER BY 1";
+                + "OR (column_name IN ('budget_limit', 'step_budget', 'timeout_ms') AND table_name = 'rle_decision') ORDER BY 1";
         assertThat(jdbc.sql(columns).query(String.class).list()).containsExactly("rle_decision.budget_limit",
-                "rle_version.source_file_name", "rle_version_history.source_file_name");
+                "rle_decision.step_budget", "rle_decision.timeout_ms", "rle_version.source_file_name",
+                "rle_version_history.source_file_name");
+        // The CHECKs were added NOT VALID and then validated: none is left unvalidated on a populated table
+        assertThat(jdbc.sql("SELECT count(*) FROM pg_constraint WHERE conname LIKE '%source_file_name_check' "
+                + "AND convalidated").query(Long.class).single()).isEqualTo(2L);
+        assertThat(jdbc.sql("SELECT count(*) FROM pg_constraint WHERE NOT convalidated").query(Long.class).single())
+                .isZero();
         assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE is_nullable = 'NO' AND "
-                + "column_name IN ('source_file_name', 'budget_limit')").query(Long.class).single()).isZero();
+                + "column_name IN ('source_file_name', 'budget_limit', 'step_budget', 'timeout_ms')").query(Long.class).single()).isZero();
 
         // The rollback step written at the top of V3, run by hand
         jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN source_file_name").update();
         jdbc.sql("ALTER TABLE rle_version DROP COLUMN source_file_name").update();
+        jdbc.sql("ALTER TABLE rle_decision DROP COLUMN timeout_ms").update();
+        jdbc.sql("ALTER TABLE rle_decision DROP COLUMN step_budget").update();
         jdbc.sql("ALTER TABLE rle_decision DROP COLUMN budget_limit").update();
 
         assertThat(jdbc.sql(columns).query(String.class).list()).isEmpty();

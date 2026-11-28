@@ -27,13 +27,48 @@ import java.time.Instant;
  * @param functionVersions the host functions the rule set calls, each as {@code name@version} in name order, comma
  *     separated, with the version label registered when the decision ran (RLE-058); null when it calls none
  * @param budgetLimit the evaluation limit the decision reached, {@code STEPS} or {@code TIME}, for an
- *     {@code EVALUATION_BUDGET_EXCEEDED} failure; null otherwise (RLE-229)
+ *     {@code EVALUATION_BUDGET_EXCEEDED} failure; null otherwise (RLE-229). With the two limits below this is the
+ *     stored outcome that a replay uses instead of the clock
+ * @param stepBudget the step budget the decision ran with, or null for a row written before it was recorded (RLE-229)
+ * @param timeoutMillis the time backstop in milliseconds the decision ran with, or null as above
  */
 public record DecisionRecord(
         String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson, String callerId,
         String correlationId, Instant evalClock, long durationMicros, boolean pinned, String onBehalfOf,
-        String functionVersions, String budgetLimit) {
+        String functionVersions, String budgetLimit, Integer stepBudget, Integer timeoutMillis) {
+
+    /**
+     * Creates the row of a decision that did not record the limits it ran with.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param createdAt see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param hitPolicy see the record
+     * @param outcome see the record
+     * @param errorCode see the record
+     * @param maskedInputsJson see the record
+     * @param outputsJson see the record
+     * @param matchedRuleIdsJson see the record
+     * @param callerId see the record
+     * @param correlationId see the record
+     * @param evalClock see the record
+     * @param durationMicros see the record
+     * @param pinned see the record
+     * @param onBehalfOf see the record
+     * @param functionVersions see the record
+     * @param budgetLimit see the record
+     */
+    public DecisionRecord(String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy,
+            String outcome, String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson,
+            String callerId, String correlationId, Instant evalClock, long durationMicros, boolean pinned,
+            String onBehalfOf, String functionVersions, String budgetLimit) {
+        this(tenantId, id, createdAt, ruleSet, version, hitPolicy, outcome, errorCode, maskedInputsJson, outputsJson,
+                matchedRuleIdsJson, callerId, correlationId, evalClock, durationMicros, pinned, onBehalfOf,
+                functionVersions, budgetLimit, null, null);
+    }
 
     /**
      * Creates the row of a decision that reached no evaluation limit.

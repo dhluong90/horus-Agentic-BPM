@@ -180,6 +180,13 @@ class ImportFileNameAndBudgetLimitPostgresIT {
                 .query(String.class).single()).isEqualTo("STEPS");
         assertThat(jdbc.sql("SELECT budget_limit FROM rle_decision WHERE id = :id").param("id", passed.decisionId())
                 .query(String.class).optional()).isEmpty();
+        // RLE-229: the limits the decision ran with are stored too, and a replay on the default host uses them
+        assertThat(jdbc.sql("SELECT step_budget || '/' || timeout_ms FROM rle_decision WHERE id = :id")
+                .param("id", failed.decisionId()).query(String.class).single()).isEqualTo("10/10000");
+        assertThat(jdbc.sql("SELECT step_budget || '/' || timeout_ms FROM rle_decision WHERE id = :id")
+                .param("id", passed.decisionId()).query(String.class).single()).isEqualTo("100000/10000");
+        assertThat(authoring.ruleEngine().replay(failed.decisionId()).outcome()).isInstanceOfSatisfying(
+                DecisionResult.Failed.class, f -> assertThat(f.limit()).isEqualTo("STEPS"));
         LoggedDecision read = host.decisionLog().get(failed.decisionId());
         assertThat(read.errorCode()).isEqualTo("EVALUATION_BUDGET_EXCEEDED");
         assertThat(read.limit()).isEqualTo("STEPS");

@@ -55,7 +55,8 @@ final class RuleListQueries {
     static final String DECISION_COLUMNS = """
             tenant_id, id, created_at, rule_set_name, version_num, hit_policy, outcome, error_code,
             masked_inputs::text AS inputs, outputs::text AS outputs, matched_rule_ids::text AS matched, caller_id,
-            correlation_id, eval_clock, duration_micros, pinned, on_behalf_of, function_versions, budget_limit
+            correlation_id, eval_clock, duration_micros, pinned, on_behalf_of, function_versions, budget_limit,
+            step_budget, timeout_ms
             """;
 
     /** The lifecycle actions a version's history shows; the others belong to the rule set. */
