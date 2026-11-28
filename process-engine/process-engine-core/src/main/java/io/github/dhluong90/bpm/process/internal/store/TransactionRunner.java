@@ -14,6 +14,21 @@ public interface TransactionRunner {
     <T> T inTransaction(Supplier<T> work);
 
     /**
+     * Runs a list read in its own read-only transaction with a time limit, never joining a host write transaction
+     * (ADR-0015, {@code PRE-394}). A read that runs longer than {@code limit} is stopped by the database and surfaces
+     * as {@code QUERY_TIMEOUT}; it never returns a partial result. A runner that cannot limit a read joins
+     * {@link #inTransaction} unchanged.
+     *
+     * @param limit the longest the database may spend on one statement of the read
+     * @param work the read
+     * @param <T> result type
+     * @return the result
+     */
+    default <T> T inReadTransaction(java.time.Duration limit, Supplier<T> work) {
+        return inTransaction(work);
+    }
+
+    /**
      * Runs {@code action} once the current transaction has committed, and never when it rolls back. A runner that
      * cannot register a callback, or a call made outside a transaction, runs the action at once. Used for metrics,
      * which count committed work only (PRE-084); the action must not throw and must not touch the database.
@@ -74,6 +89,11 @@ public interface TransactionRunner {
                     }
                 }
             });
+        }
+
+        @Override
+        public <T> T inReadTransaction(java.time.Duration limit, Supplier<T> work) {
+            return delegate.inReadTransaction(limit, work);
         }
 
         @Override
