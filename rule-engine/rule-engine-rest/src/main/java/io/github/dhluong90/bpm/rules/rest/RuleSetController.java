@@ -109,11 +109,12 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = RestSupport.SOURCE_FILE_NAME_HEADER, required = false) String sourceFileName,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         // Permission first, then a bounded read: a caller without rules:author never makes the host buffer a body.
         RestSupport.require(callers, "rules:author");
         ImportRequest request = new ImportRequest(documentFormat(contentType), RestSupport.boundedBody(body, contentLength),
-                idempotencyKey, ProblemDetails.correlationId(correlationId));
+                idempotencyKey, ProblemDetails.correlationId(correlationId), RestSupport.sourceFileName(sourceFileName));
         return RestSupport.version(HttpStatus.CREATED, versions.importRuleSet(request), callers);
     }
 
@@ -130,6 +131,7 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = RestSupport.SOURCE_FILE_NAME_HEADER, required = false) String sourceFileName,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:author");
         if (copyOf != null) {
@@ -145,7 +147,7 @@ public class RuleSetController {
         }
         SourceFormat format = format(contentType);
         ImportRequest request = new ImportRequest(format, RestSupport.boundedBody(body, contentLength),
-                idempotencyKey, ProblemDetails.correlationId(correlationId));
+                idempotencyKey, ProblemDetails.correlationId(correlationId), RestSupport.sourceFileName(sourceFileName));
         if (format == SourceFormat.CSV) {
             // RLE-192: a spreadsheet file is read against the base version whose columns it must keep
             int baseVersion = base != null && base.matches("[0-9]{1,9}") ? Integer.parseInt(base) : 0;
@@ -187,11 +189,13 @@ public class RuleSetController {
             @RequestHeader(value = HttpHeaders.CONTENT_TYPE, required = false) String contentType,
             @RequestHeader(value = HttpHeaders.IF_MATCH, required = false) String ifMatch,
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+            @RequestHeader(value = RestSupport.SOURCE_FILE_NAME_HEADER, required = false) String sourceFileName,
             @RequestHeader(value = ProblemDetails.CORRELATION_HEADER, required = false) String correlationId) throws IOException {
         RestSupport.require(callers, "rules:author");
         String key = RestSupport.requiredIdempotencyKey(idempotencyKey, "PUT of a draft");
         long lock = RestSupport.requiredIfMatch(ifMatch, "PUT of a draft");
-        ImportRequest request = new ImportRequest(documentFormat(contentType), RestSupport.boundedBody(body, contentLength), key);
+        ImportRequest request = new ImportRequest(documentFormat(contentType), RestSupport.boundedBody(body, contentLength),
+                key, null, RestSupport.sourceFileName(sourceFileName));
         return RestSupport.version(HttpStatus.OK,
                 versions.replaceDraft(name, version, request,
                         new WriteOptions(key, lock, null, ProblemDetails.correlationId(correlationId))), callers);

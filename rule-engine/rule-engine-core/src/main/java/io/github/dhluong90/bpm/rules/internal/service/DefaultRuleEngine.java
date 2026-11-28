@@ -18,6 +18,7 @@ import io.github.dhluong90.bpm.rules.api.InvalidStateException;
 import io.github.dhluong90.bpm.rules.api.MaskingKey;
 import io.github.dhluong90.bpm.rules.api.NoEffectiveVersionException;
 import io.github.dhluong90.bpm.rules.api.QueryInvalidException;
+import io.github.dhluong90.bpm.expr.internal.EvaluationLimits;
 import io.github.dhluong90.bpm.rules.api.ReplayNotPossibleException;
 import io.github.dhluong90.bpm.rules.api.RuleEngine;
 import io.github.dhluong90.bpm.rules.api.RuleSetNotFoundException;
@@ -961,7 +962,10 @@ public final class DefaultRuleEngine implements RuleEngine {
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs(), maskByDefault, key)),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
                 EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned, onBehalfOf,
-                HostFunctions.format(context.functions().currentVersions(rules.hostFunctions().keySet()))));
+                HostFunctions.format(context.functions().currentVersions(rules.hostFunctions().keySet())),
+                outcome instanceof DecisionResult.Failed failed ? failed.limit() : null,
+                context.settings().evaluationLimits().stepBudget(),
+                context.settings().evaluationLimits().timeoutMillis()));
         return result;
     }
 
@@ -1044,9 +1048,22 @@ public final class DefaultRuleEngine implements RuleEngine {
             DecisionResult.Outcome outcome;
             try {
                 requireSameFunctions(decisionId, logged);
-                CompiledRuleSet rules = compiled(version);
+                // RLE-233: the limits and the outcome the decision logged decide, never this machine's clock. A decision
+                // the clock stopped replays its stored failure; every other one runs again on the step budget it ran
+                // with, with the time backstop off.
+                EvaluationLimits current = context.settings().evaluationLimits();
+                EvaluationLimits limits = new EvaluationLimits(
+                        logged.stepBudget() == null ? current.stepBudget() : logged.stepBudget(),
+                        logged.timeoutMillis() == null ? current.timeoutMillis() : logged.timeoutMillis()).deterministic();
+                CompiledRuleSet rules = compiled(version, limits);
                 DecisionInput input = loggedInput(decisionId, logged, rules.inputs());
-                outcome = rules.evaluate(input, logged.evalClock());
+                if (EvaluationLimits.Limit.TIME.name().equals(logged.budgetLimit())) {
+                    outcome = new DecisionResult.Failed("EVALUATION_ERROR",
+                            EvaluationLimits.EVALUATION_BUDGET_EXCEEDED + ": the decision ran longer than "
+                                    + limits.timeoutMillis() + " ms", List.of(), logged.budgetLimit());
+                } else {
+                    outcome = rules.evaluate(input, logged.evalClock());
+                }
             } catch (IntegrityFailure failure) {
                 outcome = new DecisionResult.Failed("EVALUATION_ERROR", failure.getMessage());
             }
@@ -1108,6 +1125,10 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
+        return compiled(version, context.settings().evaluationLimits());
+    }
+
+    private CompiledRuleSet compiled(StoredVersion version, EvaluationLimits limits) {
         // RLE-223: the date and approver are outside the content hash, so the seal written at approval is checked on
         // every load, before the cache: a date moved in the table is refused, not served.
         ApprovalSeal seal = new ApprovalSeal(context.sealKey());
@@ -1124,7 +1145,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                             + version.tenantId() + " is served on an unkeyed seal; re-seal it and close the window");
             meters.unkeyedSealAccepted();
         }
-        String key = version.tenantId() + "/" + version.id() + "/" + version.canonicalHash();
+        String key = version.tenantId() + "/" + version.id() + "/" + version.canonicalHash() + "/" + limits;
         CompiledRuleSet cached = compiled.get(key);
         if (cached != null) {
             return cached;
@@ -1140,7 +1161,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         }
         CompiledRuleSet fresh = CompiledRuleSet.compile(RuleSetReader.readCanonical(version.canonicalJson()),
                 context.settings().maxOutputBytes(), context.settings().maxStringLength(),
-                context.settings().regexLimits(), context.settings().evaluationLimits(), context.functions().library());
+                context.settings().regexLimits(), limits, context.functions().library());
         compiled.put(key, fresh);
         return fresh;
     }

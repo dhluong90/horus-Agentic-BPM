@@ -18,8 +18,10 @@ package io.github.dhluong90.bpm.expr.internal;
  *
  * @param stepBudget steps one decision may take, 1 to {@value #STEP_BUDGET_MAX}
  * @param timeoutMillis longest time one decision may evaluate, 1 to {@value #TIMEOUT_MILLIS_MAX}
+ * @param timed whether the wall-clock backstop is checked; false only for {@link #deterministic}, which a replay of a
+ *     logged decision uses so that the clock of the replaying machine never decides the outcome (RLE-233)
  */
-public record EvaluationLimits(int stepBudget, int timeoutMillis) {
+public record EvaluationLimits(int stepBudget, int timeoutMillis, boolean timed) {
 
     /** Reason of a decision that ran past its step budget or its time backstop. */
     public static final String EVALUATION_BUDGET_EXCEEDED = "EVALUATION_BUDGET_EXCEEDED";
@@ -51,6 +53,16 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
     /** Ceiling of the time backstop: one decision never holds a thread longer than thirty seconds. */
     public static final int TIMEOUT_MILLIS_MAX = 30_000;
 
+    /**
+     * Creates limits with the wall-clock backstop on.
+     *
+     * @param stepBudget steps one decision may take
+     * @param timeoutMillis longest time one decision may evaluate
+     */
+    public EvaluationLimits(int stepBudget, int timeoutMillis) {
+        this(stepBudget, timeoutMillis, true);
+    }
+
     public EvaluationLimits {
         if (stepBudget < 1 || stepBudget > STEP_BUDGET_MAX) {
             throw new IllegalArgumentException("horus.bpm.rules.evaluation.step-budget must be 1 to " + STEP_BUDGET_MAX + ", was "
@@ -69,6 +81,17 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
      */
     public static EvaluationLimits defaults() {
         return new EvaluationLimits(STEP_BUDGET, TIMEOUT_MILLIS);
+    }
+
+    /**
+     * Returns the same bounds with the wall-clock backstop off: only the step count can stop the decision, so the
+     * outcome is the same on every machine. A replay of a logged decision uses it, with the step budget the decision
+     * ran with; a decision that the clock stopped is replayed from its stored outcome, not run again.
+     *
+     * @return the limits without the time check
+     */
+    public EvaluationLimits deterministic() {
+        return new EvaluationLimits(stepBudget, timeoutMillis, false);
     }
 
     /**
@@ -157,7 +180,7 @@ public record EvaluationLimits(int stepBudget, int timeoutMillis) {
                         "the decision took more than "
                         + limits.stepBudget() + " evaluation steps");
             }
-            if (used / CHECK_EVERY != before / CHECK_EVERY && System.nanoTime() - deadline > 0) {
+            if (limits.timed() && used / CHECK_EVERY != before / CHECK_EVERY && System.nanoTime() - deadline > 0) {
                 throw new EvaluationException(EVALUATION_BUDGET_EXCEEDED, Limit.TIME.name(),
                         "the decision ran longer than "
                         + limits.timeoutMillis() + " ms");

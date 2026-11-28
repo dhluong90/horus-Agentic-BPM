@@ -30,12 +30,44 @@ import java.util.Objects;
  * @param copiedFrom on a {@code CREATED} entry of a restore, the earlier version it copied (RLE-062); else null
  * @param retireRequestedBy on a {@code RETIRED} entry in {@code four-eyes} mode, who requested the retirement that
  *     {@code actor} confirmed (RLE-038); otherwise null
+ * @param sourceFileName on a {@code CREATED} entry of an import and on {@code DRAFT_UPDATED}, the name of the file
+ *     the document came from when the import named one; display metadata, otherwise null (RLE-232)
  */
 public record VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus,
         String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy, String approvalMode,
         Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
         List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, Integer copiedFrom,
-        String retireRequestedBy) {
+        String retireRequestedBy, String sourceFileName) {
+
+    /**
+     * Creates an entry that names no source file.
+     *
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param maskedByDefaultInputs see the record
+     * @param copiedFrom see the record
+     * @param retireRequestedBy see the record
+     */
+    public VersionHistoryEntry(LifecycleAction action, VersionStatus fromStatus, VersionStatus toStatus,
+            String actor, String reason, long lockVersion, Instant occurredAt, Integer supersededBy,
+            String approvalMode, Boolean noVersionInEffect, String canonicalHash, String previousCanonicalHash,
+            List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs, Integer copiedFrom,
+            String retireRequestedBy) {
+        this(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt, supersededBy, approvalMode,
+                noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings, maskedByDefaultInputs,
+                copiedFrom, retireRequestedBy, null);
+    }
 
     /**
      * Creates an entry of a restore's creation, which names no retirement requester.

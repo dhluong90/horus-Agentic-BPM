@@ -91,12 +91,13 @@ public final class JdbcRuleStore implements RuleStore {
                 INSERT INTO rle_version (tenant_id, id, rule_set_id, version_num, status, hit_policy, effective_from,
                   canonical_json, canonical_hash, source_format, source_document, source_hash, lock_version,
                   requested_by, requested_at, approved_by, approved_at, approval_comment, created_by, created_at,
-                  copied_from)
+                  copied_from, source_file_name)
                 VALUES (:tenant, :id, :ruleSetId, :num, :status, :hitPolicy, :effectiveFrom,
                   CAST(:canonicalJson AS jsonb), :canonicalHash, :sourceFormat, :sourceDocument, :sourceHash, :lock,
                   :requestedBy, :requestedAt, :approvedBy, :approvedAt, :comment, :createdBy, :createdAt,
-                  :copiedFrom)
+                  :copiedFrom, :sourceFileName)
                 """)
+                .param("sourceFileName", v.sourceFileName())
                 .param("tenant", v.tenantId()).param("id", v.id()).param("ruleSetId", v.ruleSetId())
                 .param("num", v.version()).param("status", v.status().name()).param("hitPolicy", v.hitPolicy())
                 .param("effectiveFrom", timestamp(v.effectiveFrom()))
@@ -136,13 +137,14 @@ public final class JdbcRuleStore implements RuleStore {
                 UPDATE rle_version SET hit_policy = :hitPolicy, effective_from = :effectiveFrom,
                   canonical_json = CAST(:canonicalJson AS jsonb), canonical_hash = :canonicalHash,
                   source_format = :sourceFormat, source_document = :sourceDocument, source_hash = :sourceHash,
-                  lock_version = :lock
+                  source_file_name = :sourceFileName, lock_version = :lock
                 WHERE tenant_id = :tenant AND id = :id AND lock_version = :expected AND status = 'DRAFT'
                 """)
                 .param("hitPolicy", v.hitPolicy()).param("effectiveFrom", timestamp(v.effectiveFrom()))
                 .param("canonicalJson", v.canonicalJson()).param("canonicalHash", v.canonicalHash())
                 .param("sourceFormat", v.sourceFormat().name()).param("sourceDocument", v.sourceDocument())
-                .param("sourceHash", v.sourceHash()).param("lock", v.lockVersion())
+                .param("sourceHash", v.sourceHash()).param("sourceFileName", v.sourceFileName())
+                .param("lock", v.lockVersion())
                 .param("tenant", v.tenantId()).param("id", v.id()).param("expected", expectedLockVersion)
                 .update();
         if (updated != 1) {
@@ -318,11 +320,12 @@ public final class JdbcRuleStore implements RuleStore {
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
                   reason, superseded_by, approval_mode, no_version_in_effect, lock_version, occurred_at,
                   canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs,
-                  copied_from, retire_requested_by, effective_from)
+                  copied_from, retire_requested_by, effective_from, source_file_name)
                 VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :none,
                   :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb),
-                  :copiedFrom, :retireRequestedBy, :effectiveFrom)
+                  :copiedFrom, :retireRequestedBy, :effectiveFrom, :sourceFileName)
                 """)
+                .param("sourceFileName", row.sourceFileName())
                 .param("effectiveFrom", timestamp(row.effectiveFrom()))
                 .param("retireRequestedBy", row.retireRequestedBy())
                 .param("supersededBy", row.supersededBy()).param("mode", row.approvalMode())
@@ -455,7 +458,7 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("approval_mode"), noVersionInEffect, rs.getString("canonical_hash"),
                 rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
                 strings(rs.getString("masked_by_default")), copiedFrom, rs.getString("retire_requested_by"),
-                instant(rs, "effective_from"));
+                instant(rs, "effective_from"), rs.getString("source_file_name"));
     }
 
     @Override
@@ -614,7 +617,8 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
                 instant(rs, "created_at"), instant(rs, "retired_at"), copiedFrom,
-                retirementRequest(rs), rs.getString("approval_seal"), instant(rs, "legacy_backfilled_at"));
+                retirementRequest(rs), rs.getString("approval_seal"), instant(rs, "legacy_backfilled_at"),
+                rs.getString("source_file_name"));
     }
 
     /** The pending four-eyes retirement of a version row, or null; the columns are set together. */
