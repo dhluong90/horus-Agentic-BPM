@@ -27,10 +27,14 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * Export is off by default (#114, TR-OBS-03, TR-SEC-05): with no tracing property set, the host builds no span exporter
- * bean, and a host that took traffic opened no connection to the default OTLP
- * ports. Only the database and the demo password are set, as in any run of the example.
+ * bean, and a host that took traffic opened no connection to the default OTLP ports. Only the database and the demo
+ * password are set, as in any run of the example, plus a one-second metrics step. The step enables nothing: it makes a
+ * metrics exporter that is on by accident publish inside this test's window instead of once a minute, so a host that
+ * sends metrics or logs to localhost:4318 fails here every time and not one run in twenty. (Spring Boot's OTLP metrics
+ * registry and log exporter are on by default with the OpenTelemetry starter; application.yml turns them off.)
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "HORUS_DEMO_PASSWORD=it-pass")
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
+        "HORUS_DEMO_PASSWORD=it-pass", "management.otlp.metrics.export.step=PT1S"})
 @ActiveProfiles("dev")
 @Testcontainers
 class TracingExportOffIT {
@@ -67,9 +71,11 @@ class TracingExportOffIT {
                 HttpResponse<String> response = submit("OFF-APP-" + i);
                 assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
             }
-            Thread.sleep(1500);
+            Thread.sleep(3500);
 
-            // Then the context holds no span exporter
+            // Then the context holds no span exporter and no metrics registry that pushes anywhere
+            assertThat(context.getBeansOfType(io.micrometer.core.instrument.MeterRegistry.class).values())
+                    .extracting(registry -> registry.getClass().getSimpleName()).noneMatch(name -> name.contains("Otlp"));
             assertThat(context.getBeansOfType(SpanExporter.class)).isEmpty();
 
             // and nothing connected to a default collector port
