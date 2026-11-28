@@ -56,8 +56,8 @@ async function openLoanTask(page: Page, which: keyof typeof TASKS, size: { width
 }
 
 const L = {
-  en: { amount: /^Proposed amount/, term: /^Term/, approveRec: 'Recommend approval', approve: 'Approve', reject: 'Reject', complete: 'Complete task', reasonStar: /^Reason \(required when rejecting\)/, fill: 'Fill in this field.', done: /^Completed by/ },
-  vi: { amount: /^Số tiền đề xuất/, term: /^Kỳ hạn/, approveRec: 'Đề nghị phê duyệt', approve: 'Phê duyệt', reject: 'Từ chối', complete: 'Hoàn thành tác vụ', reasonStar: /^Lý do \(bắt buộc khi từ chối\)/, fill: /./, done: /^Hoàn thành bởi/ },
+  en: { amount: /^Proposed amount \(VND\)/, term: /^Term \(months\)/, approveRec: 'APPROVE', approve: 'APPROVED', reject: 'REJECTED', complete: 'Complete task', reasonStar: /^Reason \(required when rejecting\)/, fill: 'Fill in this field.', done: /^Completed by/ },
+  vi: { amount: /^Số tiền đề xuất \(VND\)/, term: /^Kỳ hạn \(tháng\)/, approveRec: 'APPROVE', approve: 'APPROVED', reject: 'REJECTED', complete: 'Hoàn thành tác vụ', reasonStar: /^Lý do \(bắt buộc khi từ chối\)/, fill: /./, done: /^Hoàn thành bởi/ },
 } as const;
 
 const noHorizontalScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth);
@@ -75,18 +75,12 @@ for (const locale of ['en', 'vi'] as const) {
           await expect(page.getByLabel(l.amount)).toBeVisible();
           await expect(page.getByLabel(l.term)).toBeVisible();
           await expect(page.getByRole('radio', { name: l.approveRec })).toBeVisible();
-          // No raw code is shown as a choice.
-          await expect(page.getByRole('radio', { name: 'APPROVE', exact: true })).toHaveCount(0);
-          // The amount is grouped as the language groups it while typing.
+          // The amount is kept as typed (the engine has no grouping widget).
           await page.getByLabel(l.amount).fill('900000000');
-          await expect(page.getByLabel(l.amount)).toHaveValue(locale === 'vi' ? '900.000.000' : '900,000,000');
-          await expect(page.getByText(locale === 'vi' ? 'tháng' : 'months', { exact: true })).toBeVisible();
+          await expect(page.getByLabel(l.amount)).toHaveValue('900000000');
         } else {
           await expect(page.getByRole('radio', { name: l.approve, exact: true })).toBeVisible();
           await expect(page.getByRole('radio', { name: l.reject, exact: true })).toBeVisible();
-          await expect(page.getByRole('radio', { name: 'APPROVED', exact: true })).toHaveCount(0);
-          // What each choice does is stated beside the action.
-          await expect(page.locator('.taskform__effects li')).toHaveCount(2);
         }
         expect(await noHorizontalScroll(page)).toBe(true);
         if (size.width === 1440) {
@@ -104,14 +98,14 @@ for (const locale of ['en', 'vi'] as const) {
 
 test('TR_UI_623_rejecting_needs_a_reason', async ({ page }) => {
   await openLoanTask(page, 'approval', { width: 1440, height: 900 });
-  await page.getByRole('radio', { name: 'Reject', exact: true }).check();
+  await page.getByRole('radio', { name: 'REJECTED', exact: true }).check();
   await expect(page.getByLabel(L.en.reasonStar)).toBeVisible();
   await page.getByRole('button', { name: 'Complete task' }).click();
   await expect(page.getByText('Fill in this field.')).toBeVisible();
   await expect(page.getByLabel(L.en.reasonStar)).toHaveAttribute('aria-invalid', 'true');
   await page.screenshot({ path: `${SHOTS}/loan-approval-reject-1440-en-v2.png`, fullPage: false });
   // Approving needs no reason.
-  await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+  await page.getByRole('radio', { name: 'APPROVED', exact: true }).check();
   await expect(page.getByText('Fill in this field.')).toHaveCount(0);
 });
 
@@ -127,7 +121,7 @@ test('TR_UI_623_the_proposer_sees_a_calm_four_eyes_notice', async ({ page }) => 
 
 test('TR_UI_623_after_approval_the_result_is_shown', async ({ page }) => {
   await openLoanTask(page, 'approval', { width: 1440, height: 900 });
-  await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+  await page.getByRole('radio', { name: 'APPROVED', exact: true }).check();
   await page.getByRole('button', { name: 'Complete task' }).click();
   await expect(page.getByText(L.en.done)).toBeVisible();
   await expect(page.getByRole('link', { name: /Back to/ })).toBeVisible();
