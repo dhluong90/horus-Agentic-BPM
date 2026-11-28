@@ -42,6 +42,15 @@ final class ProcessListQueries {
                     + "WHERE tenant_id = ? AND definition_id = ? AND status IN " + LIVE_STATUSES + " "
                     + "GROUP BY current_node_id, status");
 
+    /**
+     * Open incidents per node of one definition version (PRE-521), counted on {@code idx_pre_incident_node}, which
+     * holds the open rows only.
+     */
+    static final ListQuery OPEN_INCIDENT_COUNTS = new ListQuery("open-incident-counts",
+            new Bound.ParentKey("definition_id", "one row per node of one definition version, open rows only"),
+            "SELECT node_id, count(*) AS open FROM pre_incident "
+                    + "WHERE tenant_id = ? AND definition_id = ? AND status = 'OPEN' GROUP BY node_id");
+
     /** Every version of one key, locked, for a lifecycle change. */
     static final ListQuery LOCK_DEFINITIONS = new ListQuery("lock-definition-versions",
             new Bound.ParentKey("key_name", "the versions of one definition key"),
@@ -134,6 +143,14 @@ final class ProcessListQueries {
     static final ListQuery INCIDENTS = incidents(false);
     /** A later page, after the last incident of the previous page. */
     static final ListQuery INCIDENTS_AFTER = incidents(true);
+    /** The incidents of one definition version, newest first (PRE-522). */
+    static final ListQuery INCIDENTS_OF_VERSION = incidentsOfDefinition(true, false);
+    /** A later page of the incidents of one definition version. */
+    static final ListQuery INCIDENTS_OF_VERSION_AFTER = incidentsOfDefinition(true, true);
+    /** The incidents of every version of one key, newest first (PRE-522). */
+    static final ListQuery INCIDENTS_OF_KEY = incidentsOfDefinition(false, false);
+    /** A later page of the incidents of every version of one key. */
+    static final ListQuery INCIDENTS_OF_KEY_AFTER = incidentsOfDefinition(false, true);
 
     /** The recorded results of some steps of one instance, by the primary key; parameters: tenant, instance, nodes. */
     static final ListQuery STEP_RESULTS = new ListQuery("instance-step-results",
@@ -515,7 +532,8 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, SIGNAL_START_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, OPEN_INCIDENT_COUNTS, INCIDENTS_OF_VERSION,
+                INCIDENTS_OF_VERSION_AFTER, INCIDENTS_OF_KEY, INCIDENTS_OF_KEY_AFTER, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, SIGNAL_START_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
                 OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_PAYLOADS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
@@ -639,6 +657,25 @@ final class ProcessListQueries {
         return new ListQuery(after ? "incidents-after" : "incidents",
                 new Bound.Page("newest first on idx_pre_incident_status (tenant_id, status, created_at DESC, id DESC)"),
                 "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? AND status = ? "
+                        + (after ? "AND (created_at, id) < (?, ?) " : "")
+                        + "ORDER BY created_at DESC, id DESC LIMIT ?");
+    }
+
+    /**
+     * The incidents of one status in one definition version, on {@code idx_pre_incident_definition_status (tenant_id,
+     * definition_id, status, created_at DESC, id DESC)}, read in order with no sort; or in every version of one key,
+     * the versions found through the unique key of {@code pre_definition}. Keyset on {@code (created_at, id)}, never
+     * {@code OFFSET}. Parameters: tenant, status, tenant, key, [version], [after created at, after id], limit.
+     */
+    private static ListQuery incidentsOfDefinition(boolean oneVersion, boolean after) {
+        String name = (oneVersion ? "incidents-of-version" : "incidents-of-key") + (after ? "-after" : "");
+        String definition = oneVersion
+                ? "definition_id = (SELECT id FROM pre_definition WHERE tenant_id = ? AND key_name = ? AND version_num = ?) "
+                : "definition_id IN (SELECT id FROM pre_definition WHERE tenant_id = ? AND key_name = ?) ";
+        return new ListQuery(name,
+                new Bound.Page("newest first on idx_pre_incident_definition_status (tenant_id, definition_id, status, "
+                        + "created_at DESC, id DESC)"),
+                "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? AND status = ? AND " + definition
                         + (after ? "AND (created_at, id) < (?, ?) " : "")
                         + "ORDER BY created_at DESC, id DESC LIMIT ?");
     }

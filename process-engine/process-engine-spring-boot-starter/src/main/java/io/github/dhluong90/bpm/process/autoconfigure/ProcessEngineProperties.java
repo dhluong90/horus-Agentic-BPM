@@ -632,7 +632,7 @@ public record ProcessEngineProperties(
      *     {@code 400 ROLE_FAN_OUT_EXCEEDED} unless the request names one {@code role} or {@code group} (#408)
      * @param statementTimeout longest one statement of a list read may run, set with {@code SET LOCAL} in a read-only
      *     transaction of its own (ADR-0015); a read that exceeds it is answered {@code 503 QUERY_TIMEOUT}, never with
-     *     a partial page. Positive; two seconds by default (#254)
+     *     a partial page. Applies to the instance, definition and incident lists and the live node counts (#254, #91). Positive; two seconds by default
      * @param dueSoonWindow a task due within this time reads {@code slaState: DUE_SOON} in the task list (PD-111,
      *     #472); positive, one hour by default
      */

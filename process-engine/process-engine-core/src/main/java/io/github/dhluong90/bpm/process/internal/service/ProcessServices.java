@@ -3048,9 +3048,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!INCIDENT_STATUSES.contains(q.status())) {
             throw new QueryInvalidException("status must be one of " + String.join(", ", INCIDENT_STATUSES));
         }
+        String key = q.definitionKey() == null ? null : q.definitionKey().strip();
+        if (key != null && key.isEmpty()) {
+            throw new QueryInvalidException("definitionKey must not be empty");
+        }
+        if (q.version() != null && key == null) {
+            throw new QueryInvalidException("version needs a definitionKey");
+        }
+        if (q.version() != null && q.version() < 1) {
+            throw new QueryInvalidException("version must be a positive integer");
+        }
         int limit = limit(q.page());
-        // The cursor is bound to the tenant and the status it was issued for.
-        String after = cursors().verify(tenant, q.status(), "incidents", q.page().cursor());
+        // The cursor is bound to the tenant, the status and the definition filter it was issued for.
+        String scope = key == null ? q.status() : q.status() + "|" + key + "|" + (q.version() == null ? "" : q.version());
+        String after = cursors().verify(tenant, scope, "incidents", q.page().cursor());
         Instant afterCreatedAt = null;
         String afterId = null;
         if (after != null) {
@@ -3064,8 +3075,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         Instant at = afterCreatedAt;
         String id = afterId;
-        List<ProcessStore.IncidentRow> rows = transactions.inTransaction(() -> store.incidents(tenant, q.status(), at,
-                id, limit + 1));
+        List<ProcessStore.IncidentRow> rows = transactions.inReadTransaction(readTimeout, () -> key == null
+                ? store.incidents(tenant, q.status(), at, id, limit + 1)
+                : store.incidentsOfDefinition(tenant, q.status(), key, q.version(), at, id, limit + 1));
         java.util.Set<String> held = callers.currentPermissions();
         List<io.github.dhluong90.bpm.process.api.Incident> items = rows.stream().limit(limit)
                 .map(r -> incidentView(r, null, caller, held)).toList();
@@ -3073,7 +3085,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new Page<>(items, null);
         }
         io.github.dhluong90.bpm.process.api.Incident last = items.get(limit - 1);
-        return new Page<>(items, cursors().sign(tenant, q.status(), "incidents", last.createdAt() + "|" + last.id()));
+        return new Page<>(items, cursors().sign(tenant, scope, "incidents", last.createdAt() + "|" + last.id()));
     }
 
     @Override

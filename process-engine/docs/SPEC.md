@@ -588,6 +588,35 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Example:** `GET /instances with pre_instance locked -> 503 QUERY_TIMEOUT after 0.5 s`.
 - **Test ID:** `PRE_394_a_definition_list_slower_than_the_limit_is_stopped_with_a_named_code`, `PRE_394_an_instance_list_slower_than_the_limit_is_stopped_with_a_named_code`, `PRE_394_a_host_write_transaction_around_the_timed_out_read_is_untouched`, `PRE_394_the_list_answers_once_the_lock_is_gone_and_the_limit_does_not_stay_on_the_connection` (`ReadTimeoutPostgresIT`), `TR_SEC_08_every_code_of_the_error_matrix_is_a_problem_with_code_correlation_id_and_type`
 
+### PRE-521 The live node counts carry the open incidents of each step, in the caller's tenant, under the statement timeout
+- **Traces to:** `TR-TEN-01`, `TR-PERF-07`, `PRE-028`, `PRE-394`, #91
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Tenant `bank-a` runs `loan-disbursement` version 1 with two cases stopped on `check-limit` (daily limit of account ACC-0001 reached) and version 2 with one; `loan-repayment` version 1 has one. Tenant `bank-b` runs `loan-disbursement` version 1 with one stopped case. A supervisor holds `processes:read`.
+- **When:** The supervisor reads `GET /definitions/loan-disbursement/versions/1/node-stats?mode=live`, then version 2; one of the two cases of version 1 is cancelled and the counts are read after the cache expired; a `bank-b` supervisor reads version 1, then a version or key only `bank-a` has; a caller without `processes:read` reads; the incident table is locked by another connection while the counts are read.
+- **Then:**
+  - `openIncidents` is `{"check-limit": 2}` for version 1 and `{"check-limit": 1}` for version 2; a node with no open incident is absent, and a node may be in `openIncidents` and not in `nodes`, because a failed step holds no live token. After the cancel, which resolves the incident, version 1 shows 1.
+  - Only `OPEN` incidents of that version in the caller's tenant are counted, by one index-only read of `idx_pre_incident_node`; `bank-b` sees `{"check-limit": 1}` for its own version 1, whichever tenant read first, and a version or key only `bank-a` has is `404 DEFINITION_NOT_FOUND`.
+  - The counts share the `asOf` and the cache of the token counts. The read runs in a read-only transaction under `query.statement-timeout`: with the table locked it is `503 QUERY_TIMEOUT`, never token counts without the incidents.
+  - Without `processes:read` the read is `403 PERMISSION_DENIED`.
+- **Example:** `GET .../loan-disbursement/versions/1/node-stats?mode=live -> openIncidents {"check-limit": 2}`.
+- **Test ID:** `PRE_521_each_node_counts_the_open_incidents_of_its_own_version`, `PRE_521_a_resolved_incident_is_no_longer_counted`, `PRE_521_another_tenants_incidents_are_never_counted_or_revealed`, `PRE_521_a_node_without_an_incident_is_absent_and_the_read_needs_the_read_permission` (`IncidentCountsAndFiltersTest`), `PRE_521_live_counts_slower_than_the_limit_are_stopped_with_a_named_code_and_no_partial_counts` (`ReadTimeoutPostgresIT`), `PRE_521_the_open_incident_count_reads_the_partial_index_of_open_incidents` (`ListQueryPlanCheckTest`), `list_and_live_count_bodies_match_the_contract` (`ProcessRestContractTest`)
+
+### PRE-522 The incident list can be filtered by process key and version, in the caller's tenant, under the statement timeout
+- **Traces to:** `TR-TEN-01`, `TR-PERF-04`, `TR-PERF-07`, `PRE-036`, `PRE-080`, `PRE-394`, #91
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The tenants and cases of `PRE-521`: `bank-a` has 4 open incidents (2 on `loan-disbursement` v1, 1 on v2, 1 on `loan-repayment` v1), `bank-b` has 1 on `loan-disbursement` v1.
+- **When:** A `bank-a` supervisor calls `GET /incidents?definitionKey=loan-disbursement`, `?definitionKey=loan-disbursement&version=1` one item at a time following the cursor, `?definitionKey=card-dispute`, `?definitionKey=loan-disbursement&version=9`, `?version=1`, `?definitionKey=loan-disbursement&version=0`, `?definitionKey=loan-disbursement&version=two`, and uses the cursor of one filter with another filter or none; a `bank-b` supervisor calls `?definitionKey=loan-repayment` and `?definitionKey=loan-disbursement&version=2`; the incident table is locked while the list is read.
+- **Then:**
+  - The key filter returns 3 incidents and the version filter 2, newest first on `(createdAt, id)`; an unknown key or version, and a status with none, return an empty page with no cursor.
+  - `version` without `definitionKey`, a version below 1, a blank key and a version that is no number are `400 QUERY_INVALID`; a cursor issued for one filter is `400 QUERY_INVALID` for another filter and for the unfiltered list.
+  - `bank-b` sees no incident of `bank-a`: a key or version that exists only at `bank-a` gives an empty page, the same as one that does not exist.
+  - The version filter reads `idx_pre_incident_definition_status` (V3) in order with a `LIMIT` and no sort, and the four queries are registered with the query-plan check (`PRE-036`).
+  - With the table locked the list is `503 QUERY_TIMEOUT` with no partial page.
+- **Example:** `GET /incidents?definitionKey=loan-disbursement&version=1 -> 2 incidents; ?version=1 -> 400 QUERY_INVALID`.
+- **Test ID:** `PRE_522_the_incident_list_keeps_the_versions_of_one_key_or_one_version`, `PRE_522_a_filtered_list_pages_with_a_cursor_bound_to_its_filter`, `PRE_522_a_version_without_a_key_or_below_one_is_refused`, `PRE_522_another_tenants_incidents_never_appear_in_a_filtered_list` (`IncidentCountsAndFiltersTest`), `PRE_522_an_incident_list_slower_than_the_limit_is_stopped_with_a_named_code` (`ReadTimeoutPostgresIT`), `PRE_522_the_incidents_of_one_version_read_the_V3_index_in_order_without_a_sort`, `PRE_036_list_queries_pass_query_plan_check` (`ListQueryPlanCheckTest`), `PRE_522_the_definition_key_and_version_filters_reach_the_service_and_a_bad_version_is_refused` (`IncidentRestContractTest`)
+
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
 - **Milestone:** M2

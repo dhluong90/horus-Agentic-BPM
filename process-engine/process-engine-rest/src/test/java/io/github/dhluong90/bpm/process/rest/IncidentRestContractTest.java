@@ -44,6 +44,23 @@ class IncidentRestContractTest {
             .setControllerAdvice(new ProcessProblemDetails()).build();
 
     @Test
+    void PRE_522_the_definition_key_and_version_filters_reach_the_service_and_a_bad_version_is_refused() throws Exception {
+        // When the list is read with a key and a version, with a key only, and with neither
+        assertThat(exchange(get(BASE + "/incidents").param("definitionKey", "loan-disbursement").param("version", "2"))
+                .getResponse().getStatus()).isEqualTo(200);
+        exchange(get(BASE + "/incidents").param("definitionKey", "loan-disbursement"));
+        exchange(get(BASE + "/incidents"));
+
+        // Then the service got each filter, and none when none was sent
+        assertThat(incidents.queries).extracting(IncidentQuery::definitionKey)
+                .containsExactly("loan-disbursement", "loan-disbursement", null);
+        assertThat(incidents.queries).extracting(IncidentQuery::version).containsExactly(2, null, null);
+        // And a version that is no number is a QUERY_INVALID problem
+        assertProblem(get(BASE + "/incidents").param("definitionKey", "loan-disbursement").param("version", "two"),
+                400, "QUERY_INVALID");
+    }
+
+    @Test
     void PRE_218_the_incident_list_has_an_etag_that_follows_its_content_and_the_callers_actions() throws Exception {
         // When the list is read, it carries an ETag
         MvcResult first = exchange(get(BASE + "/incidents"));
