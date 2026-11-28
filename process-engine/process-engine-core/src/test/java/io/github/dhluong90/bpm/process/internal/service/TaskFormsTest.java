@@ -182,4 +182,34 @@ class TaskFormsTest {
         assertThat(TaskForms.checkHints(Map.of("palette", "dark"), loanForm())).containsExactly(
                 "has an unknown member palette");
     }
+
+    @Test
+    void PRE_393_a_currency_must_be_a_real_iso_4217_code() {
+        for (String ok : List.of("VND", "USD", "SGD")) {
+            assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currency", ok))), loanForm()))
+                    .isEmpty();
+        }
+        for (String bad : List.of("ZZZ", "ABC", "vnd", "VN")) {
+            assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currency", bad))), loanForm()))
+                    .hasSize(1);
+        }
+    }
+
+    @Test
+    void PRE_393_currency_from_must_name_another_field_that_is_not_masked() {
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currencyFrom", "amount"))),
+                loanForm())).hasSize(1);
+        Map<String, Object> properties = new LinkedHashMap<>(asProps(loanForm()));
+        properties.put("currency", Map.of("type", "string", "mask", true));
+        Map<String, Object> masked = Map.of("type", "object", "properties", properties);
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currencyFrom", "currency"))),
+                masked)).hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currencyFrom", "currency"))),
+                loanForm())).isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> asProps(Map<String, Object> schema) {
+        return (Map<String, Object>) schema.get("properties");
+    }
 }

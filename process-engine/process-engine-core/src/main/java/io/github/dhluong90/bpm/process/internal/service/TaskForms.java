@@ -492,8 +492,20 @@ public final class TaskForms {
         }
         checkOptions(hints, schema, fields, problems);
         checkUnits(hints, fields, problems);
-        checkFormats(hints, fields, problems);
+        checkFormats(hints, schema, fields, problems);
         return problems;
+    }
+
+    private static boolean isCurrency(String code) {
+        if (!CURRENCY.matcher(code).matches()) {
+            return false;
+        }
+        try {
+            java.util.Currency.getInstance(code);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     /** Texts per locale, each at most {@code max} characters. */
@@ -559,7 +571,9 @@ public final class TaskForms {
      * {@code formats}: field, then {@code {grouping, currency | currencyFrom}}. A fixed ISO 4217 {@code currency}, or
      * {@code currencyFrom}, a declared field that holds the code. Display only.
      */
-    private static void checkFormats(Map<String, Object> hints, Set<String> fields, List<String> problems) {
+    private static void checkFormats(Map<String, Object> hints, Map<String, Object> schema, Set<String> fields,
+            List<String> problems) {
+        Map<?, ?> properties = schema.get("properties") instanceof Map<?, ?> p ? p : Map.of();
         if (!hints.containsKey("formats")) {
             return;
         }
@@ -573,9 +587,10 @@ public final class TaskForms {
                     && (!f.containsKey("grouping") || f.get("grouping") instanceof Boolean)
                     && !(f.containsKey("currency") && f.containsKey("currencyFrom"))
                     && (!f.containsKey("currency") || f.get("currency") instanceof String c
-                            && CURRENCY.matcher(c).matches())
+                            && isCurrency(c))
                     && (!f.containsKey("currencyFrom") || f.get("currencyFrom") instanceof String from
-                            && fields.contains(from));
+                            && fields.contains(from) && !from.equals(String.valueOf(field))
+                            && !(properties.get(from) instanceof Map<?, ?> def && Boolean.TRUE.equals(def.get("mask"))));
             if (!ok) {
                 problems.add("formats: " + safe(String.valueOf(field)) + " is not a declared field with grouping"
                         + " (true or false) and at most one of currency (three capital letters) and currencyFrom"

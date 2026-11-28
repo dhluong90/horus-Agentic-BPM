@@ -571,12 +571,12 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 ### PRE-393 Form hints carry option labels with consequences, unit suffixes and money formats
 - **Traces to:** `TR-UI-02`, `TR-STD-03`, #639
 - **Milestone:** M3
-- **Kind:** behaviour
+- **Kind:** semantics
 - **Given:** A loan approval form with `decision` (`APPROVE`, `REJECT`), `termMonths`, `amount` and `currency`, and hints `options.decision.APPROVE = {label: {en: "Approve", vi: "Phê duyệt"}, consequence: {en: "The loan is disbursed.", vi: "Khoản vay được giải ngân."}}`, `units.termMonths = {en: "months", vi: "tháng"}`, `formats.amount = {currencyFrom: "currency", grouping: true}`.
-- **When:** The definition is imported; then variants are imported with an option for `MAYBE` (not in the enum), an option on a non-enum field, a unit for an undeclared field, a lower-case `currency`, both `currency` and `currencyFrom`, and a member `palette`.
+- **When:** The definition is imported; then variants are imported with an option for `MAYBE` (not in the enum), an option on a non-enum field, a unit for an undeclared field, a lower-case `currency`, a well-formed but unassigned code such as `ZZZ`, both `currency` and `currencyFrom`, a `currencyFrom` that names its own field or a masked field, and a member `palette`.
 - **Then:** The first is accepted and the form is returned with the hints as written; each variant is `422 VALIDATION_FAILED` with one `FORM_HINTS_INVALID` problem (the unknown member named). Completion validation is unchanged: the value sent is `APPROVE`, never its label. The hints are part of the form in the definition hash, as `labels` are.
 - **Example:** `options.decision.APPROVE.label.vi -> "Phê duyệt"; amount 250000000 + currency VND -> shown "250.000.000 ₫" in vi`.
-- **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named` (`TaskFormsTest`)
+- **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named`, `PRE_393_a_currency_must_be_a_real_iso_4217_code`, `PRE_393_currency_from_must_name_another_field_that_is_not_masked` (`TaskFormsTest`)
 
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
