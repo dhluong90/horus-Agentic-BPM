@@ -222,6 +222,45 @@ class ConformanceSuiteTest {
     }
 
     @Test
+    void PRE_384_a_receive_task_that_instantiates_starts_after_itself_and_waits_for_nothing() throws IOException {
+        Process process = read("receive-task-start.bpmn");
+
+        Outcome out = run(process, new Command.Start(Map.of("applicant", "Tran Thi Mai"), "officer.hoa",
+                "receive-application"), Map.of(), DataStorePort.NONE);
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.visited()).contains("receive-application", "route", "end");
+        assertThat(out.state().variables()).containsEntry("route", "online").containsEntry("applicant", "Tran Thi Mai");
+        assertThat(out.effects()).noneMatch(e -> e instanceof Effect.CreateSubscription);
+        assertThatThrownBy(() -> run(process, Map.of(), Map.of())).hasMessageContaining("receive task receive-application");
+    }
+
+    @Test
+    void PRE_383_a_user_task_compensation_activity_is_a_manual_undo_on_the_stack() throws IOException {
+        Process process = read("compensation-manual-undo.bpmn");
+
+        Outcome out = run(process, Map.of(), Map.of("disburse", Map.of("postingRef", "FT26332001")));
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.effects()).filteredOn(Effect.PushCompensation.class::isInstance).singleElement()
+                .isInstanceOfSatisfying(Effect.PushCompensation.class, push -> {
+                    assertThat(push.nodeId()).isEqualTo("disburse");
+                    assertThat(push.handler()).isEqualTo("manual");
+                });
+    }
+
+    @Test
+    void PRE_382_a_start_event_that_is_not_interrupting_runs_as_any_start_outside_an_event_sub_process()
+            throws IOException {
+        Outcome out = run(read("non-interrupting-start.bpmn"), Map.of(), Map.of());
+
+        assertThat(out.state().status()).isEqualTo(InstanceStatus.COMPLETED);
+        assertThat(out.visited()).contains("start", "assess-start", "score", "end");
+        assertThat(CanonicalProcessWriter.canonicalText(read("non-interrupting-start.bpmn")))
+                .contains("\"interrupting\":false");
+    }
+
+    @Test
     void PRE_355_a_parallel_instantiating_event_gateway_starts_on_one_catch_and_awaits_every_other() throws IOException {
         Process process = read("event-gateway-parallel-start.bpmn");
 
@@ -449,7 +488,8 @@ class ConformanceSuiteTest {
         for (String file : List.of("data-objects.bpmn", "gateways.bpmn", "parallel-join.bpmn",
                 "sub-process-and-timer.bpmn", "compensation-background.bpmn", "parallel-multiple-start.bpmn",
                 "multiple-throw-and-end.bpmn", "event-gateway-start.bpmn", "event-gateway-parallel-start.bpmn", "compensation-event-subprocess.bpmn",
-                "data-store.bpmn", "inclusive-gateway.bpmn", "multi-instance.bpmn", "terminate-and-link.bpmn",
+                "receive-task-start.bpmn", "compensation-manual-undo.bpmn", "service-task-handler-urn.bpmn",
+                "non-interrupting-start.bpmn", "data-store.bpmn", "inclusive-gateway.bpmn", "multi-instance.bpmn", "terminate-and-link.bpmn",
                 "boundary-timer.bpmn", "collaboration-pools.bpmn", "call-activity.bpmn", "error-and-escalation.bpmn",
                 "event-subprocess.bpmn", "conditional-and-signal.bpmn", "ad-hoc-and-complex.bpmn")) {
             Process source = read(file);

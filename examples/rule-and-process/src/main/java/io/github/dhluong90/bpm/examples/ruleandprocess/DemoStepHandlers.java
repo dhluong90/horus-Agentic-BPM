@@ -101,6 +101,12 @@ class DemoStepHandlers {
         return step("credit.score", false, call -> of("score", 712, "band", "B"));
     }
 
+    /** The KYC check named by implementation="urn:horus-bpm:handler:kyc.check" in the conformance model (#632). */
+    @Bean
+    ServiceTaskHandler kycCheck() {
+        return step("kyc.check", false, call -> of("kycStatus", "CLEARED"));
+    }
+
     @Bean
     ServiceTaskHandler cardsOpenAccount() {
         return step("cards.open-account", false, call -> of("accountNumber", "ACC-" + suffix(call)));

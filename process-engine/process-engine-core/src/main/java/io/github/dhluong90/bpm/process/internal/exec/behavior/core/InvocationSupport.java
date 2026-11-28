@@ -118,15 +118,22 @@ final class InvocationSupport {
      * The undo of a step (#67, #488): its {@code horus:compensate} handler, or the handler of the compensation activity
      * that a compensation boundary event on the step points at.
      */
+    /** The undo handler of a compensation activity that a person does; the walk raises a manual-undo incident. */
+    static final String MANUAL_UNDO = "manual";
+
     static java.util.Optional<String> undoHandler(FlowNode node, ExecutionContext ctx) {
         java.util.Optional<String> declared = node.extensions().first(CompensateHandlerRef.class)
                 .map(CompensateHandlerRef::handler);
         if (declared.isPresent()) {
             return declared;
         }
+        // #632: a compensation activity that is not a service task has no handler; a person does the undo, as with
+        // horus:compensate="manual".
         return ctx.process().compensationActivityOf(node.id()).flatMap(a -> a.extensions()
                 .first(io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef.class)
-                .map(io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef::handler));
+                .map(io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef::handler)
+                .or(() -> a instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ServiceTask
+                        ? java.util.Optional.empty() : java.util.Optional.of(MANUAL_UNDO)));
     }
 
     /** The token waits on the same step for a person; the review task is its activity instance. */
