@@ -27,6 +27,8 @@ export function useKeys() {
     activities: (id: string) => [...base, 'instance', id, 'activities'] as const,
     instances: (key: string) => [...base, 'instances', key] as const,
     migration: (id: string) => [...base, 'migration', id] as const,
+    calendars: [...base, 'calendars'] as const,
+    calendar: (key: string) => [...base, 'calendars', key] as const,
     calendarChanges: [...base, 'calendar-changes'] as const,
     calendarChange: (id: string) => [...base, 'calendar-changes', id] as const,
     migrationOutcomes: (id: string) => [...base, 'migration', id, 'outcomes'] as const,

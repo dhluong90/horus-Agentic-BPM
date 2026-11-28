@@ -34,6 +34,8 @@ const SCREENS: readonly (readonly [name: string, scenario: Scenario, hash: strin
   ['incidents', 'incidents-operator', '#/incidents'],
   ['migration', 'migration-operator', '#/processes/kyc-onboarding/2/move'],
   ['calendar changes', 'calendar-approver', '#/calendar-changes'],
+  ['calendars', 'calendar-proposer', '#/calendars'],
+  ['calendar editor', 'calendar-proposer', '#/calendars/vn-banking-hours'],
   ['service', 'ready', '#/service'],
 ];
 
