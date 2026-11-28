@@ -44,16 +44,17 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'boundaryEvent:error':
         return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} />;
       case 'endEvent:error':
-        return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} fill="currentColor" />;
+        return <path d="M9.5 1.5L3.5 9h4l-1 5.5L12.5 7h-4z" {...common} className="icon--filled" />;
       case 'boundaryEvent:escalation':
-      case 'intermediateThrowEvent:escalation':
         return <path d="M8 2l5 11-5-3-5 3z" {...common} />;
+      case 'intermediateThrowEvent:escalation':
+        return <path d="M8 2l5 11-5-3-5 3z" {...common} className="icon--filled" />;
       case 'endEvent:escalation':
-        return <path d="M8 2l5 11-5-3-5 3z" {...common} fill="currentColor" />;
+        return <path d="M8 2l5 11-5-3-5 3z" {...common} className="icon--filled" />;
       case 'endEvent:terminate':
-        return <circle cx="8" cy="8" r="5" {...common} fill="currentColor" />;
+        return <circle cx="8" cy="8" r="5" {...common} className="icon--filled" />;
       case 'intermediateThrowEvent:link':
-        return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} fill="currentColor" />;
+        return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} className="icon--filled" />;
       case 'intermediateCatchEvent:link':
         return <path d="M2 8h10M8.5 4.5L12 8l-3.5 3.5" {...common} />;
       case 'startEvent:signal':
@@ -62,7 +63,7 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         return <path d="M8 2.5l6 10.5H2z" {...common} />;
       case 'endEvent:signal':
       case 'intermediateThrowEvent:signal':
-        return <path d="M8 2.5l6 10.5H2z" {...common} fill="currentColor" />;
+        return <path d="M8 2.5l6 10.5H2z" {...common} className="icon--filled" />;
       case 'startEvent:conditional':
       case 'boundaryEvent:conditional':
       case 'intermediateCatchEvent:conditional':
@@ -79,10 +80,11 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
         // A filled envelope: the message is sent.
         return <><rect className="icon--filled" x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path className="icon--knockout" d="M2 4.5L8 9l6-4.5" {...common} /></>;
       case 'boundaryEvent:compensate':
-      case 'intermediateThrowEvent:compensate':
         return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} />;
+      case 'intermediateThrowEvent:compensate':
+        return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} className="icon--filled" />;
       case 'endEvent:compensate':
-        return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} fill="currentColor" />;
+        return <path d="M8 4l-5 4 5 4zM14 4l-5 4 5 4z" {...common} className="icon--filled" />;
       case 'boundaryEvent:cancel':
         return <path d="M4 4l8 8M12 4l-8 8" {...common} />;
       case 'endEvent:cancel':
@@ -93,6 +95,9 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'startEvent:multiple':
       case 'boundaryEvent:multiple':
         return <path d="M8 2l5.5 4.2-2.1 6.8H4.6L2.5 6.2z" {...common} />;
+      case 'intermediateThrowEvent:multiple':
+      case 'endEvent:multiple':
+        return <path d="M8 2l5.5 4.2-2.1 6.8H4.6L2.5 6.2z" {...common} className="icon--filled" />;
       case 'intermediateCatchEvent:parallelMultiple':
       case 'startEvent:parallelMultiple':
       case 'boundaryEvent:parallelMultiple':
