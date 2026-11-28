@@ -1566,3 +1566,17 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Key rotation:** After the host sets a new current key and lists the old one as previous, every approved version is still served. `VersionService.reseal` writes the seal of an approved version again under the current key. It needs `rules:approve`, the caller is neither the approver, the author nor the requester, and the old seal must verify first, so a changed version is refused (`SEAL_MISMATCH`) and never blessed. One `RESEALED` history row names the caller; a version already sealed under the current key is returned unchanged. A key is switched on after approvals the same way: open the window, re-seal, close the window.
 - **Example:** `v2 effective_from 2026-12-01 -> 2026-11-25T11:00Z in the table => refused at 26 Nov, v1 serves`; `v1 sealed by k1, host now has k2 current and k1 previous => served; omar re-seals => hmac-sha256:k2:...`; `v1 approved, approval_seal set to NULL by an administrator => refused`
 - **Test IDs:** `RLE_223_request_and_approval_rows_record_the_date_and_hash_and_the_approval_writes_a_seal`, `RLE_223_a_date_moved_in_the_table_is_refused_with_one_audit_entry_and_the_other_version_still_serves`, `RLE_223_a_host_key_makes_the_seal_an_hmac_and_a_plain_seal_or_another_key_is_refused`, `RLE_223_rotating_the_key_keeps_approved_versions_served_and_a_second_person_reseals_them`, `RLE_223_a_version_changed_in_the_table_is_not_resealed`, `RLE_223_switching_a_key_on_after_versions_were_approved_needs_the_window_and_a_reseal`, `RLE_223_an_approved_version_with_a_null_seal_is_refused_in_plain_mode`, `RLE_223_the_pre_seal_marker_cannot_be_written_after_the_migration_and_a_keyed_host_refuses_it`
+
+### RLE-228 Each evaluation call is one span with the rule set, its version, the decision id and the outcome
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A host with a Micrometer `Tracer` and a host request span. Inside it the host evaluates `card-fee` version 3, which matches rule `R2`.
+- **When:** The finished spans are read.
+- **Then:**
+  - One span `horus.rule.evaluate` is a child of the request span, with `horus.rule_set` (`card-fee`), `horus.rule_set.version` (`3`), `horus.decision_id`, `horus.outcome` (`MATCHED`, `NO_MATCH`, `FAILED` or `REFUSED`) and, for a match, `horus.matched_count` (`1`).
+  - A refused call or failed evaluation adds `horus.error_code` (and `horus.error_type` for a refusal); the span's error carries the code, never the exception message.
+  - No attribute holds an input or an output value. `horus.tenant_id` is present only when `horus.bpm.tracing.tenant-attribute` is `true` (default).
+  - Without a tracer the engine uses a no-op port and creates no span. A tracer that throws never fails the call.
+- **Example:** `evaluate card-fee v3 -> horus.rule.evaluate MATCHED, matched_count 1, no output value`.
+- **Test ID:** `RLE_228_a_matched_evaluation_is_one_span_with_rule_set_version_decision_and_count_but_no_value`, `RLE_228_a_refused_call_records_an_error_code_and_the_exception_type_never_its_message` (`RuleEngineTracingTest`)
