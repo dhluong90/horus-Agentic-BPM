@@ -145,7 +145,7 @@ function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; t
             <div key={row.name} className={row.wide ? 'taskform__value taskform__field--wide' : 'taskform__value'}>
               <dt className="field__label">{row.label}</dt>
               <dd>
-                {row.masked ? <span className="masked__tag"><span aria-hidden="true">◍</span> {t(recorded ? 'form.hidden' : 'form.masked')}</span>
+                {row.masked ? <span className="masked__tag">{t(recorded ? 'form.hidden' : 'form.masked')}</span>
                   : row.text !== undefined ? <>{row.text}{row.consequence !== undefined ? <span className="taskform__effect muted">{row.consequence}</span> : null}</> : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t(recorded ? 'form.notSubmitted' : 'form.notRecorded')}</span></span>}
               </dd>
             </div>
