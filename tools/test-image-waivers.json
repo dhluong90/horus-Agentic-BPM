@@ -30,7 +30,7 @@
   {
     "image": "postgres@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d",
     "issue": 552,
-    "reason": "Test-only image, never shipped, holds no real data. 16-alpine (16.16, rebuilt 22 Nov 2026) is the newest 16 image, resolved 28 Nov 2026 and unchanged on the registry; the 25 findings are OpenSSL (about half with no upstream fix) and libxml2. Move the pin when the official 16 image picks up OpenSSL 3.5.9-r1 and libxml2 2.13.9-r5.",
+    "reason": "Used by the local and demo docker-compose.yml (a database for the examples, run by the adopter) and by the tests; not part of any released engine image (never shipped in a release artefact). Holds no real data in tests or demos. 16-alpine (16.16, rebuilt 22 Nov 2026) is the newest 16 image, resolved 28 Nov 2026 and unchanged on the registry; the 25 findings are OpenSSL (about half with no upstream fix) and libxml2. Move the pin when the official 16 image picks up OpenSSL 3.5.9-r1 and libxml2 2.13.9-r5, and move docker-compose.yml with it.",
     "owner": "devops",
     "expires": "2026-12-27"
   },
