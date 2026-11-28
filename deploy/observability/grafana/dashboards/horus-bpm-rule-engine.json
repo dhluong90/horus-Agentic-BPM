@@ -1,0 +1,522 @@
+{
+  "uid": "horus-bpm-rule-engine",
+  "title": "Horus BPM: Rule Engine",
+  "tags": [
+    "horus-bpm",
+    "rule-engine"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "refresh": "30s",
+  "timezone": "browser",
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Decisions",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Evaluations per second",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(horus_rle_evaluations_seconds_count[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Evaluation error share",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(horus_rle_evaluations_seconds_count{outcome=\"failed\"}[5m])) / clamp_min(sum(rate(horus_rle_evaluations_seconds_count[5m])),0.001)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 6,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 0.01
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Rows in the default partition",
+      "description": "Should be 0.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(horus_rle_partition_default_rows)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 5,
+      "type": "stat",
+      "title": "Compiled versions cached",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(horus_rle_cache_size)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 18,
+        "y": 1,
+        "w": 6,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "none",
+        "graphMode": "none"
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Evaluations per second by outcome",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(horus_rle_evaluations_seconds_count[5m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Evaluation latency p50 / p99 / p99.9",
+      "description": "Includes the decision log write.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(horus_rle_evaluations_seconds_bucket{outcome=~\"matched|no_match\"}[5m])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(horus_rle_evaluations_seconds_bucket{outcome=~\"matched|no_match\"}[5m])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "p99"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.999, sum by (le) (rate(horus_rle_evaluations_seconds_bucket{outcome=~\"matched|no_match\"}[5m])))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "p99.9"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 8,
+      "type": "row",
+      "title": "Errors and lifecycle",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Errors by code (per 10 min)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (code) (increase(horus_rle_evaluation_errors_total[10m]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "{{code}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Versions retired by reason (per day)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (reason) (increase(horus_rle_lifecycle_retired_total[1d]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "{{reason}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 13,
+        "w": 6,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Unkeyed seals accepted (per hour)",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(increase(horus_rle_seal_unkeyed_accepted_total[1h]))",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": ""
+        }
+      ],
+      "gridPos": {
+        "x": 18,
+        "y": 13,
+        "w": 6,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 12,
+      "type": "row",
+      "title": "Cache",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Cache size by replica",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "horus_rle_cache_size",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Cache evictions per minute by cause",
+      "description": "",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "horus-prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (cause) (rate(horus_rle_cache_evictions_total[5m]))*60",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "horus-prometheus"
+          },
+          "legendFormat": "{{cause}}"
+        }
+      ],
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "min": 0
+        },
+        "overrides": []
+      },
+      "options": {}
+    }
+  ],
+  "templating": {
+    "list": []
+  }
+}

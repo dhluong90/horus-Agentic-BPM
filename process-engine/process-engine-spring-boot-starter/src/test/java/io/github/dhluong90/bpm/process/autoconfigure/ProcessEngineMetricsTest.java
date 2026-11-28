@@ -38,6 +38,25 @@ class ProcessEngineMetricsTest {
     }
 
     @Test
+    void PRE_084_refused_message_correlations_are_counted_by_a_bounded_reason() {
+        // Given the meters
+        ProcessEngineMetrics metrics = metrics(false);
+
+        // When two correlations find nobody waiting, one finds two, and one reports a reason outside the engine's set
+        metrics.messageRefused("NOT_CORRELATED");
+        metrics.messageRefused("NOT_CORRELATED");
+        metrics.messageRefused("AMBIGUOUS");
+        metrics.messageRefused("customer-42");
+
+        // Then each reason has its count and the unknown one is OTHER
+        assertThat(registry.get("horus.pre.messages.refused").tag("reason", "NOT_CORRELATED").counter().count())
+                .isEqualTo(2);
+        assertThat(registry.get("horus.pre.messages.refused").tag("reason", "AMBIGUOUS").counter().count())
+                .isEqualTo(1);
+        assertThat(registry.get("horus.pre.messages.refused").tag("reason", "OTHER").counter().count()).isEqualTo(1);
+    }
+
+    @Test
     void PRE_084_counters_timers_and_distributions_carry_engine_values_only() {
         // Given the meters on a registry, and an engine that reports a start, a completion, incidents, steps, attempts
         // and a timer fired 4 seconds late
