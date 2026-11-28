@@ -3006,7 +3006,6 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `20 POST /api/cards/applications -> 0 connections on 4317 and 4318, with management.otlp.metrics.export.step=PT1S`.
 - **Test ID:** `PRE_520_with_no_tracing_property_nothing_is_exported_and_no_exporter_connects_anywhere` (`TracingExportOffIT`)
 
-<<<<<<< HEAD
 ### PRE-521 The step that applies an async result is linked to the step that scheduled the call
 - **Traces to:** `TR-OBS-03`, `TR-SEC-05`
 - **Milestone:** M3
@@ -3020,8 +3019,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - The reference holds no business key, instance id, variable, input or output.
 - **Example:** `START span 0af7...-b7ad6b7169203331 schedules the bureau call -> ASYNC_RESULT span, new trace, link to 0af7...-b7ad6b7169203331`.
 - **Test ID:** `PRE_521_the_span_that_applies_an_async_result_is_linked_to_the_span_that_scheduled_the_call`, `PRE_521_the_link_is_ids_only_and_never_a_value_of_the_request`, `PRE_521_a_tracer_that_does_not_know_links_still_applies_the_result` (`AsyncSpanLinkTest`); `PRE_521_the_result_of_an_async_call_is_a_span_linked_to_the_span_that_scheduled_it`, `PRE_521_a_step_names_itself_by_trace_id_and_span_id_only_so_a_later_span_can_link_to_it`, `PRE_521_a_link_that_is_not_two_hex_ids_gives_a_plain_span_and_never_fails_the_step`, `PRE_521_a_linked_step_that_ends_on_an_Error_leaves_no_current_span` (`ProcessEngineTracingTest`)
-||||||| 6d2b6920
-=======
+
 ### PRE-525 Instance variables named in the configuration are encrypted at rest with AES-256-GCM, in the instance and in every store that copies them
 - **Traces to:** `TR-SEC-05`, `TR-TEN-01`, PD-153, #594
 - **Milestone:** M3
@@ -3073,4 +3071,3 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The write is refused with `409 VARIABLE_ENCRYPTION_RULE_REMOVED` naming the instance and the variable, never its value; the row, its `lock_version` and its envelope are unchanged, and nothing is written to the clear. The check is part of the instance's `UPDATE`, so it costs no extra read. Naming the variable again lets the same completion go through, stored as an envelope. There is no operation that turns a stored envelope back into plain text: a variable that must stop being protected is released by the bank outside the engine, under its own change control. The code is in `openapi.yaml` and in the error matrix.
 - **Example:** `complete senior-approval with amount not named -> 409 VARIABLE_ENCRYPTION_RULE_REMOVED "Variable [amount] of instance 01JD2X... is stored encrypted, but the encryption rules no longer name it"`.
 - **Test ID:** `PRE_529_removing_a_rule_never_stores_the_encrypted_variable_in_the_clear` (`VariableEncryptionPostgresIT`), `TR_SEC_08_every_code_of_the_error_matrix_is_a_problem_with_code_correlation_id_and_type` (`ProcessRestErrorMatrixTest`)
->>>>>>> origin/main
