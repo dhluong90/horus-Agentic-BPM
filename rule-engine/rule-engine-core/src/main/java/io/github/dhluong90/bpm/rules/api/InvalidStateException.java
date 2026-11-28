@@ -63,4 +63,17 @@ public final class InvalidStateException extends HorusBpmException {
         return new InvalidStateException(command + " is not allowed on " + ruleSet + " v" + version + " in status "
                 + status + ": no retirement is pending");
     }
+
+    /**
+     * A dead-letter command the row's state does not allow (RLE-235).
+     *
+     * @param decisionId the decision
+     * @param state the state it is in
+     * @param command the refused command
+     * @return the exception
+     */
+    public static InvalidStateException deadLetter(String decisionId, DeadLetterState state, String command) {
+        return new InvalidStateException(command + " is not allowed on the dead-lettered decision " + decisionId
+                + " in state " + state);
+    }
 }

@@ -17,6 +17,7 @@ Find, explain and protect the record of every decision. The decision log is the 
 | `inputs` | As received after type validation; masked inputs appear as keyed hashes |
 | `matchedRuleIds`, `outputs` | The explanation |
 | `outcome` | `ok` or an error code such as `UNIQUE_HIT_VIOLATION` |
+| `limit` | `STEPS` or `TIME` on a decision that failed with `EVALUATION_BUDGET_EXCEEDED` (1.1, `RLE-233`); absent otherwise and on earlier rows. `STEPS` is the step budget, the same on every machine, so the rule set must change; `TIME` is the wall-clock backstop, so the machine was slow and a retry may pass |
 | `caller`, `correlationId` | From the security context and the request |
 | `onBehalfOf` | Set only for a process decision step (0.2.0): the step is evaluated as `system:process-engine`, and `onBehalfOf` names the user who triggered it, or is null after a timer. The task worker needs no `rules:evaluate`. A retried step replays its decision instead of writing a second row |
 | `evalClock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |
@@ -139,9 +140,18 @@ Values compare by canonical form: money by currency and minor units, a number by
 | Mode | Behaviour | Use it for |
 |---|---|---|
 | `transactional` (default) | One insert in the caller's transaction. A rolled-back business transaction leaves no decision | Everything where the decision has a business effect |
-| `async` (from M2) | The entry is written through an outbox after the call returns and is marked as async | High-volume read paths, for example a fee preview on every page load |
+| `async` (1.1, opt-in) | The entry is written to a queue table in the caller's transaction, so it is durable at the caller's commit and rolls back with it, and a relay moves it into the log within about a second, marked `ASYNC` | High-volume read paths, for example a fee preview on every page load |
 
-Set `horus.bpm.rules.decision-log.mode`. To turn logging off entirely, set `decision-log.enabled: false`; decisions then return no `decisionId`.
+Set `horus.bpm.rules.decision-log.mode`. In `async` mode:
+
+- **Nothing is lost.** The queue row commits with your business data; a rolled-back transaction leaves nothing. The relay deletes a batch from the queue and inserts it into the log in one statement, so a row is in exactly one table. The queue is append-only: the database refuses every update and truncate of it, and a delete unless the same decision is already in the log.
+- **A bad row does not stall the others.** A row the log refuses is retried with a growing wait (`decision-log.async.retry-backoff`, doubled up to `max-retry-backoff`) up to `max-attempts` times, then dead-lettered. Rows behind it go on; the log needs no order among decisions. A dead letter is listed at `GET /decision-log/dead-letters`, counted in `horus.rle.decision.log.queue.dead`, and the alert rule in `rule-engine/docs/alerts/decision-log-queue.rules.yml` fires on it.
+- **Retry or resolve needs two people.** `POST /decisions/{id}/dead-letter:request` (`rules:log:operate`) asks, with a reason; `:approve` or `:reject` (`rules:log:approve`, another person) decides. An approved retry puts the row back in the relay's queue; an approved resolve closes it. Every step is an audit event and an append-only row; nothing deletes the decision.
+- **Nothing is dropped silently.** When more than `decision-log.async.max-backlog` decisions wait, the next evaluation is refused with `503 DECISION_LOG_BACKLOG` and `Retry-After: 1`; see [[Common Error Codes]]. Alert on `horus.rle.decision.log.queue.depth` (and `.queue.oldest.age`) well before the limit; `.refused` and `.relay.failed` count the refusals and failed runs.
+- **Reading.** A caller that holds a decision id reads and replays it at once (the read finds it in the queue), with the same result as after the relay; replay is unchanged. A search by rule set, period, correlation id or input lists a decision only once it is relayed, so it lags by about `async.poll-interval`.
+- **Operation.** The relay runs on every replica and drains the queue at a clean shutdown. The database user needs `INSERT`, `SELECT` and `DELETE` on `rle_decision_queue`. The `ruleEngine` health contributor reports the job `decisionLogRelay`.
+
+To turn logging off entirely, set `decision-log.enabled: false`; decisions then return no `decisionId`.
 
 ## Keep the log within retention
 

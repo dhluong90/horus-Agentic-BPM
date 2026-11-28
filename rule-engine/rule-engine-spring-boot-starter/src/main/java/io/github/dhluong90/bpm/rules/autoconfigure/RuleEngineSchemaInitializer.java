@@ -44,6 +44,18 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
     private final RuleEngineMaskingCheck maskingCheck;
     private final RuleEngineFunctionCheck functionCheck;
     private final RuleEngineLifecycleSweeper sweeper;
+    private Runnable roleCheck;
+
+    /**
+     * Sets the check of the runtime database role, run once the schema is current (#700).
+     *
+     * @param check the check; it throws to stop the start
+     * @return this initializer
+     */
+    RuleEngineSchemaInitializer withRoleCheck(Runnable check) {
+        this.roleCheck = check;
+        return this;
+    }
 
     RuleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator, DecisionLogPartitions partitions, boolean migrate, Clock clock) {
@@ -94,6 +106,9 @@ public final class RuleEngineSchemaInitializer implements SmartInitializingSingl
                 }
                 return;
             }
+        }
+        if (roleCheck != null) {
+            roleCheck.run();
         }
         if (maintenance != null) {
             maintenance.runOnce();

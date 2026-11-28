@@ -139,6 +139,10 @@ class RuleListQueryPlanCheckTest {
                 "limit", 50));
         samples.put("published-function-uses", ListQuery.params());
         samples.put("settings-seen", ListQuery.params("setting", "x"));
+        samples.put("relay-lock-batch", ListQuery.params("now", now, "n", 100));
+        samples.put("relay-batch", ListQuery.params("now", now, "n", 100));
+        samples.put("relay-row-lock", ListQuery.params("seq", 1L, "now", now));
+        samples.put("dead-letters", ListQuery.params("tenant", "bank-a", "limit", 100));
         samples.put("decision-partitions", ListQuery.params());
         samples.put("decision-search", period);
         samples.put("decision-search-after", with(period, "afterAt", TO, "afterId", "D" + "9".repeat(25)));

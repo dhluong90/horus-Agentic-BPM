@@ -152,13 +152,13 @@ class DecisionLogSearchPostgresIT {
     }
 
     @Test
-    void RLE_232_the_mode_is_stored_with_the_decision_and_an_older_row_shows_none() {
+    void RLE_236_the_mode_is_stored_with_the_decision_and_an_older_row_shows_none() {
         // Given one decision stored with its mode, and one row as an earlier release wrote it, without the column
         Instant at = Instant.parse("2027-01-20T10:00:00Z");
         String evaluated = Ulid.next(at);
         log.append(new DecisionRecord("bank-a", evaluated, at, "card-fee", 1, "FIRST", "OK", null,
                 "{\"tier\":\"SILVER\"}", "{\"fee\":10000}", "[\"R2\"]", "teller-01", null, at, 31, false, null, null,
-                "strict"));
+                null, null, null, "strict"));
         String earlier = Ulid.next(at.plusSeconds(60));
         JdbcClient.create(plain).sql("""
                 INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy,

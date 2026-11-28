@@ -162,11 +162,40 @@ public final class PostgresRuleEngines {
             DecisionQuerySettings querySettings, io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer,
             java.util.Collection<io.github.dhluong90.bpm.expr.spi.ExpressionFunction> functions,
             HostFunctions.VersionChange onVersionChange, io.github.dhluong90.bpm.rules.spi.ApprovalSealKey sealKey) {
+        return create(dataSource, transactions, tenants, callers, clock, settings, masking, querySettings, explainer,
+                functions, onVersionChange, sealKey, new JdbcDecisionLog(dataSource));
+    }
+
+    /**
+     * Builds the entry points with the decision log the host chose: the transactional {@link JdbcDecisionLog}, which
+     * every other overload uses, or the opt-in {@link AsyncDecisionLog} (RLE-234).
+     *
+     * @param dataSource the host's data source
+     * @param transactions the host's transaction manager, wrapped
+     * @param tenants resolves the tenant of a call
+     * @param callers resolves the caller of a call
+     * @param clock the host clock
+     * @param settings validated engine settings
+     * @param masking the masking key and default per tenant
+     * @param querySettings validated bounds of decision log searches
+     * @param explainer writes the text of decision explanations
+     * @param functions the host's functions; none is allowed
+     * @param onVersionChange what evaluation does when a function's version is not the approved one
+     * @param sealKey the seal key; {@code ApprovalSealKey.none()} for plain seals
+     * @param decisionLog where decisions are written
+     * @return the entry points
+     */
+    public static RuleEngines create(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
+            CallerResolver callers, Clock clock, EngineSettings settings, MaskingPolicy masking,
+            DecisionQuerySettings querySettings, io.github.dhluong90.bpm.rules.spi.DecisionExplainer explainer,
+            java.util.Collection<io.github.dhluong90.bpm.expr.spi.ExpressionFunction> functions,
+            HostFunctions.VersionChange onVersionChange, io.github.dhluong90.bpm.rules.spi.ApprovalSealKey sealKey,
+            io.github.dhluong90.bpm.rules.internal.store.DecisionLog decisionLog) {
         JdbcIdempotencyStore idempotency = new JdbcIdempotencyStore(dataSource);
         EngineContext context = new EngineContext(tenants, callers, clock, transactions, idempotency, settings,
                 masking, HostFunctions.of(functions, new JdbcFunctionVersionStore(dataSource), onVersionChange),
                 new JdbcSimulationReportStore(dataSource), sealKey);
-        return RuleEngines.create(context, new JdbcRuleStore(dataSource), new JdbcDecisionLog(dataSource),
+        return RuleEngines.create(context, new JdbcRuleStore(dataSource), decisionLog,
                 new JdbcEventOutbox(dataSource), querySettings, explainer);
     }
 }

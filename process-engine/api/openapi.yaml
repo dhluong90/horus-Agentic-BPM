@@ -515,7 +515,12 @@ paths:
         before now) is widened to whole hours and may be at most `query.max-range` (31 days), otherwise
         `400 QUERY_INVALID`. The answer names the rollup watermark (`asOf`) and how far behind it is (`lagSeconds`),
         which is at most about ten minutes while the rollup runs. A node with no activity in the window is absent.
-        Open incidents per node follow with the incident table. Permission `processes:read`.
+        `mode=live` also returns `openIncidents` (PRE-521): the number of `OPEN` incidents of the version at each
+        node, counted from the incident table in the caller's tenant (an incident waiting for a second person's
+        approval is not counted). A node with no open incident is absent, and a node may be there without live
+        tokens, because a failed step holds none. The counts are cached with the token counts and share their `asOf`.
+        The read runs under `query.statement-timeout`: a read that exceeds it is `503 QUERY_TIMEOUT`, never counts
+        without the incidents. Permission `processes:read`.
       parameters:
         - name: key
           in: path
@@ -563,6 +568,9 @@ paths:
                     nodes:
                       approve: { WAITING_USER: 40 }
                       assess-documents: { WAITING_ASYNC: 7 }
+                    openIncidents:
+                      assess-documents: 2
+                      post-to-core: 1
                 window:
                   value:
                     definitionKey: kyc-onboarding
@@ -579,6 +587,7 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '404': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /definitions/{key}/versions/{version}/diff:
     get:
       tags: [definitions]
@@ -2079,6 +2088,13 @@ paths:
         the error code, a cause built from codes only, the retry count, the step, the instance and `allowedActions`
         computed for the caller (empty without `processes:incident:manage`). Read only. Permission `processes:read`.
 
+        `definitionKey` and `version` keep the incidents of one process key, or of one version of it (PRE-522); both
+        are read in the caller's tenant, so a key or version that exists only in another tenant gives an empty page,
+        the same answer as one that does not exist. `version` without `definitionKey`, a version below 1 or one that
+        is no number is `400 QUERY_INVALID`. The cursor is also bound to the filter it was issued for. The read runs
+        under `query.statement-timeout`: a read that exceeds it is `503 QUERY_TIMEOUT` with no partial page; narrow the
+        filter or try again.
+
         Conditional read (`PRE-218`): the `ETag` is a hash of the body, so it changes whenever an item, the page, the
         cursor or the caller's own view (`allowedActions`, permissions, tenant) changes; a matching `If-None-Match`
         gets `304` with no body, after the permission and tenant checks, so a refused caller never gets `304` and a
@@ -2089,6 +2105,16 @@ paths:
           required: false
           description: '`OPEN` when absent. Another value is `400 QUERY_INVALID`.'
           schema: { type: string, enum: [OPEN, RESOLUTION_PENDING, RESOLVED], default: OPEN }
+        - name: definitionKey
+          in: query
+          required: false
+          description: Only the incidents of the versions of this process key. All keys when absent
+          schema: { type: string, pattern: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$', maxLength: 200 }
+        - name: version
+          in: query
+          required: false
+          description: Only the incidents of this version number of `definitionKey`. Needs `definitionKey`; all versions when absent
+          schema: { type: integer, minimum: 1 }
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
         - name: If-None-Match
@@ -2114,6 +2140,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /incidents/{id}:
     get:
       tags: [incidents]
@@ -2725,11 +2752,12 @@ components:
         `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN` (four-eyes) or `TENANT_NOT_ALLOWED` (a tenant other than
         the caller's, or a decision step whose caller tenant is not the instance tenant). `404` is
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
-        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `429` is `START_ARRIVALS_FULL`, with a `Retry-After` header. `422` is
+        `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it), `VARIABLE_ENCRYPTION_RULE_REMOVED` (the write would store an encrypted variable in the clear because the rules no longer name it; nothing is changed, `PRE-529`) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `429` is `START_ARRIVALS_FULL`, with a `Retry-After` header. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `503` is `QUERY_TIMEOUT` (a list read stopped by `query.statement-timeout`, `PRE-394`). `500` is `INTERNAL`,
-        `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
-        back), with a correlation id only.
+        `DEFINITION_INTEGRITY_FAILED`, `VARIABLE_KEY_UNAVAILABLE` (an encrypted variable's key is not in the keyring, or no key is current;
+        nothing is stored or returned, `PRE-527`), `VARIABLE_INTEGRITY_FAILED` (an encrypted variable does not authenticate) or
+        `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled back), with a correlation id only.
       headers:
         WWW-Authenticate:
           description: Sent with every `401`
@@ -3643,7 +3671,7 @@ components:
         hasMore: { type: boolean, description: The instance has more entries than `entries` holds }
     NodeCounts:
       type: object
-      required: [definitionKey, version, mode, asOf, nodes]
+      required: [definitionKey, version, mode, asOf, nodes, openIncidents]
       properties:
         definitionKey: { type: string }
         version: { type: integer, minimum: 1 }
@@ -3655,6 +3683,10 @@ components:
           additionalProperties:
             type: object
             additionalProperties: { type: integer, minimum: 1 }
+        openIncidents:
+          type: object
+          description: Node id to its number of `OPEN` incidents (PRE-521); a node with none is absent, and a node may be here without a live token
+          additionalProperties: { type: integer, minimum: 1 }
     NodeWindowStats:
       type: object
       required: [definitionKey, version, mode, from, to, nodes]
@@ -4114,7 +4146,7 @@ components:
             TASK_NOT_FOUND, FORM_NOT_DECLARED, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, START_ARRIVALS_FULL, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,
             CMMN_UNSUPPORTED, BPMN_UNSAFE_XML, DEFINITION_TOO_LARGE, IDEMPOTENCY_KEY_REUSE_MISMATCH, STEP_FAILED, FORM_VALIDATION_FAILED,
-            PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
+            PRECONDITION_REQUIRED, DEFINITION_INTEGRITY_FAILED, VARIABLE_KEY_UNAVAILABLE, VARIABLE_INTEGRITY_FAILED, VARIABLE_ENCRYPTION_RULE_REMOVED, EVENT_LISTENER_FAILED, REPLAY_NOT_FOUND, RULE_SET_NOT_FOUND,
             REPLAY_TOO_LARGE, MIGRATION_NOT_FOUND, CONTENT_HASH_REQUIRED, CONTENT_CHANGED, CHANGE_SET_TRUNCATED,
             INCIDENT_NOT_FOUND, DRY_RUN_REQUIRED, MIGRATION_PLAN_INVALID, LAYOUT_INVALID, LAYOUT_NOT_FOUND, CALENDAR_NOT_FOUND, ASSIGNEE_NOT_ALLOWED,
             OUTPUT_INVALID, MESSAGE_NOT_CORRELATED, MESSAGE_CORRELATION_AMBIGUOUS, INTERNAL]

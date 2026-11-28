@@ -42,6 +42,15 @@ final class ProcessListQueries {
                     + "WHERE tenant_id = ? AND definition_id = ? AND status IN " + LIVE_STATUSES + " "
                     + "GROUP BY current_node_id, status");
 
+    /**
+     * Open incidents per node of one definition version (PRE-521), counted on {@code idx_pre_incident_node}, which
+     * holds the open rows only.
+     */
+    static final ListQuery OPEN_INCIDENT_COUNTS = new ListQuery("open-incident-counts",
+            new Bound.ParentKey("definition_id", "one row per node of one definition version, open rows only"),
+            "SELECT node_id, count(*) AS open FROM pre_incident "
+                    + "WHERE tenant_id = ? AND definition_id = ? AND status = 'OPEN' GROUP BY node_id");
+
     /** Every version of one key, locked, for a lifecycle change. */
     static final ListQuery LOCK_DEFINITIONS = new ListQuery("lock-definition-versions",
             new Bound.ParentKey("key_name", "the versions of one definition key"),
@@ -134,6 +143,14 @@ final class ProcessListQueries {
     static final ListQuery INCIDENTS = incidents(false);
     /** A later page, after the last incident of the previous page. */
     static final ListQuery INCIDENTS_AFTER = incidents(true);
+    /** The incidents of one definition version, newest first (PRE-522). */
+    static final ListQuery INCIDENTS_OF_VERSION = incidentsOfDefinition(true, false);
+    /** A later page of the incidents of one definition version. */
+    static final ListQuery INCIDENTS_OF_VERSION_AFTER = incidentsOfDefinition(true, true);
+    /** The incidents of every version of one key, newest first (PRE-522). */
+    static final ListQuery INCIDENTS_OF_KEY = incidentsOfDefinition(false, false);
+    /** A later page of the incidents of every version of one key. */
+    static final ListQuery INCIDENTS_OF_KEY_AFTER = incidentsOfDefinition(false, true);
 
     /** The recorded results of some steps of one instance, by the primary key; parameters: tenant, instance, nodes. */
     static final ListQuery STEP_RESULTS = new ListQuery("instance-step-results",
@@ -147,10 +164,9 @@ final class ProcessListQueries {
      */
     static final ListQuery OVERRIDDEN_ATTEMPTS = new ListQuery("replay-overridden-attempts",
             new Bound.ParentKeys("instance_id", "the instances of one page of recorded answers, at most one page"),
-            "SELECT details->>'refusedAttemptId' AS attempt_id FROM pre_history WHERE tenant_id = ? "
-                    + "AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
-                    + "AND details->>'refusedAttemptId' = ANY (?) AND EXISTS (SELECT 1 FROM jsonb_each(details->'changes') c "
-                    + "WHERE c.value->>'from' IS DISTINCT FROM '***')");
+            "SELECT id, details->>'refusedAttemptId' AS attempt_id, details::text AS details FROM pre_history "
+                    + "WHERE tenant_id = ? AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
+                    + "AND details->>'refusedAttemptId' = ANY (?)");
 
     /** The first page of recorded answers of one agent step in a period (#98). */
     static final ListQuery RECORDED_ANSWERS = recordedAnswers(false);
@@ -495,6 +511,15 @@ final class ProcessListQueries {
                     + "AND (event_type LIKE 'COMPENSATION\\_%' OR event_type = 'COMPENSATED') "
                     + "ORDER BY occurred_at, id LIMIT ?");
 
+    /**
+     * One page of the instances of one tenant that hold an encrypted variable, locked for the re-encryption sweep
+     * (PRE-526), in primary key order after the last id. Parameters: tenant, after id, limit.
+     */
+    static final ListQuery REENCRYPT_INSTANCES = new ListQuery("variable-reencrypt-instances",
+            new Bound.Page("the primary key (tenant_id, id) orders the page; the sweep passes at most 500 rows"),
+            "SELECT id, variables::text AS variables FROM pre_instance WHERE tenant_id = ? AND id > ? "
+                    + "AND variables::text LIKE '%\"$enc\"%' ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED");
+
     /** Due timers, for every tenant: the poll of each replica. */
     static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
@@ -507,8 +532,9 @@ final class ProcessListQueries {
 
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
-        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, SIGNAL_START_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
-                OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
+        List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, OPEN_INCIDENT_COUNTS, INCIDENTS_OF_VERSION,
+                INCIDENTS_OF_VERSION_AFTER, INCIDENTS_OF_KEY, INCIDENTS_OF_KEY_AFTER, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, SIGNAL_START_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
+                OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_PAYLOADS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
@@ -518,7 +544,7 @@ final class ProcessListQueries {
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,
                 CALENDAR_CHANGES_AFTER, PENDING_CALENDAR_CHANGES, PENDING_CALENDAR_CHANGES_AFTER, PROPOSED_MIGRATIONS,
-                PROPOSED_MIGRATIONS_AFTER,
+                PROPOSED_MIGRATIONS_AFTER, REENCRYPT_INSTANCES,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true)));
         all.addAll(DATED.values());
@@ -535,6 +561,17 @@ final class ProcessListQueries {
             + "WHERE h.tenant_id = ? AND d.key_name = ? AND h.node_id = ? "
             + "AND h.event_type IN ('ASYNC_RESULT_ACCEPTED','ASYNC_RESULT_REFUSED') AND h.details->'outputFields' IS NOT NULL "
             + "AND h.occurred_at >= ? AND h.occurred_at < ? ";
+
+    /**
+     * The job payloads of the newest recorded answers of one agent step in a period, for the search of a recorded output
+     * schema when payloads are sealed (PRE-525): newest first, at most one bounded page. Parameters: tenant, definition
+     * key, node, from, to, limit.
+     */
+    static final ListQuery RECORDED_PAYLOADS = new ListQuery("replay-recorded-payloads",
+            new Bound.Page("newest first on the (tenant_id, occurred_at, id) primary key of pre_history, one page"),
+            "SELECT j.id AS job_id, j.payload::text AS payload " + ANSWERS_WHERE.replace("WHERE",
+                    "JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' WHERE")
+                    + "ORDER BY h.occurred_at DESC, h.id DESC LIMIT ?");
 
     /**
      * The recorded answers of one agent step in a period, oldest first, by the {@code (tenant_id, occurred_at, id)}
@@ -620,6 +657,25 @@ final class ProcessListQueries {
         return new ListQuery(after ? "incidents-after" : "incidents",
                 new Bound.Page("newest first on idx_pre_incident_status (tenant_id, status, created_at DESC, id DESC)"),
                 "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? AND status = ? "
+                        + (after ? "AND (created_at, id) < (?, ?) " : "")
+                        + "ORDER BY created_at DESC, id DESC LIMIT ?");
+    }
+
+    /**
+     * The incidents of one status in one definition version, on {@code idx_pre_incident_definition_status (tenant_id,
+     * definition_id, status, created_at DESC, id DESC)}, read in order with no sort; or in every version of one key,
+     * the versions found through the unique key of {@code pre_definition}. Keyset on {@code (created_at, id)}, never
+     * {@code OFFSET}. Parameters: tenant, status, tenant, key, [version], [after created at, after id], limit.
+     */
+    private static ListQuery incidentsOfDefinition(boolean oneVersion, boolean after) {
+        String name = (oneVersion ? "incidents-of-version" : "incidents-of-key") + (after ? "-after" : "");
+        String definition = oneVersion
+                ? "definition_id = (SELECT id FROM pre_definition WHERE tenant_id = ? AND key_name = ? AND version_num = ?) "
+                : "definition_id IN (SELECT id FROM pre_definition WHERE tenant_id = ? AND key_name = ?) ";
+        return new ListQuery(name,
+                new Bound.Page("newest first on idx_pre_incident_definition_status (tenant_id, definition_id, status, "
+                        + "created_at DESC, id DESC)"),
+                "SELECT " + INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? AND status = ? AND " + definition
                         + (after ? "AND (created_at, id) < (?, ?) " : "")
                         + "ORDER BY created_at DESC, id DESC LIMIT ?");
     }

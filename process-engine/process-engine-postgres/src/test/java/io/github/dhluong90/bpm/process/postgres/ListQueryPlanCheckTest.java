@@ -180,10 +180,18 @@ class ListQueryPlanCheckTest {
         samples.put("pending-approvals-after", List.of("bank-a", T, "A" + "DEF" + "%022d".formatted(5), 51));
         samples.put("instance-compensation-stack", List.of("bank-a", INSTANCE));
         samples.put("incidents", List.of("bank-a", "OPEN", 50));
+        samples.put("open-incident-counts", List.of("bank-a", DEFINITION));
+        samples.put("incidents-of-version", List.of("bank-a", "OPEN", "bank-a", "loan-origination", 2, 50));
+        samples.put("incidents-of-version-after", List.of("bank-a", "OPEN", "bank-a", "loan-origination", 2, T,
+                "AIC" + "%023d".formatted(500), 50));
+        samples.put("incidents-of-key", List.of("bank-a", "OPEN", "bank-a", "loan-origination", 50));
+        samples.put("incidents-of-key-after", List.of("bank-a", "OPEN", "bank-a", "loan-origination", T,
+                "AIC" + "%023d".formatted(500), 50));
         samples.put("incidents-after", List.of("bank-a", "OPEN", T, "AIC" + "%023d".formatted(500), 50));
         samples.put("instance-step-results", List.of("bank-a", INSTANCE, new String[] {"credit-review", "kyc-agent"}));
         samples.put("replay-overridden-attempts", List.of("bank-a", new String[] {INSTANCE, "AIN" + "%023d".formatted(43)},
                 new String[] {"AAT" + "%023d".formatted(42)}));
+        samples.put("replay-recorded-payloads", List.of("bank-a", "loan-origination", "kyc-agent", from, T, 500));
         samples.put("replay-recorded-answers", List.of("bank-a", "loan-origination", "kyc-agent", from, T, 100));
         samples.put("replay-recorded-answers-after", List.of("bank-a", "loan-origination", "kyc-agent", from, T, from,
                 "AHI" + "%023d".formatted(7), 100));
@@ -241,6 +249,7 @@ class ListQueryPlanCheckTest {
         samples.put("instance-node-activities", List.of("bank-a", INSTANCE, from, T));
         samples.put("instance-history-entries", List.of("bank-a", INSTANCE, from, T, 201));
         samples.put("instance-compensation-entries", List.of("bank-a", INSTANCE, from, T, 2000));
+        samples.put("variable-reencrypt-instances", List.of("bank-a", "", 500));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));
@@ -284,6 +293,35 @@ class ListQueryPlanCheckTest {
         } finally {
             jdbc.sql("RESET enable_bitmapscan").update();
         }
+    }
+
+    @Test
+    void PRE_522_the_incidents_of_one_version_read_the_V3_index_in_order_without_a_sort() {
+        // Given the first and a later page of the open incidents of one version, planned the way a large list is
+        Map<String, List<Object>> samples = samples();
+        jdbc.sql("SET enable_bitmapscan = off").update();
+        try {
+            for (ListQuery query : List.of(ProcessListQueries.INCIDENTS_OF_VERSION,
+                    ProcessListQueries.INCIDENTS_OF_VERSION_AFTER)) {
+                List<JsonNode> nodes = new ArrayList<>();
+                collect(plan(query, samples.get(query.name())), nodes);
+
+                // Then the plan walks idx_pre_incident_definition_status (V3) in order: no Sort node
+                assertThat(nodes).as(query.name()).anySatisfy(n -> assertThat(n.path("Index Name").asString(""))
+                        .isEqualTo("idx_pre_incident_definition_status"));
+                assertThat(nodes).as(query.name()).noneMatch(n -> n.path("Node Type").asString("").equals("Sort"));
+            }
+        } finally {
+            jdbc.sql("RESET enable_bitmapscan").update();
+        }
+    }
+
+    @Test
+    void PRE_521_the_open_incident_count_reads_the_partial_index_of_open_incidents() {
+        List<JsonNode> nodes = new ArrayList<>();
+        collect(plan(ProcessListQueries.OPEN_INCIDENT_COUNTS, samples().get("open-incident-counts")), nodes);
+
+        assertThat(nodes).anySatisfy(n -> assertThat(n.path("Index Name").asString("")).isEqualTo("idx_pre_incident_node"));
     }
 
     @Test

@@ -28,7 +28,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import tools.jackson.databind.JsonNode;
 
-/** RLE-232: a version and a decision row carry the error mode they evaluate in, the decision row as stored with the decision. */
+/** RLE-236: a version and a decision row carry the error mode they evaluate in, the decision row as stored with the decision. */
 class ErrorModeWebMvcTest {
 
     static final String RULES = "/api/bpm/rules/v1";
@@ -92,7 +92,7 @@ class ErrorModeWebMvcTest {
     }
 
     @Test
-    void RLE_232_a_version_and_a_version_row_show_strict_for_an_imported_table() throws Exception {
+    void RLE_236_a_version_and_a_version_row_show_strict_for_an_imported_table() throws Exception {
         // Given a version imported from a DMN table, which keeps the strict mode (PD-143)
         // When it is read alone and in the list
         // Then both carry errorMode strict
@@ -102,13 +102,13 @@ class ErrorModeWebMvcTest {
     }
 
     @Test
-    void RLE_232_a_decision_row_shows_the_error_mode_it_was_made_in() throws Exception {
+    void RLE_236_a_decision_row_shows_the_error_mode_it_was_made_in() throws Exception {
         assertThat(read(RULES + "/decisions/D1").get("errorMode").asString()).isEqualTo("strict");
         assertThat(read(RULES + "/decisions").get("data").get(0).get("errorMode").asString()).isEqualTo("strict");
     }
 
     @Test
-    void RLE_232_a_decision_row_without_a_stored_mode_shows_unknown_never_strict() throws Exception {
+    void RLE_236_a_decision_row_without_a_stored_mode_shows_unknown_never_strict() throws Exception {
         // Given decision D0 logged before the mode was stored
         // When it is read alone and in the list
         // Then the mode is unknown
@@ -117,7 +117,7 @@ class ErrorModeWebMvcTest {
     }
 
     @Test
-    void RLE_232_a_version_whose_document_names_a_mode_shows_that_mode() {
+    void RLE_236_a_version_whose_document_names_a_mode_shows_that_mode() {
         // Given a canonical document that declares spec (stage S1)
         var node = RestSupport.withErrorMode(EngineJson.NODES.objectNode(), "{\"schemaVersion\":1,\"errorMode\":\"spec\"}");
         assertThat(node.get("errorMode").asString()).isEqualTo("spec");

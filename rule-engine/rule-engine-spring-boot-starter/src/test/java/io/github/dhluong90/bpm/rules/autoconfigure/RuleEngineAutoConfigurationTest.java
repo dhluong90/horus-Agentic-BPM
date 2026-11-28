@@ -74,6 +74,41 @@ class RuleEngineAutoConfigurationTest {
     }
 
     @Test
+    void RLE_234_the_decision_log_is_transactional_by_default_and_async_only_when_the_host_asks() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class).run(context -> {
+            assertThat(context).hasNotFailed();
+            assertThat(context).doesNotHaveBean(io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog.class);
+            assertThat(context).doesNotHaveBean(RuleEngineDecisionLogRelay.class);
+        });
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("horus.bpm.rules.decision-log.mode=async",
+                        "horus.bpm.rules.decision-log.async.batch-size=250",
+                        "horus.bpm.rules.decision-log.async.max-backlog=5000")
+                .run(context -> {
+                    assertThat(context).hasNotFailed();
+                    assertThat(context).hasSingleBean(io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog.class);
+                    assertThat(context.getBean(io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog.class).maxBacklog())
+                            .isEqualTo(5000);
+                    assertThat(context.getBean(RuleEngineDecisionLogRelay.class).jobName()).isEqualTo("decisionLogRelay");
+                });
+    }
+
+    @Test
+    void RLE_234_async_settings_out_of_range_stop_start_up_naming_the_property() {
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("horus.bpm.rules.decision-log.mode=async",
+                        "horus.bpm.rules.decision-log.async.max-backlog=10")
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure()).hasRootCauseMessage(
+                            "horus.bpm.rules.decision-log.async.max-backlog must be 1000 to 10000000, was 10");
+                });
+        runner.withUserConfiguration(HostWithEngineStandIns.class)
+                .withPropertyValues("horus.bpm.rules.decision-log.async.poll-interval=PT2H")
+                .run(context -> assertThat(context).hasFailed());
+    }
+
+    @Test
     void TR_EXT_02_host_beans_replace_the_engine_defaults_of_every_spi() {
         io.github.dhluong90.bpm.rules.spi.TenantResolver tenants = () -> "bank-a";
         io.github.dhluong90.bpm.rules.spi.CallerResolver callers = new io.github.dhluong90.bpm.rules.spi.CallerResolver() {

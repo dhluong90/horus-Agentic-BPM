@@ -1,0 +1,186 @@
+# Soak stack (#655): three copies of the example host (both engines and the cockpit, examples/rule-and-process)
+# behind a load balancer, on one PostgreSQL through a transaction pooler. LOCAL AND CI TESTING ONLY: demo users,
+# plain HTTP, dev profile. Started and stopped by perf/soak/soak.sh; read perf/soak/README.md before running it by hand.
+#
+# PostgreSQL and PgBouncer are pinned by digest. The host image is built from this checkout (the Dockerfile of docker-compose.yml).
+# Containers have fixed names (horus-soak-*) so that the chaos steps can kill, restart and pause them by name.
+# restart is "no" on purpose: the driver decides when a killed copy comes back, so the outage lengths are known.
+
+name: horus-soak
+
+x-host: &host
+  build:
+    context: ../..
+    dockerfile: deploy/docker/Dockerfile
+    args:
+      EXAMPLE: rule-and-process
+  image: horus-bpm/rule-and-process:local
+  restart: "no"
+  environment: &host-env
+    HORUS_DB_URL: jdbc:postgresql://${SOAK_DB_HOST:-pgbouncer}:5432/horus?prepareThreshold=0
+    HORUS_DB_USERNAME: horus
+    SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+    SPRING_PROFILES_ACTIVE: dev
+    # Migrations run once, on a direct connection, in the "migrate" step (Flyway's lock is a session lock, which a
+    # transaction pooler does not keep). The copies only check the schema.
+    SPRING_FLYWAY_ENABLED: "false"
+    HORUS_BPM_RULES_MIGRATE_ON_START: "false"
+    HORUS_BPM_PROCESSES_MIGRATE_ON_START: "false"
+    # LISTEN does not work behind a transaction pooler; the epoch check (5 s) keeps the copies coherent (ADR-0009).
+    HORUS_BPM_RULES_CACHE_LISTEN_NOTIFY: ${SOAK_LISTEN_NOTIFY:-false}
+  secrets:
+    - source: db_password
+      target: HORUS_DB_PASSWORD
+    - source: demo_password
+      target: HORUS_DEMO_PASSWORD
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,noexec,nosuid,nodev
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  deploy:
+    resources:
+      limits:
+        cpus: "2.0"
+        memory: 1G
+        pids: 512
+
+services:
+  postgres:
+    container_name: horus-soak-postgres
+    # PostgreSQL 16.16 on Alpine; tag and digest are updated together with docker-compose.yml.
+    image: postgres:16-alpine@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d
+    environment:
+      POSTGRES_DB: horus
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+    secrets:
+      - db_admin_password
+      - db_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ../../deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    # The pooler holds at most 20 server connections; 100 leaves room for the driver's probes and the migration.
+    command: ["postgres", "-c", "max_connections=100"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U horus -d horus"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+    restart: "no"
+    cap_drop: [ALL]
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+          pids: 256
+
+  pgbouncer:
+    container_name: horus-soak-pgbouncer
+    # PgBouncer in transaction mode; the digest is the one the pooler tests use (TR-ASY-04).
+    image: ghcr.io/cloudnative-pg/pgbouncer@sha256:9f648625e11f67f5171f1edd31648c7d02a1a4a5e1b8adf7d4a9db30dce8c22b
+    command: ["/etc/pgbouncer/pgbouncer.ini"]
+    volumes:
+      - ./pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+    secrets:
+      - source: pgbouncer_userlist
+        target: pgbouncer_userlist
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # The image has no shell, so no health check; soak.sh waits for "process up" in its log.
+    restart: "no"
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  # One-off: migrates the schema on a direct connection, then soak.sh stops it.
+  migrate:
+    <<: *host
+    container_name: horus-soak-migrate
+    profiles: ["migrate"]
+    environment:
+      <<: *host-env
+      HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
+      SPRING_FLYWAY_ENABLED: "true"
+      HORUS_BPM_RULES_MIGRATE_ON_START: "true"
+      HORUS_BPM_PROCESSES_MIGRATE_ON_START: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 2 -O /dev/null http://127.0.0.1:8080/actuator/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+
+  host1: &replica
+    <<: *host
+    container_name: horus-soak-host1
+    # Each copy is also published on its own port, so the driver can ask one copy directly (cold-start checks).
+    ports: ["127.0.0.1:${SOAK_HOST1_PORT:-18101}:8080"]
+    depends_on:
+      pgbouncer:
+        condition: service_started
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 2 -O /dev/null http://127.0.0.1:8080/actuator/health"]
+      interval: 3s
+      timeout: 3s
+      retries: 60
+  host2:
+    <<: *replica
+    container_name: horus-soak-host2
+    ports: ["127.0.0.1:${SOAK_HOST2_PORT:-18102}:8080"]
+  host3:
+    <<: *replica
+    container_name: horus-soak-host3
+    ports: ["127.0.0.1:${SOAK_HOST3_PORT:-18103}:8080"]
+
+  lb:
+    container_name: horus-soak-lb
+    # perf/soak/SoakLb.java, a layer 4 balancer compiled by soak.sh into perf/results/soak-lb and run on the JRE of the
+    # host image, so the stack pulls no image that is not pinned here.
+    image: horus-bpm/rule-and-process:local
+    entrypoint: ["java", "-cp", "/lb", "SoakLb", "--listen", "8080", "--stats", "8404",
+                 "--backend", "host1:8080", "--backend", "host2:8080", "--backend", "host3:8080"]
+    volumes:
+      - ${SOAK_LB_DIR:-../results/soak-lb}:/lb:ro
+    ports:
+      - "127.0.0.1:${SOAK_HTTP_PORT:-18091}:8080"
+      - "127.0.0.1:${SOAK_STATS_PORT:-18092}:8404"
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -T 2 -O /dev/null http://127.0.0.1:8404/healthz"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+volumes:
+  pgdata:
+
+secrets:
+  db_admin_password:
+    file: ../../secrets/db_admin_password
+  db_password:
+    file: ../../secrets/db_password
+  demo_password:
+    file: ../../secrets/demo_password
+  pgbouncer_userlist:
+    file: ../../secrets/pgbouncer_userlist

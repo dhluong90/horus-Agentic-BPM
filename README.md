@@ -17,7 +17,7 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 - Cockpit: rule editing and approval, decision log, process diagrams, tasks, incidents and a merged inbox across services, embedded in your service or hosted standalone.
 - Spring Boot starters and example hosts that run with Docker Compose.
 
-Not built: application-level encryption of process variables (#594), connectors to outside systems, client libraries beyond Java, a graphical process modeller, an asynchronous decision log, and a built-in shadow mode for agent steps. See [Feature status](../../wiki/Feature-Status).
+Not built: connectors to outside systems, client libraries beyond Java, a graphical process modeller, an asynchronous decision log, and a built-in shadow mode for agent steps. See [Feature status](../../wiki/Feature-Status).
 
 Requirements: Java 21 or 25, PostgreSQL 14 or later (15 or later from 1.0), and Spring Boot 4.x or 3.5.x ([ADR-0011](docs/adr/0011-spring-boot-4-baseline.md)).
 
@@ -76,6 +76,8 @@ Generic by design: every business behaviour is optional and configurable per hos
 |---|---|
 | Try it | [Getting Started](../../wiki/Getting-Started) |
 | Run the example host in Docker with one command | [Deploying with Docker Compose](docs/DEPLOYING.md) |
+| Know which versions are supported, what counts as breaking, and how to report a vulnerability | [Support and versioning policy](../../wiki/Support-and-Versioning-Policy) |
+| Operate the engines: alerts, backup and restore, upgrade, seal key | [Operations runbook](../../wiki/Operations-Runbook) |
 | Do a task: author a table, publish a version, simulate, read the log, use the cockpit | How-to guides listed on the wiki [Home](../../wiki) |
 | Look up an endpoint, a property, an operator | [Decision API](../../wiki/Rule-Engine-Decision-API), [Configuration](../../wiki/Rule-Engine-Configuration), [Expression Language](../../wiki/Rule-Engine-Expression-Language) |
 | Understand the design | [Concepts](../../wiki/Concepts), [Principles](../../wiki/Principles), [Architecture](../../wiki/Architecture), [Roadmap](../../wiki/Roadmap) |

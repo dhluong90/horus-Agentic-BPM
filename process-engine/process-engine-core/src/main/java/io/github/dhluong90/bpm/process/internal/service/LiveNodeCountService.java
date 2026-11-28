@@ -18,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Live counts per node (PRE-028): the tenant and caller from the resolvers, the permission check, one read of the
- * live token index, and a per-replica cache keyed by tenant and definition id, so one tenant's answer can never be
+ * live token index and the open incidents of the version, and a per-replica cache keyed by tenant and definition id, so one tenant's answer can never be
  * served to another. Served as {@code ProcessQueryService.liveNodeCounts} through {@link ProcessQueries}. Thread-safe; two concurrent misses may both read, which is harmless for a read.
  */
 public final class LiveNodeCountService {
@@ -38,6 +38,7 @@ public final class LiveNodeCountService {
     private final ProcessQueryStore store;
     private final LiveStatsSettings settings;
     private final Map<Key, Entry> cache = new ConcurrentHashMap<>();
+    private volatile Duration readTimeout;
 
     /**
      * @param tenants tenant resolver
@@ -57,11 +58,24 @@ public final class LiveNodeCountService {
         this.settings = Objects.requireNonNull(settings);
     }
 
+    /**
+     * Limits the read to {@code limit} in a read-only transaction of its own ({@code query.statement-timeout},
+     * ADR-0015). A read that exceeds it fails with {@code 503 QUERY_TIMEOUT} and returns no partial counts (PRE-521).
+     *
+     * @param limit the longest one statement of the read may run; positive
+     */
+    public void useReadTimeout(Duration limit) {
+        if (limit == null || limit.isNegative() || limit.isZero()) {
+            throw new IllegalArgumentException("The read timeout must be positive");
+        }
+        this.readTimeout = limit;
+    }
+
     /** {@link io.github.dhluong90.bpm.process.api.ProcessQueryService#liveNodeCounts(String, int)}. */
     public NodeCounts liveNodeCounts(String definitionKey, int version) {
         String tenant = tenant();
         requirePermission(PERMISSION_READ);
-        return transactions.inTransaction(() -> {
+        return transactions.inReadTransaction(readTimeout, () -> {
             String definitionId = store.definitionId(tenant, definitionKey, version).orElseThrow(
                     () -> new DefinitionNotFoundException("No definition " + definitionKey + " version " + version));
             Key key = new Key(tenant, definitionId);
@@ -74,7 +88,11 @@ public final class LiveNodeCountService {
             for (ProcessQueryStore.LiveCount row : store.liveTokenCounts(tenant, definitionId)) {
                 nodes.computeIfAbsent(row.nodeId(), n -> new HashMap<>()).merge(row.status(), row.count(), Long::sum);
             }
-            NodeCounts counts = new NodeCounts(definitionKey, version, now, nodes);
+            Map<String, Long> openIncidents = new HashMap<>();
+            for (ProcessQueryStore.IncidentCount row : store.openIncidentCounts(tenant, definitionId)) {
+                openIncidents.merge(row.nodeId(), row.count(), Long::sum);
+            }
+            NodeCounts counts = new NodeCounts(definitionKey, version, now, nodes, openIncidents);
             Duration ttl = counts.total() > settings.liveCacheLargeThreshold()
                     ? settings.liveCacheTtlLarge() : settings.liveCacheTtl();
             cache.values().removeIf(entry -> !now.isBefore(entry.expiresAt()));

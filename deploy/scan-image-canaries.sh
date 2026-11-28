@@ -72,7 +72,7 @@ pass "canary 2: a value inside a deflated jar entry in BOOT-INF/lib fails the ga
 mkdir -p "$WORK/secrets"
 printf '%s' "$value" > "$WORK/secrets/demo_password"
 rc=0
-env -u HORUS_DEMO_PASSWORD -u HORUS_DB_PASSWORD -u HORUS_DB_ADMIN_PASSWORD HORUS_SECRETS_DIR="$WORK/secrets" \
+env -u HORUS_DEMO_PASSWORD -u HORUS_DB_PASSWORD -u HORUS_DB_ADMIN_PASSWORD -u HORUS_DB_OWNER_PASSWORD HORUS_SECRETS_DIR="$WORK/secrets" \
   SCAN_SECRETS_ONLY=1 "$ROOT/deploy/scan-image.sh" "$TAG:jar" > "$WORK/secret-file.log" 2>&1 || rc=$?
 [[ "$rc" == 1 ]] && grep -q -F 'the value of HORUS_DEMO_PASSWORD is inside the image' "$WORK/secret-file.log" \
   || { cat "$WORK/secret-file.log"; fail "canary 3: a value read from secrets/demo_password was not found in the jar (exit $rc)"; }

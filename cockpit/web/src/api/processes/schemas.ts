@@ -276,6 +276,8 @@ export const calendarChange = z
     id: z.string(),
     calendarKey: z.string(),
     status: z.enum(['PENDING', 'APPROVED', 'REJECTED']),
+    /** `SINGLE` only when the dev profile let the proposer apply it alone. */
+    approval: z.enum(['FOUR_EYES', 'SINGLE']).optional(),
     baseVersion: z.number().int(),
     previous: calendarValue.nullable().optional(),
     proposed: calendarValue,
@@ -290,8 +292,48 @@ export const calendarChange = z
   })
   .loose();
 export type CalendarChange = z.infer<typeof calendarChange>;
+
+/** A calendar in force: its zone, working hours per weekday and holidays, with the version a change is made against (getCalendar; PRE-181). */
+export const calendarInForce = z
+  .object({ key: z.string(), version: z.number().int().min(1), calendar: calendarValue, updatedBy: z.string(), approvedBy: z.string(), updatedAt: z.string() })
+  .loose();
+export type CalendarInForce = z.infer<typeof calendarInForce>;
+export type CalendarValue = z.infer<typeof calendarValue>;
+export const calendarSummary = z
+  .object({ key: z.string(), version: z.number().int().min(1), zone: z.string(), updatedBy: z.string(), approvedBy: z.string(), updatedAt: z.string() })
+  .loose();
+export type CalendarSummary = z.infer<typeof calendarSummary>;
+export const calendarSummaryPage = page(calendarSummary);
 export const calendarChangePage = page(calendarChange);
 export const pendingDefinitionApprovalPage = page(pendingDefinitionApproval);
+
+/** What one step did over the hours of the window, from the hourly rollup (getNodeStats, mode=window; PRE-029). */
+const stepWindowFigures = z
+  .object({
+    entered: z.number().int().min(0),
+    completed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    incidents: z.number().int().min(0),
+    slaBreaches: z.number().int().min(0),
+    meanMs: z.number().int().nullable().optional(),
+    p50Ms: z.number().int().nullable().optional(),
+    p95Ms: z.number().int().nullable().optional(),
+  })
+  .loose();
+export const nodeWindowStats = z
+  .object({
+    definitionKey: z.string(),
+    version: z.number().int().min(1),
+    mode: z.literal('window'),
+    from: z.string(),
+    to: z.string(),
+    asOf: nullableString,
+    lagSeconds: z.number().int().min(0).nullable().optional(),
+    nodes: z.record(z.string(), stepWindowFigures),
+  })
+  .loose();
+export type NodeWindowStats = z.infer<typeof nodeWindowStats>;
+export type StepWindowFigures = z.infer<typeof stepWindowFigures>;
 
 export const instanceSummary = z
   .object({

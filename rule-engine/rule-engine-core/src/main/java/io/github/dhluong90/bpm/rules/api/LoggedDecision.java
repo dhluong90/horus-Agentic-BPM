@@ -28,13 +28,43 @@ import java.util.Objects;
  *     version in force; set by the engine, never by a request
  * @param onBehalfOf the human an embedded engine evaluated for, for example the user who completed the task before a
  *     process decision step; null for a decision made for its caller alone or after a timer (ADR-0027)
- * @param errorMode the error mode the decision was evaluated in, as stored with it (RLE-232); null for a decision
+ * @param limit the evaluation limit the decision reached, {@code STEPS} or {@code TIME}, when it failed with
+ *     {@code EVALUATION_BUDGET_EXCEEDED}; null otherwise. New values may be added (RLE-233)
+ * @param errorMode the error mode the decision was evaluated in, as stored with it (RLE-236); null for a decision
  *     logged before the mode was stored or refused before any evaluation, which the API shows as {@code unknown}
  */
 public record LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
         String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned,
-        String onBehalfOf, String errorMode) {
+        String onBehalfOf, String limit, String errorMode) {
+
+    /**
+     * A decision that reached no evaluation limit.
+     *
+     * @param decisionId see the record
+     * @param ruleSet see the record
+     * @param version see the record
+     * @param hitPolicy see the record
+     * @param outcome see the record
+     * @param errorCode see the record
+     * @param inputsJson see the record
+     * @param outputsJson see the record
+     * @param matchedRuleIds see the record
+     * @param callerId see the record
+     * @param correlationId see the record
+     * @param evalClock see the record
+     * @param evaluatedAt see the record
+     * @param durationMicros see the record
+     * @param pinned see the record
+     * @param onBehalfOf see the record
+     */
+    public LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
+            String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
+            String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned,
+            String onBehalfOf) {
+        this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
+                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, onBehalfOf, null, null);
+    }
 
     /**
      * A decision made for its caller alone, with no {@code onBehalfOf}.
@@ -60,34 +90,6 @@ public record LoggedDecision(String decisionId, String ruleSet, int version, Str
             String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
                 callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, null, null);
-    }
-
-    /**
-     * A decision whose error mode was not recorded.
-     *
-     * @param decisionId see the record
-     * @param ruleSet see the record
-     * @param version see the record
-     * @param hitPolicy see the record
-     * @param outcome see the record
-     * @param errorCode see the record
-     * @param inputsJson see the record
-     * @param outputsJson see the record
-     * @param matchedRuleIds see the record
-     * @param callerId see the record
-     * @param correlationId see the record
-     * @param evalClock see the record
-     * @param evaluatedAt see the record
-     * @param durationMicros see the record
-     * @param pinned see the record
-     * @param onBehalfOf see the record
-     */
-    public LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
-            String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
-            String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned,
-            String onBehalfOf) {
-        this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
-                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, onBehalfOf, null);
     }
 
     public LoggedDecision {

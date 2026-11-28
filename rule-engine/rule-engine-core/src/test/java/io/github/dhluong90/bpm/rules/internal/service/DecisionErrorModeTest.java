@@ -22,7 +22,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * RLE-232: the decision log stores the error mode each decision was evaluated in, and a row without one is shown as
+ * RLE-236: the decision log stores the error mode each decision was evaluated in, and a row without one is shown as
  * unknown, never as a guessed strict.
  */
 class DecisionErrorModeTest {
@@ -60,7 +60,7 @@ class DecisionErrorModeTest {
     }
 
     @Test
-    void RLE_232_a_decision_row_stores_the_mode_the_engine_evaluated_in() {
+    void RLE_236_a_decision_row_stores_the_mode_the_engine_evaluated_in() {
         // Given card-fee v1 published and evaluated once
         DecisionResult result = evaluateCardFee();
 
@@ -80,7 +80,7 @@ class DecisionErrorModeTest {
     }
 
     @Test
-    void RLE_232_a_row_logged_before_the_mode_was_stored_shows_unknown_and_not_strict() {
+    void RLE_236_a_row_logged_before_the_mode_was_stored_shows_unknown_and_not_strict() {
         // Given a row written by a release that did not store the mode (error_mode is NULL)
         engines.cursorKeys().load();
         Instant at = Instant.parse("2027-01-10T09:00:00Z");

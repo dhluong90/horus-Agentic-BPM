@@ -26,6 +26,17 @@ management:
       enabled: ${HORUS_TRACING_EXPORT_ENABLED:false}
     sampling:
       probability: ${HORUS_TRACING_SAMPLING:0.1}
+  # The OpenTelemetry starter also brings an OTLP metrics registry and an OTLP log exporter, and Spring Boot turns both
+  # on by default, sending to http://localhost:4318 every minute whether or not a collector exists. Metrics reach
+  # Prometheus through /actuator/prometheus instead, so both stay off until a bank asks for them and names a collector.
+  otlp:
+    metrics:
+      export:
+        enabled: ${HORUS_METRICS_OTLP_EXPORT_ENABLED:false}
+  logging:
+    export:
+      otlp:
+        enabled: ${HORUS_LOGGING_OTLP_EXPORT_ENABLED:false}
   endpoints:
     web:
       exposure:

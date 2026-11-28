@@ -33,7 +33,7 @@ final class RestSupport {
     static final String BASE = "/api/bpm/rules/v1";
 
     /**
-     * The error mode every rule set evaluates in until stage S1 adds {@code spec} (PD-066, PD-125, PD-143, RLE-232).
+     * The error mode every rule set evaluates in until stage S1 adds {@code spec} (PD-066, PD-125, PD-143, RLE-236).
      * A model that declares nothing is strict; the canonical document leaves {@code strict} out.
      */
     static final String ERROR_MODE_STRICT = "strict";
@@ -42,7 +42,7 @@ final class RestSupport {
     }
 
     /**
-     * Adds {@code errorMode} to a version or decision row (RLE-232). The mode is read from the canonical document
+     * Adds {@code errorMode} to a version or decision row (RLE-236). The mode is read from the canonical document
      * when it names one, and is {@code strict} otherwise; a row that has no document at hand is strict, the only mode
      * this release accepts. A decision row does not use this: it carries the mode it was evaluated in.
      */
@@ -467,6 +467,56 @@ final class RestSupport {
      * @throws PayloadTooLargeException when the body is larger than the limit
      * @throws IOException when the stream fails
      */
+    /** The header that names the file an import came from (RLE-232). */
+    static final String SOURCE_FILE_NAME_HEADER = "X-Source-File-Name";
+
+    /**
+     * Reads the {@code X-Source-File-Name} header: a file name, percent-encoded as UTF-8 so a name with accents
+     * travels in an ASCII header. The engine cleans it to a bare display name; it is never used as a path.
+     *
+     * @param header the header value, or null
+     * @return the decoded name, or null when the header is absent or blank
+     * @throws io.github.dhluong90.bpm.rules.api.InputInvalidException when it is not valid percent-encoded UTF-8
+     */
+    static String sourceFileName(String header) {
+        if (header == null || header.isBlank()) {
+            return null;
+        }
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(header.length());
+        for (int i = 0; i < header.length(); i++) {
+            char c = header.charAt(i);
+            if (c == '%') {
+                int value = i + 2 < header.length() ? hex(header, i + 1) : -1;
+                if (value < 0) {
+                    throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(
+                            SOURCE_FILE_NAME_HEADER + " is not valid percent-encoded UTF-8");
+                }
+                bytes.write(value);
+                i += 2;
+            } else if (c < 0x80) {
+                bytes.write(c);
+            } else {
+                throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(
+                        SOURCE_FILE_NAME_HEADER + " must be ASCII; percent-encode other characters as UTF-8");
+            }
+        }
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(bytes.toByteArray())).toString();
+        } catch (java.nio.charset.CharacterCodingException e) {
+            throw new io.github.dhluong90.bpm.rules.api.InputInvalidException(
+                    SOURCE_FILE_NAME_HEADER + " is not valid percent-encoded UTF-8");
+        }
+    }
+
+    private static int hex(String text, int at) {
+        int high = Character.digit(text.charAt(at), 16);
+        int low = Character.digit(text.charAt(at + 1), 16);
+        return high < 0 || low < 0 ? -1 : high * 16 + low;
+    }
+
     static byte[] boundedBody(InputStream body, Long contentLength) throws IOException {
         return boundedBody(body, contentLength, RuleSetReader.MAX_SOURCE_BYTES);
     }

@@ -1,3 +1,5 @@
+import { captionBox } from './captions';
+import { lineThrough } from './lineHits';
 import { CAPTION_GAP, GATEWAY_HALF, CAPTION_LINE_HEIGHT, SYMBOL_SIZE, type PlacedEdge, type PlacedNode, type Point } from './layout';
 
 /*
@@ -20,6 +22,14 @@ export const labelSize = (text: string) => ({ width: Math.ceil(text.length * CHA
 /** The room a step takes: its box, or for an event or gateway the symbol and the caption hanging under it. */
 export function footprint(node: PlacedNode): Rect {
   if (node.shape === 'task') return { x: node.x, y: node.y, width: node.width, height: node.height };
+  if (node.captionAt !== undefined) {
+    // The name was moved: the room is the symbol and the name where it now stands.
+    const name = captionBox(node);
+    const symbol = { x: node.x + node.width / 2 - SYMBOL_SIZE / 2, y: node.y, width: SYMBOL_SIZE, height: SYMBOL_SIZE };
+    const x = Math.min(symbol.x, name.x);
+    const y = Math.min(symbol.y, name.y);
+    return { x, y, width: Math.max(symbol.x + symbol.width, name.x + name.width) - x, height: Math.max(symbol.y + symbol.height, name.y + name.height) - y };
+  }
   const cx = node.x + node.width / 2;
   const caption = node.lines.length === 0 ? 0 : CAPTION_GAP + node.lines.length * CAPTION_LINE_HEIGHT + 4;
   const width = node.lines.length === 0 ? SYMBOL_SIZE : Math.max(SYMBOL_SIZE, 84);
@@ -37,28 +47,21 @@ function diamondApart(rect: Rect, node: PlacedNode, pad: number): boolean {
 
 const apart = (a: Rect, b: Rect, pad = 0) => a.x + a.width + pad <= b.x || b.x + b.width + pad <= a.x || a.y + a.height + pad <= b.y || b.y + b.height + pad <= a.y;
 
-/** Flows run along rows and columns, so a segment is a thin box. */
-function crosses(rect: Rect, points: readonly Point[]): boolean {
-  for (let i = 1; i < points.length; i += 1) {
-    const a = points[i - 1];
-    const b = points[i];
-    if (a === undefined || b === undefined) continue;
-    const box = { x: Math.min(a.x, b.x), y: Math.min(a.y, b.y), width: Math.abs(a.x - b.x), height: Math.abs(a.y - b.y) };
-    if (!apart(rect, box)) return true;
-  }
-  return false;
-}
+/** A flow runs through the rect: a slanted segment is followed point by point, not boxed. */
+const crosses = (rect: Rect, points: readonly Point[]): boolean => lineThrough(rect, points);
 
 export function placeLabels(nodes: readonly PlacedNode[], edges: readonly PlacedEdge[], given: Readonly<Record<string, Rect>> = {}): PlacedEdge[] {
   const solid = nodes.filter((node) => node.container?.open !== true);
   const clearOfSteps = (rect: Rect) => solid.every((node) => {
     if (node.shape !== 'gateway') return apart(rect, footprint(node), 2);
     // The diamond itself, then the caption hanging under it.
+    if (node.captionAt !== undefined) return diamondApart(rect, node, 2) && (node.lines.length === 0 || apart(rect, captionBox(node), 2));
     const box = footprint(node);
     return diamondApart(rect, node, 2) && (node.lines.length === 0 || apart(rect, { x: box.x, y: node.y + SYMBOL_SIZE, width: box.width, height: box.height - SYMBOL_SIZE }, 2));
   });
   const taken: Rect[] = [];
   const result = new Map<string, PlacedEdge>();
+  const fallback = new Map<string, PlacedEdge>();
   // Names the diagram places come first, so the ones this places step around them.
   for (const edge of edges) {
     const bounds = edge.label === undefined ? undefined : given[`${edge.source}->${edge.target}`];
@@ -67,7 +70,10 @@ export function placeLabels(nodes: readonly PlacedNode[], edges: readonly Placed
     const width = Math.max(bounds.width, size.width);
     const height = Math.max(bounds.height, size.height);
     const centre = { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 };
-    taken.push({ x: centre.x - width / 2, y: centre.y - height / 2, width, height });
+    const box = { x: centre.x - width / 2, y: centre.y - height / 2, width, height };
+    // The diagram's place is kept unless a flow runs through the name or it sits on a step or another name; it is then set by the search below.
+    if (!clearOfSteps(box) || taken.some((other) => !apart(box, other, 0)) || edges.some((other) => crosses(box, other.points))) { fallback.set(edge.id, { ...edge, labelAt: centre }); continue; }
+    taken.push(box);
     result.set(edge.id, { ...edge, labelAt: centre });
   }
   for (const edge of edges) {
@@ -97,6 +103,9 @@ export function placeLabels(nodes: readonly PlacedNode[], edges: readonly Placed
     }
     spots.sort((x, y) => x.cost - y.cost);
     const chosen = spots.find((spot) => fits(spot.rect))?.rect;
+    // With no clear place, the diagram's own place stands over the first guess.
+    const kept = fallback.get(edge.id);
+    if (chosen === undefined && kept !== undefined) { result.set(edge.id, kept); continue; }
     const first = spots[0]?.rect;
     const rect = chosen ?? first;
     if (rect === undefined) { result.set(edge.id, edge); continue; }

@@ -1,6 +1,8 @@
 package io.github.dhluong90.bpm.process.postgres;
 
+import io.github.dhluong90.bpm.process.internal.json.Values;
 import io.github.dhluong90.bpm.process.internal.store.JobStore;
+import io.github.dhluong90.bpm.process.internal.store.VariableVault;
 import io.github.dhluong90.bpm.process.postgres.ProcessListQueries.ClaimKinds;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -28,10 +30,24 @@ public final class JdbcJobStore implements JobStore {
             + "attempt, max_attempts, payload::text AS payload";
 
     private final JdbcClient jdbc;
+    private final VariableVault vault;
 
-    /** @param dataSource the host's data source */
+    /** @param dataSource the host's data source; a job payload is stored as it is */
     public JdbcJobStore(DataSource dataSource) {
+        this(dataSource, VariableVault.NONE);
+    }
+
+    /**
+     * @param dataSource the host's data source
+     * @param vault seals the payload of a job, which carries the input of a step, whenever a variable is protected
+     */
+    public JdbcJobStore(DataSource dataSource, VariableVault vault) {
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
+        this.vault = Objects.requireNonNull(vault, "vault must not be null");
+    }
+
+    private static String scope(String jobId) {
+        return "job/" + jobId;
     }
 
     @Override
@@ -44,7 +60,7 @@ public final class JdbcJobStore implements JobStore {
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, make_interval(secs => ?), 0, ?, ?::jsonb, ?)")
                 .params(job.tenantId(), job.id(), job.instanceId(), job.definitionId(), job.tokenId(), job.jobKind(),
                         job.nodeId(), job.status(), ts(job.nextFireAt()), job.leaseDuration().toMillis() / 1000.0, job.maxAttempts(),
-                        job.payloadJson(), ts(now))
+                        vault.sealDocument(job.tenantId(), scope(job.id()), job.payloadJson()), ts(now))
                 .update();
     }
 
@@ -70,7 +86,7 @@ public final class JdbcJobStore implements JobStore {
     @Override
     public Optional<JobRow> lockJob(String tenant, String id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ? FOR UPDATE")
-                .params(tenant, id).query(JdbcJobStore::job).optional();
+                .params(tenant, id).query(this::job).optional();
     }
 
     /**
@@ -83,7 +99,7 @@ public final class JdbcJobStore implements JobStore {
             case ASYNC -> ProcessListQueries.CLAIM_ASYNC;
             case ONE_KIND -> ProcessListQueries.CLAIM_ASYNC_KIND;
         };
-        return query.list(jdbc, ProcessListQueries.claimParams(kinds, kind, ts(now), limit, replicaId), JdbcJobStore::job)
+        return query.list(jdbc, ProcessListQueries.claimParams(kinds, kind, ts(now), limit, replicaId), this::job)
                 .stream().sorted((a, b) -> {
                     int byDue = a.nextFireAt().compareTo(b.nextFireAt());
                     return byDue != 0 ? byDue : a.id().compareTo(b.id());
@@ -94,7 +110,7 @@ public final class JdbcJobStore implements JobStore {
     public Optional<JobRow> lockClaim(String tenant, String id, String replicaId, int attempt, Instant now) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' "
                         + "AND locked_by = ? AND attempt = ? AND locked_until > ? FOR UPDATE")
-                .params(tenant, id, replicaId, attempt, ts(now)).query(JdbcJobStore::job).optional();
+                .params(tenant, id, replicaId, attempt, ts(now)).query(this::job).optional();
     }
 
     @Override
@@ -116,11 +132,20 @@ public final class JdbcJobStore implements JobStore {
 
     @Override
     public boolean retrySchema(String tenant, String id, String replicaId, int attempt, Instant retryAt) {
+        // Read, count and write under the row lock: a sealed payload cannot be edited in SQL.
+        String stored = jdbc.sql("SELECT payload::text FROM pre_timer WHERE tenant_id = ? AND id = ? "
+                        + "AND status = 'CLAIMED' AND locked_by = ? AND attempt = ? FOR UPDATE")
+                .params(tenant, id, replicaId, attempt).query(String.class).optional().orElse(null);
+        if (stored == null) {
+            return false;
+        }
+        java.util.Map<String, Object> payload = Values.readMap(vault.openDocument(tenant, scope(id), stored));
+        payload.put(SCHEMA_RETRIES, (payload.get(SCHEMA_RETRIES) instanceof Number n ? n.intValue() : 0) + 1);
         return jdbc.sql("UPDATE pre_timer SET status = 'DUE', next_fire_at = ?, locked_by = NULL, locked_until = NULL, "
-                        + "max_attempts = max_attempts + 1, payload = jsonb_set(payload, '{" + SCHEMA_RETRIES + "}', "
-                        + "to_jsonb(COALESCE((payload ->> '" + SCHEMA_RETRIES + "')::int, 0) + 1)) "
+                        + "max_attempts = max_attempts + 1, payload = ?::jsonb "
                         + "WHERE tenant_id = ? AND id = ? AND status = 'CLAIMED' AND locked_by = ? AND attempt = ?")
-                .params(ts(retryAt), tenant, id, replicaId, attempt)
+                .params(ts(retryAt), vault.sealDocument(tenant, scope(id), Values.write(payload)), tenant, id,
+                        replicaId, attempt)
                 .update() == 1;
     }
 
@@ -170,15 +195,15 @@ public final class JdbcJobStore implements JobStore {
     @Override
     public Optional<JobRow> findJob(String tenant, String id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM pre_timer WHERE tenant_id = ? AND id = ?")
-                .params(tenant, id).query(JdbcJobStore::job).optional();
+                .params(tenant, id).query(this::job).optional();
     }
 
-    private static JobRow job(ResultSet rs, int row) throws SQLException {
+    private JobRow job(ResultSet rs, int row) throws SQLException {
         return new JobRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
                 rs.getString("definition_id"), rs.getString("token_id"), rs.getString("job_kind"), rs.getString("node_id"),
                 rs.getString("status"), instant(rs, "next_fire_at"), Duration.ofMillis(rs.getLong("lease_ms")),
                 rs.getString("locked_by"), instant(rs, "locked_until"), rs.getInt("attempt"), rs.getInt("max_attempts"),
-                rs.getString("payload"));
+                vault.openDocument(rs.getString("tenant_id"), scope(rs.getString("id")), rs.getString("payload")));
     }
 
     private static OffsetDateTime ts(Instant instant) {

@@ -14,6 +14,17 @@ import java.util.Optional;
  */
 public interface ProcessStore {
 
+    /**
+     * Tells whether a variable of a definition is encrypted at rest (PRE-395), so history keeps it as masked.
+     *
+     * @param definitionKey the process key
+     * @param name the top-level variable name
+     * @return true when it is encrypted; false by default
+     */
+    default boolean encryptsVariable(String definitionKey, String name) {
+        return false;
+    }
+
     /** Definition version as stored, with its lifecycle fields (DESIGN sections 3.2 and 7). */
     record StoredDefinition(String tenantId, String id, String key, int version, String status, String name,
             String definitionJson, String definitionHash, String sourceFormat, String sourceDocument, String sourceHash,
@@ -788,6 +799,24 @@ public interface ProcessStore {
      */
     default List<IncidentRow> incidents(String tenant, String status, Instant afterCreatedAt, String afterId,
             int limit) {
+        throw new UnsupportedOperationException("incidents are not supported by this store");
+    }
+
+    /**
+     * A page of the tenant's incidents of one status in the versions of one process key, or in one version of it,
+     * newest first on {@code (created_at, id)} (PRE-522). An unknown key or version gives no rows.
+     *
+     * @param tenant tenant
+     * @param status the status
+     * @param definitionKey the process key
+     * @param version the version number, or null for every version of the key
+     * @param afterCreatedAt keyset: the {@code createdAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id, or null
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<IncidentRow> incidentsOfDefinition(String tenant, String status, String definitionKey,
+            Integer version, Instant afterCreatedAt, String afterId, int limit) {
         throw new UnsupportedOperationException("incidents are not supported by this store");
     }
 

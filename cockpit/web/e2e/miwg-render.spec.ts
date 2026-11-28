@@ -64,7 +64,11 @@ function readModel(xml: string): Model {
   const drawn = processes.find((p) => p.getAttribute('isExecutable') === 'true') ?? processes[0];
   const element = (id: string) => [...doc.querySelectorAll('[id]')].find((e) => e.getAttribute('id') === id);
   const label = (id: string) => `${element(id)?.localName ?? 'unknown'} ${id}`;
-  const others = new Set(processes.filter((p) => p !== drawn).flatMap((p) => [p.getAttribute('id') ?? '', ...[...p.querySelectorAll('[id]')].map((e) => e.getAttribute('id') ?? '')]));
+  // A file may hold several collaborations, one per process (C.4.0); the cockpit draws the one whose pool runs the drawn process, and the pools of the others are not owed.
+  const collaborations = [...doc.getElementsByTagNameNS('*', 'collaboration')];
+  const shown = collaborations.find((c) => [...c.children].some((p) => p.localName === 'participant' && p.getAttribute('processRef') === drawn?.getAttribute('id'))) ?? collaborations[0];
+  const otherPools = collaborations.filter((c) => c !== shown).flatMap((c) => [...c.children].filter((p) => p.localName === 'participant').map((p) => p.getAttribute('id') ?? ''));
+  const others = new Set([...otherPools, ...processes.filter((p) => p !== drawn).flatMap((p) => [p.getAttribute('id') ?? '', ...[...p.querySelectorAll('[id]')].map((e) => e.getAttribute('id') ?? '')])]);
   return { bpmn: xml, layout: { schemaVersion: 1, nodes, edges, labels }, shapes: shapes.filter((id) => !others.has(id)).map((id) => ({ id, label: label(id) })) };
 }
 

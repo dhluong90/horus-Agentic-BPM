@@ -116,14 +116,6 @@ class RuleEngineOnlyHostIT {
                 .isEqualTo("[\"R1\"]");
     }
 
-    /** The highest migration version the engine ships, read from its classpath so a new migration needs no edit here. */
-    private static String latestEngineMigration() throws java.io.IOException {
-        return java.util.Arrays.stream(new org.springframework.core.io.support.PathMatchingResourcePatternResolver()
-                        .getResources("classpath*:io/github/dhluong90/bpm/rules/postgres/migration/V*__*.sql"))
-                .map(resource -> resource.getFilename().substring(1, resource.getFilename().indexOf("__")))
-                .mapToInt(Integer::parseInt).max().orElseThrow() + "";
-    }
-
     @Test
     void TR_EMB_01_rule_engine_health_component_is_up_with_the_same_details_on_both_lines() throws Exception {
         // One health check, one adapter per Spring Boot line (#116): same component name and details.
@@ -132,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo(latestEngineMigration());
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo(EngineMigrations.latestVersion());
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -208,10 +200,8 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies every migration it ships.
-        // The first three are fixed history; later ones are added by releases, so only their form is checked.
-        assertThat(engineHistory).startsWith("0 Rule Engine baseline", "1 V1__baseline.sql", "2 V2__approval_seal.sql");
-        assertThat(engineHistory).allSatisfy(entry -> assertThat(entry).matches("\\d+ (Rule Engine baseline|V\\d+__.+\\.sql)"));
+        // The host's tables existed first, so the engine baselines at 0 and still applies every script it ships.
+        assertThat(engineHistory).containsExactlyElementsOf(EngineMigrations.historyAfterBaselineAt0());
     }
 
     @Test

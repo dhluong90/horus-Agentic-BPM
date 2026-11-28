@@ -5,7 +5,7 @@
 #
 #   1. No secrets in the layers: no .env, private key or keystore file in any layer or inside any jar
 #      (one level of nested jars too), except the exact paths in ALLOWED below; no secret-like variable
-#      in the image config; and none of the values of HORUS_DB_ADMIN_PASSWORD, HORUS_DB_PASSWORD and
+#      in the image config; and none of the values of HORUS_DB_ADMIN_PASSWORD, HORUS_DB_PASSWORD, HORUS_DB_OWNER_PASSWORD and
 #      HORUS_DEMO_PASSWORD anywhere in the saved image, including the unpacked contents of every jar.
 #      Files a later layer deletes are still checked. Each value comes from the environment, else from
 #      its secret file in ./secrets (deploy/create-secrets.sh; HORUS_SECRETS_DIR overrides the folder),
@@ -111,7 +111,7 @@ if docker image inspect "$IMAGE" --format '{{json .Config.Env}}' | grep -i -E '(
   failed=1
 fi
 checked=0
-for pair in HORUS_DB_ADMIN_PASSWORD:db_admin_password HORUS_DB_PASSWORD:db_password HORUS_DEMO_PASSWORD:demo_password; do
+for pair in HORUS_DB_ADMIN_PASSWORD:db_admin_password HORUS_DB_PASSWORD:db_password HORUS_DB_OWNER_PASSWORD:db_owner_password HORUS_DEMO_PASSWORD:demo_password; do
   name="${pair%%:*}"
   value="$(secret_value "$name" "${pair#*:}")"
   [[ -z "$value" ]] && continue

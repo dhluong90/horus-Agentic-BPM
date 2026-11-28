@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
+import io.github.dhluong90.bpm.rules.postgres.DatabaseRoleCheck;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import java.time.Clock;
@@ -55,10 +56,25 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Import(RuleEngineServicesConfiguration.class)
 public class RuleEngineAutoConfiguration {
 
+    /**
+     * Ends the process once the schema is current, when the host runs as the migration step ({@code horus.bpm.migrate-only=true}, #700).
+     * That step connects as the schema owner; the serving hosts never receive the owner's password.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "horus.bpm", name = "migrate-only", havingValue = "true")
+    org.springframework.boot.ApplicationRunner ruleEngineMigrateOnlyExit(org.springframework.context.ConfigurableApplicationContext context) {
+        return args -> {
+            org.apache.commons.logging.LogFactory.getLog(RuleEngineAutoConfiguration.class)
+                    .info("horus.bpm.migrate-only: the Rule Engine schema is current; exiting");
+            System.exit(org.springframework.boot.SpringApplication.exit(context, () -> 0));
+        };
+    }
+
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineSchemaMigrator ruleEngineSchemaMigrator(DataSource dataSource) {
-        return new RuleEngineSchemaMigrator(dataSource);
+    RuleEngineSchemaMigrator ruleEngineSchemaMigrator(DataSource dataSource, RuleEngineProperties properties) {
+        return new RuleEngineSchemaMigrator(dataSource, DatabaseRoles.ownerDataSource(properties.database()),
+                properties.database().appRole());
     }
 
     @Bean
@@ -81,29 +97,76 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions partitions,
+    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions runtimePartitions,
             RuleEngineProperties properties, ObjectProvider<Clock> clock,
             org.springframework.core.env.Environment environment) {
+        DecisionLogPartitions partitions = maintenancePartitions(runtimePartitions, properties);
         return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
                 properties.decisionLog().partitionsAheadOrDefault(), EngineDefaults.PARTITION_MAINTENANCE_INTERVAL,
                 DecisionLogRetention.resolve(properties.decisionLog(), environment));
+    }
+
+    /**
+     * The asynchronous decision log (#45, RLE-234), only when {@code decision-log.mode} is {@code async}: decisions
+     * are queued in the caller's transaction and relayed into the log. A host bean of this type replaces it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "horus.bpm.rules.decision-log",
+            name = "mode", havingValue = "async")
+    io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog ruleEngineAsyncDecisionLog(DataSource dataSource,
+            RuleEngineTransactions transactions, RuleEngineProperties properties, ObjectProvider<Clock> clock) {
+        RuleEngineProperties.DecisionLog.Async async = properties.decisionLog().asyncOrDefault();
+        return new io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog(dataSource, transactions, engineClock(clock),
+                async.batchSize(), async.maxBacklog(), async.maxAttempts(), async.retryBackoff(),
+                async.maxRetryBackoff());
+    }
+
+    /** Moves queued decisions into the log while the host runs in {@code async} mode (RLE-234). */
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
+            io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog.class)
+    RuleEngineDecisionLogRelay ruleEngineDecisionLogRelay(io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog log,
+            RuleEngineProperties properties) {
+        return new RuleEngineDecisionLogRelay(log, properties.decisionLog().asyncOrDefault().pollInterval());
     }
 
     @Bean
     @ConditionalOnMissingBean
     RuleEngineSchemaInitializer ruleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator,
-            DecisionLogPartitions partitions,
+            DecisionLogPartitions runtimePartitions,
+            DataSource dataSource,
             RuleEngineProperties properties,
+            org.springframework.core.env.Environment environment,
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
             ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
             ObjectProvider<RuleEngineFunctionCheck> functionCheck,
             ObjectProvider<RuleEngineLifecycleSweeper> sweeper,
             ObjectProvider<RuleEnginePartitionMaintenance> maintenance) {
-        return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
+        DatabaseRoleCheck roleCheck = new DatabaseRoleCheck(dataSource);
+        return new RuleEngineSchemaInitializer(migrator, maintenancePartitions(runtimePartitions, properties),
+                properties.migrateOnStart(), engineClock(clock),
                 cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable(),
-                maintenance.getIfAvailable(), functionCheck.getIfAvailable());
+                maintenance.getIfAvailable(), functionCheck.getIfAvailable())
+                .withRoleCheck(() -> DatabaseRoles.verify(roleCheck, properties.database(), environment,
+                        org.apache.commons.logging.LogFactory.getLog(RuleEngineSchemaInitializer.class)));
+    }
+
+    /**
+     * The partition step runs DDL, so with two database roles it runs as the schema owner, on a connection opened for
+     * the run and closed after it (#700). With one role it is the runtime step.
+     */
+    private static DecisionLogPartitions maintenancePartitions(DecisionLogPartitions runtime,
+            RuleEngineProperties properties) {
+        DataSource owner = DatabaseRoles.ownerDataSource(properties.database());
+        if (owner == null) {
+            return runtime;
+        }
+        return new DecisionLogPartitions(owner, new RuleEngineTransactions(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(owner)));
     }
 
     /** The decision log gauge, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
@@ -113,8 +176,9 @@ public class RuleEngineAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean(name = "ruleEngineMetrics")
-        RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions) {
-            return new RuleEngineMetrics(partitions);
+        RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions,
+                ObjectProvider<io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog> asyncLog) {
+            return new RuleEngineMetrics(partitions, asyncLog.getIfAvailable());
         }
     }
 

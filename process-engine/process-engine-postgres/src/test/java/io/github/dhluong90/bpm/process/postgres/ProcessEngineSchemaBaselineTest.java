@@ -40,9 +40,9 @@ class ProcessEngineSchemaBaselineTest {
         DataSource ds = TestEngine.emptySchema("baseline_clean");
         ProcessEngineSchemaMigrator migrator = new ProcessEngineSchemaMigrator(ds);
 
-        assertThat(migrator.migrate()).isEqualTo(2);
+        assertThat(migrator.migrate()).isEqualTo(3);
         assertThat(migrator.migrate()).isZero();
-        assertThat(migrator.currentVersion()).isEqualTo("2");
+        assertThat(migrator.currentVersion()).isEqualTo("3");
     }
 
     @Test

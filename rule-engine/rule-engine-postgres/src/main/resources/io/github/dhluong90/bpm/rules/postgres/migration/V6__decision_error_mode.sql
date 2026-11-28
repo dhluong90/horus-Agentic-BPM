@@ -1,4 +1,4 @@
--- RLE-232: the decision log records the error mode each decision was evaluated in. Additive and forward-only:
+-- RLE-236: the decision log records the error mode each decision was evaluated in. Additive and forward-only:
 -- a row written before this migration keeps NULL, which the API shows as "unknown" and never as a guessed "strict".
 -- ALTER TABLE on the partitioned parent adds the column to every partition, the default one included.
 ALTER TABLE rle_decision

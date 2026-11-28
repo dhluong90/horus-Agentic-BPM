@@ -1037,6 +1037,8 @@ public class ProcessController {
             ObjectNode statuses = nodes.putObject(node);
             byStatus.forEach(statuses::put);
         });
+        ObjectNode openIncidents = body.putObject("openIncidents");
+        counts.openIncidents().forEach(openIncidents::put);
         return json(HttpStatus.OK, body, counts.asOf().toEpochMilli(), null);
     }
 

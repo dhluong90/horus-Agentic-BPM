@@ -54,7 +54,7 @@ public final class CompiledRuleSet {
     public static final int MAX_VIOLATIONS = 100;
 
     /**
-     * The error mode every rule set evaluates in until stage S1 adds {@code spec} (PD-066, PD-143, RLE-232): a model
+     * The error mode every rule set evaluates in until stage S1 adds {@code spec} (PD-066, PD-143, RLE-236): a model
      * that declares nothing is strict. The decision log records {@link #errorMode()} next to each decision.
      */
     public static final String ERROR_MODE_STRICT = "strict";
@@ -287,7 +287,7 @@ public final class CompiledRuleSet {
     }
 
     /**
-     * Returns the error mode this rule set evaluates in; the decision log records it with each decision (RLE-232).
+     * Returns the error mode this rule set evaluates in; the decision log records it with each decision (RLE-236).
      *
      * @return {@code strict} until stage S1 adds {@code spec}
      */

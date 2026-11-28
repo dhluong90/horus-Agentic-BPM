@@ -2772,7 +2772,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             "ASYNC_RESULT_ACCEPTED", job.nodeId(), job.tokenId(), attemptId, reportedBy, clock.instant(),
                             details)));
                     run(definition, row, state, new Command.AsyncResult(job.tokenId(), job.id(), completed),
-                            new RunAs.EngineWork(tenant, ASYNC_ACTOR));
+                            new RunAs.EngineWork(tenant, ASYNC_ACTOR), traceLinkOf(job));
                 } catch (RuntimeException e) {
                     throw new AttemptRunFailed(e);
                 }
@@ -2851,7 +2851,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 // Always four eyes: the reviewer is never the reporter of the result (participants) or the starter.
                 run(definition, row, state, new Command.RouteToReview(job.tokenId(), job.id(), refused.reviewer(),
                         true, refused.code(), refused.reasons(), reviewContext(job, attemptId, reportedBy, details)),
-                        new RunAs.EngineWork(tenant, ASYNC_ACTOR));
+                        new RunAs.EngineWork(tenant, ASYNC_ACTOR), traceLinkOf(job));
             } catch (RuntimeException e) {
                 throw new RefusalNotRouted(e, details);
             }
@@ -3048,9 +3048,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (!INCIDENT_STATUSES.contains(q.status())) {
             throw new QueryInvalidException("status must be one of " + String.join(", ", INCIDENT_STATUSES));
         }
+        String key = q.definitionKey() == null ? null : q.definitionKey().strip();
+        if (key != null && key.isEmpty()) {
+            throw new QueryInvalidException("definitionKey must not be empty");
+        }
+        if (q.version() != null && key == null) {
+            throw new QueryInvalidException("version needs a definitionKey");
+        }
+        if (q.version() != null && q.version() < 1) {
+            throw new QueryInvalidException("version must be a positive integer");
+        }
         int limit = limit(q.page());
-        // The cursor is bound to the tenant and the status it was issued for.
-        String after = cursors().verify(tenant, q.status(), "incidents", q.page().cursor());
+        // The cursor is bound to the tenant, the status and the definition filter it was issued for.
+        String scope = key == null ? q.status() : q.status() + "|" + key + "|" + (q.version() == null ? "" : q.version());
+        String after = cursors().verify(tenant, scope, "incidents", q.page().cursor());
         Instant afterCreatedAt = null;
         String afterId = null;
         if (after != null) {
@@ -3064,8 +3075,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         Instant at = afterCreatedAt;
         String id = afterId;
-        List<ProcessStore.IncidentRow> rows = transactions.inTransaction(() -> store.incidents(tenant, q.status(), at,
-                id, limit + 1));
+        List<ProcessStore.IncidentRow> rows = transactions.inReadTransaction(readTimeout, () -> key == null
+                ? store.incidents(tenant, q.status(), at, id, limit + 1)
+                : store.incidentsOfDefinition(tenant, q.status(), key, q.version(), at, id, limit + 1));
         java.util.Set<String> held = callers.currentPermissions();
         List<io.github.dhluong90.bpm.process.api.Incident> items = rows.stream().limit(limit)
                 .map(r -> incidentView(r, null, caller, held)).toList();
@@ -3073,7 +3085,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return new Page<>(items, null);
         }
         io.github.dhluong90.bpm.process.api.Incident last = items.get(limit - 1);
-        return new Page<>(items, cursors().sign(tenant, q.status(), "incidents", last.createdAt() + "|" + last.id()));
+        return new Page<>(items, cursors().sign(tenant, scope, "incidents", last.createdAt() + "|" + last.id()));
     }
 
     @Override
@@ -4775,9 +4787,36 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new io.github.dhluong90.bpm.process.api.FormValidationException(
                         "The result does not meet the task's form", violations);
             }
-            return TaskForms.record(form.schema(), result);
+            return maskEncrypted(row, tenant, task, TaskForms.record(form.schema(), result));
         }
         return null;
+    }
+
+    /**
+     * PRE-395: history keeps what is stored encrypted as masked, as it keeps a field the form masks. A task whose
+     * result variable is encrypted has its whole submission masked, because the submission is that variable; otherwise
+     * each submitted field named like an encrypted variable is.
+     */
+    private io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission maskEncrypted(InstanceRow row,
+            String tenant, TaskRow task, io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission recorded) {
+        String resultVariable = null;
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElse(null);
+        if (definition != null && compiled(definition).process().node(task.nodeId()).orElse(null) instanceof UserTask node) {
+            resultVariable = node.extensions()
+                    .first(io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable.class)
+                    .map(io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable::name).orElse(null);
+        }
+        boolean all = resultVariable != null && store.encryptsVariable(row.definitionKey(), resultVariable);
+        Map<String, Object> values = new LinkedHashMap<>(recorded.values());
+        boolean changed = false;
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            if (all || (resultVariable == null && store.encryptsVariable(row.definitionKey(), entry.getKey()))) {
+                entry.setValue(io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission.MASKED);
+                changed = true;
+            }
+        }
+        return changed ? new io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission(values,
+                recorded.unrecordedFields()) : recorded;
     }
 
     @Override
@@ -5172,14 +5211,33 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private io.github.dhluong90.bpm.process.spi.ProcessTracing.Span startStepSpan(StoredDefinition definition,
-            String stepKind) {
+            String stepKind, String linkedFrom) {
         try {
-            io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span = tracing.startStep(definition.tenantId(),
-                    definition.key(), definition.version(), stepKind);
+            io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span = linkedFrom == null
+                    ? tracing.startStep(definition.tenantId(), definition.key(), definition.version(), stepKind)
+                    : tracing.startStep(definition.tenantId(), definition.key(), definition.version(), stepKind,
+                            linkedFrom);
             return span == null ? io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE : span;
         } catch (RuntimeException ignored) {
             return io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE;
         }
+    }
+
+    /** The reference a later span links to, or null; a tracer that throws never fails a step. */
+    private static String spanLink(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span) {
+        try {
+            return span.link();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /** The scheduling span's reference kept in an async job's payload; ids only, never a value of the request. */
+    static final String TRACE_LINK = "traceLink";
+
+    /** What the job's payload holds as the link to the span that scheduled it, or null. */
+    private static String traceLinkOf(JobRow job) {
+        return Values.readMap(job.payloadJson()).get(TRACE_LINK) instanceof String link ? link : null;
     }
 
     private static void endStepSpan(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span, String outcome,
@@ -5497,6 +5555,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private List<IncidentSite> run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first,
             RunAs as) {
+        return run(definition, row, initial, first, as, null);
+    }
+
+    /**
+     * Runs the command and everything it queues. {@code firstLinkedFrom}, when not null, is the span reference of the
+     * step that scheduled an async call whose result is the first command: its span is linked to that one.
+     */
+    private List<IncidentSite> run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first,
+            RunAs as, String firstLinkedFrom) {
         Compiled compiled = compiled(definition);
         InstanceState state = initial;
         List<HistoryEntry> history = new ArrayList<>();
@@ -5531,7 +5598,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }
                 Queued item = queue.poll();
                 Command command = item.command();
-                var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command));
+                var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command),
+                        applied == 1 ? firstLinkedFrom : null);
+                String scheduledBy = spanLink(span);
                 String spanOutcome = "OK";
                 Throwable spanFailure = null;
                 Transition t;
@@ -5643,6 +5712,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 payload.put("businessKey", state.businessKey());
                             }
                             payload.put("inputs", call.inputs());
+                            if (scheduledBy != null) {
+                                payload.put(TRACE_LINK, scheduledBy);
+                            }
                             Duration lease = timeout.plus(async.leaseMargin());
                             newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
                                     definition.id(), call.tokenId(), kind, call.nodeId(),
@@ -5671,6 +5743,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             payload.put(AUDIT_INPUTS, AgentAudit.maskInputs(state.tenantId(), node, call.inputs(),
                                     inputMasker));
                             payload.put("guard", AgentGuardSpecs.payload(node));
+                            if (scheduledBy != null) {
+                                payload.put(TRACE_LINK, scheduledBy);
+                            }
                             // The step's own retry policy, from the approved definition, or the runner's (#58).
                             RetryPolicy retry = node.extensions().first(RetryPolicy.class).orElse(null);
                             int attempts = retry == null ? runner.maxAttempts() : retry.attempts();

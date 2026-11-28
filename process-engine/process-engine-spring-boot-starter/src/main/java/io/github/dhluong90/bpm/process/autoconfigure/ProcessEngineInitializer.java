@@ -28,6 +28,18 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
     private final ProcessEngineProperties properties;
     private final ResourceLoader resources;
     private final boolean summariseUnclassified;
+    private Runnable roleCheck;
+
+    /**
+     * Sets the check of the runtime database role, run once the schema is current (#700).
+     *
+     * @param check the check; it throws to stop the start
+     * @return this initializer
+     */
+    ProcessEngineInitializer withRoleCheck(Runnable check) {
+        this.roleCheck = check;
+        return this;
+    }
 
     ProcessEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
             ProcessEngineProperties properties, ResourceLoader resources) {
@@ -68,6 +80,9 @@ public final class ProcessEngineInitializer implements SmartInitializingSingleto
             int applied = migrator.migrate();
             LOG.info("Process Engine schema at version " + migrator.currentVersion() + " (" + applied
                     + " migration(s) applied)");
+        }
+        if (roleCheck != null) {
+            roleCheck.run();
         }
         // The list cursor key, in its own short transaction outside any request (pre_engine_key).
         // AUD-13: keys from configuration or a secret keep the signing key out of the database.

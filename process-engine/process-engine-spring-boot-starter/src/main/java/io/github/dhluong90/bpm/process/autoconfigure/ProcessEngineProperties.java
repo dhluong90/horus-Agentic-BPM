@@ -41,7 +41,9 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  * @param calls limits of a process that calls another (#92)
  * @param tasks how a user task is completed through a declared form (PRE-031)
+ * @param database the schema owner and the application role (#700)
  * @param parallelStart limits of the arrivals a parallel multiple start holds (PD-149, AUD-10)
+ * @param variableEncryption which instance variables are encrypted at rest and under which keys (PRE-395)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -71,7 +73,126 @@ public record ProcessEngineProperties(
         @DefaultValue MultiInstance multiInstance,
         @DefaultValue Tasks tasks,
         @DefaultValue Cursor cursor,
-        @DefaultValue ParallelStart parallelStart) {
+        @DefaultValue ParallelStart parallelStart,
+        @DefaultValue Database database,
+        @DefaultValue VariableEncryption variableEncryption) {
+
+    /**
+     * Two database roles for production (#700): a schema owner that migrates and an application role that serves traffic.
+     * Unset, the engine migrates and runs as the one role of the host's {@code DataSource}, which suits development and
+     * is not for production, because that role owns the tables and can disable their triggers.
+     *
+     * @param ownerUrl JDBC URL of the schema owner's connection; required with {@code ownerUsername}
+     * @param ownerUsername the schema owner; set it to turn the two-role setup on. Do not set it on a serving host: run the migration as a separate step ({@code horus.bpm.migrate-only=true}, connecting as the owner) and give the serving hosts the application role only. The owner migrates at start-up (and
+     *     keeps the partition step, when the engine has one) and is not used for requests: its connections are opened
+     *     for one run and closed
+     * @param ownerPassword the owner's password; supply it from a secret, never from a file in the repository
+     * @param appRole the role the host's {@code DataSource} connects as; after each migration the engine grants it
+     *     SELECT, INSERT, UPDATE and DELETE on the engine's tables and nothing else. Empty grants nothing: apply
+     *     {@code deploy/postgres/app-role-grants.sql} yourself
+     * @param roleCheck what start-up does when the role the host serves traffic with owns the engine's tables, holds
+     *     TRIGGER on them or is a superuser: {@code enforce} (default outside the {@code dev} profile) stops the start with the code {@code HORUS-DB-ROLE-001}, {@code warn} logs one WARN,
+     *     {@code off} skips the check. Outside {@code dev}, {@code warn} and {@code off} are an opt-out that logs {@code HORUS-DB-ROLE-002} at ERROR on every start. In the {@code dev} profile the default is {@code off}. The check is skipped when {@code horus.bpm.migrate-only=true}
+     */
+    public record Database(String ownerUrl, String ownerUsername, String ownerPassword, String appRole,
+            @DefaultValue("") String roleCheck) {
+
+        /** Whether the two-role setup is on. */
+        public boolean split() {
+            return ownerUsername != null && !ownerUsername.isBlank();
+        }
+
+        /** Never prints the password. */
+        @Override
+        public String toString() {
+            return "Database[ownerUrl=" + ownerUrl + ", ownerUsername=" + ownerUsername + ", ownerPassword=***, appRole="
+                    + appRole + ", roleCheck=" + roleCheck + "]";
+        }
+    }
+
+    /**
+     * Application-level encryption of instance variables (PRE-395). Off until {@code variables} or
+     * {@code definitions} name something. Supply every key from an environment variable or a secret store, never from a
+     * file in the repository. Naming a variable without a key fails start-up: the engine never stores it in the clear
+     * instead.
+     *
+     * @param variables names of the variables encrypted in every definition, matched on the top-level name
+     * @param definitions per definition key, the variable names encrypted there; {@code *} encrypts all of them
+     * @param activeKeyId the id of the key that encrypts new values, 1 to 32 letters, digits, {@code .}, {@code _} or
+     *     {@code -}; required when {@code variables} or {@code definitions} is set
+     * @param keys Base64 AES-256 keys (32 bytes after decoding) by id. To rotate: add a new key, make it active, run
+     *     the re-encryption sweep, then remove the old key once no stored value carries its id; a value of a removed
+     *     key is refused with {@code 500 VARIABLE_KEY_UNAVAILABLE}
+     */
+    public record VariableEncryption(java.util.Set<String> variables,
+            java.util.Map<String, java.util.Set<String>> definitions, String activeKeyId,
+            java.util.Map<String, String> keys) {
+
+        /** Copies the collections; unset is empty. */
+        public VariableEncryption {
+            variables = variables == null ? java.util.Set.of() : java.util.Set.copyOf(variables);
+            definitions = definitions == null ? java.util.Map.of() : java.util.Map.copyOf(definitions);
+            keys = keys == null ? java.util.Map.of() : java.util.Map.copyOf(keys);
+        }
+
+        /** @return the rules these settings describe */
+        public io.github.dhluong90.bpm.process.spi.VariableEncryptionRules rules() {
+            return new io.github.dhluong90.bpm.process.spi.VariableEncryptionRules(variables, definitions);
+        }
+
+        /**
+         * Builds the keyring: the active key writes, every other key only reads.
+         *
+         * @return the keyring, empty when no key is set
+         * @throws IllegalArgumentException naming the property when a key is not Base64 or not 32 bytes, or the active
+         *     id is missing
+         */
+        public io.github.dhluong90.bpm.process.spi.VariableKeyring keyring() {
+            if (keys.isEmpty()) {
+                return io.github.dhluong90.bpm.process.spi.VariableKeyring.none();
+            }
+            if (activeKeyId == null || !keys.containsKey(activeKeyId)) {
+                throw new IllegalArgumentException("horus.bpm.processes.variable-encryption.active-key-id must name "
+                        + "one of horus.bpm.processes.variable-encryption.keys");
+            }
+            java.util.List<io.github.dhluong90.bpm.process.spi.VariableKeyring.Key> earlier = new java.util.ArrayList<>();
+            io.github.dhluong90.bpm.process.spi.VariableKeyring.Key active = null;
+            for (java.util.Map.Entry<String, String> e : keys.entrySet()) {
+                io.github.dhluong90.bpm.process.spi.VariableKeyring.Key key;
+                try {
+                    key = new io.github.dhluong90.bpm.process.spi.VariableKeyring.Key(e.getKey(),
+                            java.util.Base64.getDecoder().decode(e.getValue().strip()));
+                } catch (IllegalArgumentException ex) {
+                    throw new IllegalArgumentException("horus.bpm.processes.variable-encryption.keys." + e.getKey()
+                            + " must be Base64 of exactly 32 bytes");
+                }
+                if (e.getKey().equals(activeKeyId)) {
+                    active = key;
+                } else {
+                    earlier.add(key);
+                }
+            }
+            io.github.dhluong90.bpm.process.spi.VariableKeyring.Key now = active;
+            return new io.github.dhluong90.bpm.process.spi.VariableKeyring() {
+                @Override
+                public java.util.Optional<Key> current() {
+                    return java.util.Optional.of(now);
+                }
+
+                @Override
+                public java.util.List<Key> previous() {
+                    return earlier;
+                }
+            };
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "VariableEncryption[variables=" + variables + ", definitions=" + definitions.keySet()
+                    + ", activeKeyId=" + activeKeyId + ", keys=" + keys.keySet() + "]";
+        }
+    }
 
     /**
      * The keys that sign list cursors (AUD-13). Supply every key from an environment variable or a secret store,
@@ -546,7 +667,7 @@ public record ProcessEngineProperties(
      *     {@code 400 ROLE_FAN_OUT_EXCEEDED} unless the request names one {@code role} or {@code group} (#408)
      * @param statementTimeout longest one statement of a list read may run, set with {@code SET LOCAL} in a read-only
      *     transaction of its own (ADR-0015); a read that exceeds it is answered {@code 503 QUERY_TIMEOUT}, never with
-     *     a partial page. Positive; two seconds by default (#254)
+     *     a partial page. Applies to the instance, definition and incident lists and the live node counts (#254, #91). Positive; two seconds by default
      * @param dueSoonWindow a task due within this time reads {@code slaState: DUE_SOON} in the task list (PD-111,
      *     #472); positive, one hour by default
      */

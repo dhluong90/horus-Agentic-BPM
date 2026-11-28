@@ -81,6 +81,7 @@ public class ProblemDetails {
             Map.entry("UNIQUE_HIT_VIOLATION", UNPROCESSABLE),
             Map.entry("REPLAY_NOT_POSSIBLE", UNPROCESSABLE),
             Map.entry("INTERNAL_ERROR", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("DECISION_LOG_BACKLOG", HttpStatus.SERVICE_UNAVAILABLE),
             Map.entry("SCHEMA_NOT_READY", HttpStatus.SERVICE_UNAVAILABLE));
 
     /**
@@ -168,6 +169,10 @@ public class ProblemDetails {
         if (e instanceof io.github.dhluong90.bpm.rules.api.RateLimitedException limited) {
             return ResponseEntity.status(status).header("Retry-After", Long.toString(limited.retryAfterSeconds()))
                     .contentType(PROBLEM).body(response.getBody());
+        }
+        if ("DECISION_LOG_BACKLOG".equals(e.code())) {
+            // RLE-234: the relay drains the queue every second or so; a client retries after a moment
+            return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());
         }
         if (status == HttpStatus.CONFLICT && "IDEMPOTENCY_IN_FLIGHT".equals(e.code())) {
             return ResponseEntity.status(status).header("Retry-After", "1").contentType(PROBLEM).body(response.getBody());

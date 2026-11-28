@@ -38,10 +38,10 @@ public final class JdbcDecisionLog implements DecisionLog {
         jdbc.sql("""
                 INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome,
                   error_code, masked_inputs, outputs, matched_rule_ids, caller_id, correlation_id, eval_clock,
-                  duration_micros, log_mode, pinned, on_behalf_of, function_versions, error_mode)
+                  duration_micros, log_mode, pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms, error_mode)
                 VALUES (:tenant, :createdAt, :id, :ruleSet, :version, :hitPolicy, :outcome, :errorCode,
                   CAST(:inputs AS jsonb), CAST(:outputs AS jsonb), CAST(:matched AS jsonb), :caller, :correlation,
-                  :clock, :micros, 'TRANSACTIONAL', :pinned, :onBehalfOf, :functionVersions, :errorMode)
+                  :clock, :micros, 'TRANSACTIONAL', :pinned, :onBehalfOf, :functionVersions, :budgetLimit, :stepBudget, :timeoutMs, :errorMode)
                 """)
                 .param("tenant", r.tenantId()).param("createdAt", Timestamp.from(r.createdAt())).param("id", r.id())
                 .param("ruleSet", r.ruleSet()).param("version", r.version()).param("hitPolicy", r.hitPolicy())
@@ -50,7 +50,10 @@ public final class JdbcDecisionLog implements DecisionLog {
                 .param("matched", r.matchedRuleIdsJson()).param("caller", r.callerId())
                 .param("correlation", r.correlationId()).param("clock", Timestamp.from(r.evalClock()))
                 .param("micros", r.durationMicros()).param("pinned", r.pinned())
-                .param("onBehalfOf", r.onBehalfOf()).param("functionVersions", r.functionVersions()).param("errorMode", r.errorMode())
+                .param("onBehalfOf", r.onBehalfOf()).param("functionVersions", r.functionVersions())
+                .param("budgetLimit", r.budgetLimit()).param("stepBudget", r.stepBudget())
+                .param("timeoutMs", r.timeoutMillis())
+                .param("errorMode", r.errorMode())
                 .update();
     }
 
@@ -221,13 +224,14 @@ public final class JdbcDecisionLog implements DecisionLog {
         return RuleListQueries.byInput(afterPosition).sql();
     }
 
-    private static DecisionRecord record(ResultSet rs, int row) throws SQLException {
+    static DecisionRecord record(ResultSet rs, int row) throws SQLException {
         return new DecisionRecord(rs.getString("tenant_id"), rs.getString("id"),
                 rs.getTimestamp("created_at").toInstant(), rs.getString("rule_set_name"), rs.getInt("version_num"),
                 rs.getString("hit_policy"), rs.getString("outcome"), rs.getString("error_code"),
                 rs.getString("inputs"), rs.getString("outputs"), rs.getString("matched"), rs.getString("caller_id"),
                 rs.getString("correlation_id"), rs.getTimestamp("eval_clock").toInstant(),
                 rs.getLong("duration_micros"), rs.getBoolean("pinned"), rs.getString("on_behalf_of"),
-                rs.getString("function_versions"), rs.getString("error_mode"));
+                rs.getString("function_versions"), rs.getString("budget_limit"), (Integer) rs.getObject("step_budget"),
+                (Integer) rs.getObject("timeout_ms"), rs.getString("error_mode"));
     }
 }

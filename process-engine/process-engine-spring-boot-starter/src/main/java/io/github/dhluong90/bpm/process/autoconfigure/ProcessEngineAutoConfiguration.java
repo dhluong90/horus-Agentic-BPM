@@ -52,7 +52,11 @@ import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcLayoutStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcMigrationStore;
+import io.github.dhluong90.bpm.process.internal.store.VariableVault;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcVariableReencryption;
+import io.github.dhluong90.bpm.process.spi.VariableEncryptionRules;
+import io.github.dhluong90.bpm.process.spi.VariableKeyring;
 import io.github.dhluong90.bpm.process.postgres.JdbcCalendarStore;
 import io.github.dhluong90.bpm.process.internal.service.Calendars;
 import io.github.dhluong90.bpm.process.api.CalendarService;
@@ -119,6 +123,20 @@ import org.springframework.transaction.PlatformTransactionManager;
 @EnableConfigurationProperties(ProcessEngineProperties.class)
 public class ProcessEngineAutoConfiguration {
 
+    /**
+     * Ends the process once the schema is current, when the host runs as the migration step ({@code horus.bpm.migrate-only=true}, #700).
+     * That step connects as the schema owner; the serving hosts never receive the owner's password.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "horus.bpm", name = "migrate-only", havingValue = "true")
+    org.springframework.boot.ApplicationRunner processEngineMigrateOnlyExit(org.springframework.context.ConfigurableApplicationContext context) {
+        return args -> {
+            org.apache.commons.logging.LogFactory.getLog(ProcessEngineAutoConfiguration.class)
+                    .info("horus.bpm.migrate-only: the Process Engine schema is current; exiting");
+            System.exit(org.springframework.boot.SpringApplication.exit(context, () -> 0));
+        };
+    }
+
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
@@ -133,8 +151,9 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    ProcessEngineSchemaMigrator processEngineSchemaMigrator(DataSource dataSource) {
-        return new ProcessEngineSchemaMigrator(dataSource);
+    ProcessEngineSchemaMigrator processEngineSchemaMigrator(DataSource dataSource, ProcessEngineProperties properties) {
+        return new ProcessEngineSchemaMigrator(dataSource, DatabaseRoles.ownerDataSource(properties.database()),
+                properties.database().appRole());
     }
 
     @Bean
@@ -147,16 +166,50 @@ public class ProcessEngineAutoConfiguration {
         }), org.springframework.jdbc.core.simple.JdbcClient.create(dataSource));
     }
 
+    /**
+     * The keys of variable encryption (PRE-395). A host with a vault registers its own {@link VariableKeyring}; the
+     * default reads {@code horus.bpm.processes.variable-encryption.keys}.
+     */
     @Bean
     @ConditionalOnMissingBean
-    JdbcProcessStore processEngineStore(DataSource dataSource, ProcessEngineProperties properties) {
-        return new JdbcProcessStore(dataSource, properties.idempotency().lockTimeout());
+    VariableKeyring processEngineVariableKeyring(ProcessEngineProperties properties) {
+        return properties.variableEncryption().keyring();
+    }
+
+    /**
+     * Encrypts the configured variables. Fails start-up when variables are named and the keyring has no current key:
+     * the engine never falls back to the clear.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    VariableVault processEngineVariableVault(VariableKeyring keyring, ProcessEngineProperties properties) {
+        VariableEncryptionRules rules = properties.variableEncryption().rules();
+        if (!rules.isEmpty() && keyring.current().isEmpty()) {
+            throw new IllegalStateException("horus.bpm.processes.variable-encryption names variables to encrypt, but "
+                    + "the keyring has no current key. Set variable-encryption.keys and active-key-id from a secret "
+                    + "store.");
+        }
+        return new VariableVault(keyring, rules);
+    }
+
+    /** Rewrites stored values under the current key after a rotation. */
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcVariableReencryption processEngineVariableReencryption(DataSource dataSource, VariableVault vault) {
+        return new JdbcVariableReencryption(dataSource, vault);
     }
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcJobStore processEngineJobStore(DataSource dataSource) {
-        return new JdbcJobStore(dataSource);
+    JdbcProcessStore processEngineStore(DataSource dataSource, ProcessEngineProperties properties,
+            VariableVault vault) {
+        return new JdbcProcessStore(dataSource, properties.idempotency().lockTimeout(), vault);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcJobStore processEngineJobStore(DataSource dataSource, VariableVault vault) {
+        return new JdbcJobStore(dataSource, vault);
     }
 
     /** This replica's job settings; the replica id defaults to the host name plus a random suffix. */
@@ -660,8 +713,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource) {
-        return new JdbcAgentReplayStore(dataSource);
+    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource, VariableVault vault) {
+        return new JdbcAgentReplayStore(dataSource, vault);
     }
 
     /**
@@ -759,8 +812,11 @@ public class ProcessEngineAutoConfiguration {
     LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
             ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
             JdbcProcessStore store, ProcessEngineProperties properties) {
-        return new LiveNodeCountService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
-                clock.getIfUnique(Clock::systemUTC), transactions, store, properties.stats().toSettings());
+        LiveNodeCountService service = new LiveNodeCountService(tenants.getIfUnique(() -> () -> null),
+                callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC), transactions, store,
+                properties.stats().toSettings());
+        service.useReadTimeout(properties.query().statementTimeout());
+        return service;
     }
 
     @Bean
@@ -905,10 +961,15 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     ProcessEngineInitializer processEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
-            ProcessEngineProperties properties, ResourceLoader resources, Environment environment) {
+            ProcessEngineProperties properties, ResourceLoader resources, Environment environment,
+            DataSource dataSource) {
         // PD-146: the one start-up summary of unclassified agent step fields is logged outside the dev profile only
+        io.github.dhluong90.bpm.process.postgres.DatabaseRoleCheck roleCheck =
+                new io.github.dhluong90.bpm.process.postgres.DatabaseRoleCheck(dataSource);
         return new ProcessEngineInitializer(migrator, services, properties, resources,
-                !environment.matchesProfiles("dev"));
+                !environment.matchesProfiles("dev"))
+                .withRoleCheck(() -> DatabaseRoles.verify(roleCheck, properties.database(), environment,
+                        org.apache.commons.logging.LogFactory.getLog(ProcessEngineInitializer.class)));
     }
 
     @Bean

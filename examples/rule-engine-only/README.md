@@ -18,7 +18,7 @@ sequenceDiagram
     Host->>HF: migrate db/migration
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
-    RE->>DB: baseline 0, V1 rle_* tables and V2, recorded in rle_schema_history
+    RE->>DB: baseline 0, V1 rle_* tables, V2 and V3, recorded in rle_schema_history
     RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
@@ -817,6 +817,9 @@ The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=htt
 | `horus.bpm.host-id` | unset; `rule-engine-only` here | Id returned by `GET /api/bpm/meta` |
 | `horus.bpm.rules.security.role-permissions` | empty; `ROLE_PRICING_AUTHOR` and `ROLE_PRICING_APPROVER` here | Host role to `rules:*` permissions, listed by `GET /api/bpm/me` |
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
+| `horus.bpm.rules.database.owner-url`, `.owner-username`, `.owner-password` | unset | The schema owner, for two database roles: migrations and the decision log partition step run as this role, requests as `spring.datasource`. Do not set it on a serving host: use a separate migration step (`horus.bpm.migrate-only=true`). [Operations runbook](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#run-the-migration-as-a-separate-step) |
+| `horus.bpm.rules.database.app-role` | unset | The role `spring.datasource` connects as; the engine grants it data rights after each migration |
+| `horus.bpm.rules.database.role-check` | `enforce`, `off` in `dev` | `enforce` (`HORUS-DB-ROLE-001`) stops the start when the request role owns an `rle_*` table, holds `TRIGGER` on one or is a superuser |
 | `horus.bpm.rules.query.max-page-size` | `200` | Largest `limit` of `GET /rule-sets` and `GET .../versions`, 1 to 200; may be lowered, never raised |
 | `horus.bpm.rules.lifecycle.reason-max-length` | `2000` | Longest `:reject` reason in characters, 1 to 2000; may be lowered, never raised |
 | `horus.bpm.rules.decision-log.retention` | none: keeps everything, warns | `keep-forever`, or how long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Unset, nothing is dropped and start-up is unaffected |
@@ -842,7 +845,7 @@ The full list of properties is on the wiki page Rule Engine Configuration. The s
 | `SignInPageTest` | The page in English and Vietnamese, the error and signed-out states, the escaped CSRF field, demo users only on `dev` with a password, no inline script or style, and the same message keys in both languages |
 | `CockpitEmbeddedIT.CKP_001_*` | On the `dev` profile: form sign-in, the cockpit page and its one-host registry, then `200` from `/api/bpm/meta` and `/api/bpm/me` with the session, valid against the cockpit schemas; a call that changes data needs `X-XSRF-TOKEN` from the cookie |
 | `HostRestartIT.TR_EMB_06_*` | On restart, and after a new host migration, the engine's history is unchanged and the host's history is never touched by the engine |
-| `MultiReplicaCacheIT.RLE_010_*`, `MultiReplicaCacheIT.TR_ASY_04_*` | Two copies of this host on one database: copy B serves `card-fee` v2 within 1 s of copy A's approval on a direct connection, and within the 5 s epoch check through PgBouncer in transaction mode (`edoburu/pgbouncer`, override with `-Dbpm.test.pgbouncer.image`) with `cache.listen-notify=false`, where no session runs `LISTEN` |
+| `MultiReplicaCacheIT.RLE_010_*`, `MultiReplicaCacheIT.TR_ASY_04_*`, `MultiReplicaCacheIT.RLE_027_*` | Two copies of this host on one database: copy B serves `card-fee` v2 within 1 s of copy A's approval on a direct connection, and within the 5 s epoch check through PgBouncer in transaction mode (`edoburu/pgbouncer`, override with `-Dbpm.test.pgbouncer.image`) with `cache.listen-notify=false`, where no session runs `LISTEN`. Behind the pooler, both copies sweep every second and a superseded version is retired once (one event, one history row) |
 | `DecisionLogSearchIT.RLE_029_*`, `DecisionLogSearchIT.RLE_017_*` | The decision log demo above over HTTP: 250 card-fee decisions of January 2027 in pages of 200 and 50, a 32-day range and a missing rule set refused, another tenant's own rows only, `403` without `rules:log:read`, masked inputs still hashed; the default-section gauge from 1 to 0 when the job creates March without a restart |
 | `RuleLifecycleIT.RLE_020_*`, `RLE_009_*`, `RLE_001_*`, `RLE_011_*`, `RLE_014_*`, `RLE_002_*`, `RLE_003_*` | The demo above over HTTP: import with the source kept, self-approval refused, evaluation of `R1` at 0 VND, the body tenant ignored, idempotent import. The host runs with `spring.jackson.property-naming-strategy=SNAKE_CASE`, and engine responses stay camelCase |
 

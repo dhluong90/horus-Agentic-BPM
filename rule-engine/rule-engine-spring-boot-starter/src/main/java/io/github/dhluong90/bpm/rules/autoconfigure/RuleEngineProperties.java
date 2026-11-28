@@ -34,6 +34,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param explain the plain-language explanation of logged decisions
  * @param classification the reminder about inputs that declare no {@code mask} (PD-146)
  * @param cursor the keys that sign list cursors (AUD-13)
+ * @param database the schema owner and the application role (#700)
  * @param templates the rule set templates the host offers new rule sets (PD-112)
  */
 @ConfigurationProperties("horus.bpm.rules")
@@ -54,7 +55,42 @@ public record RuleEngineProperties(
         @DefaultValue Simulation simulation,
         @DefaultValue Explain explain,
         @DefaultValue Classification classification,
-        @DefaultValue Templates templates) {
+        @DefaultValue Templates templates,
+        @DefaultValue Database database) {
+
+    /**
+     * Two database roles for production (#700): a schema owner that migrates and an application role that serves traffic.
+     * Unset, the engine migrates and runs as the one role of the host's {@code DataSource}, which suits development and
+     * is not for production, because that role owns the tables and can disable their triggers.
+     *
+     * @param ownerUrl JDBC URL of the schema owner's connection; required with {@code ownerUsername}
+     * @param ownerUsername the schema owner; set it to turn the two-role setup on. Do not set it on a serving host: run the migration as a separate step ({@code horus.bpm.migrate-only=true}, connecting as the owner) and give the serving hosts the application role only. The owner migrates at start-up (and
+     *     keeps the partition step, when the engine has one) and is not used for requests: its connections are opened
+     *     for one run and closed
+     * @param ownerPassword the owner's password; supply it from a secret, never from a file in the repository
+     * @param appRole the role the host's {@code DataSource} connects as; after each migration the engine grants it
+     *     SELECT, INSERT, UPDATE and DELETE on the engine's tables and nothing else. Empty grants nothing: apply
+     *     {@code deploy/postgres/app-role-grants.sql} yourself
+     * @param roleCheck what start-up does when the role the host serves traffic with owns the engine's tables, holds
+     *     TRIGGER on them or is a superuser: {@code enforce} (default outside the {@code dev} profile) stops the start with the code {@code HORUS-DB-ROLE-001}, {@code warn} logs one WARN,
+     *     {@code off} skips the check. Outside {@code dev}, {@code warn} and {@code off} are an opt-out that logs {@code HORUS-DB-ROLE-002} at ERROR on every start. In the {@code dev} profile the default is {@code off}. The check is skipped when {@code horus.bpm.migrate-only=true}
+     */
+    public record Database(String ownerUrl, String ownerUsername, String ownerPassword, String appRole,
+            @DefaultValue("") String roleCheck) {
+
+        /** Whether the two-role setup is on. */
+        public boolean split() {
+            return ownerUsername != null && !ownerUsername.isBlank();
+        }
+
+        /** Never prints the password. */
+        @Override
+        public String toString() {
+            return "Database[ownerUrl=" + ownerUrl + ", ownerUsername=" + ownerUsername + ", ownerPassword=***, appRole="
+                    + appRole + ", roleCheck=" + roleCheck + "]";
+        }
+    }
+
 
     /**
      * The rule set templates an author starts a new rule set from (PD-112, RLE-197). The engine ships four: fee by tier,
@@ -290,10 +326,98 @@ public record RuleEngineProperties(
      *     A period must be at least {@code retention-floor}
      * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
      *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
+     * @param mode {@code transactional} (the default): each decision is one {@code INSERT} into the log in the caller's
+     *     transaction. {@code async} (#45, RLE-234): each decision is written to a queue in the caller's transaction,
+     *     durable at its commit, and a relay moves it into the log in batches; the log lags by about the poll interval
+     *     and the evaluation is cheaper. An evaluation is refused with {@code 503 DECISION_LOG_BACKLOG}, never dropped,
+     *     when the queue is over {@code async.max-backlog}. Off by default; no decision is lost in either mode
+     * @param async the settings of {@code async} mode; read only then
      */
     public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
             List<String> additionalPersonalDataNames, Duration partitionsAhead, String retention,
-            Period retentionFloor) {
+            Period retentionFloor, Mode mode, Async async) {
+
+        /** How a decision reaches the log. */
+        public enum Mode {
+            /** One insert into the log, in the caller's transaction. */
+            TRANSACTIONAL,
+            /** A queue row in the caller's transaction, relayed into the log in batches. */
+            ASYNC
+        }
+
+        /**
+         * The settings of {@code decision-log.mode: async} (RLE-234).
+         *
+         * @param batchSize decisions the relay moves in one transaction, 1 to 10,000; default 100
+         * @param pollInterval how often the relay runs, 100 ms to one minute; default one second. The log lags by about
+         *     this long
+         * @param maxBacklog queued decisions above which an evaluation is refused with {@code 503 DECISION_LOG_BACKLOG},
+         *     1,000 to 10,000,000; default 100,000. Counted at the relay's runs and every 256 decisions, so it is
+         *     approximate. Dead letters are not counted: they block nothing
+         * @param maxAttempts attempts the relay makes on a decision the log refuses before it dead-letters it, 1 to
+         *     100; default 5. A dead letter is kept whole, listed by the dead-letter endpoints and counted in
+         *     {@code horus.rle.decision.log.queue.dead}; an operator retries or resolves it with a second person's
+         *     approval, and nothing deletes it
+         * @param retryBackoff the wait after the first failed attempt, doubled with each further one, 100 ms to
+         *     one hour; default five seconds
+         * @param maxRetryBackoff the longest wait between two attempts, at least {@code retry-backoff} and at most one
+         *     hour; default five minutes
+         */
+        public record Async(@DefaultValue("100") int batchSize, @DefaultValue("PT1S") Duration pollInterval,
+                @DefaultValue("100000") int maxBacklog, @DefaultValue("5") int maxAttempts,
+                @DefaultValue("PT5S") Duration retryBackoff, @DefaultValue("PT5M") Duration maxRetryBackoff) {
+
+            /** Validates the settings; an out-of-range value fails start-up naming the property. */
+            public Async {
+                if (batchSize < 1 || batchSize > 10_000) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.batch-size must be 1 to 10000, "
+                            + "was " + batchSize);
+                }
+                if (pollInterval.compareTo(Duration.ofMillis(100)) < 0 || pollInterval.compareTo(Duration.ofMinutes(1)) > 0) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.poll-interval must be PT0.1S to "
+                            + "PT1M, was " + pollInterval);
+                }
+                if (maxBacklog < 1_000 || maxBacklog > 10_000_000) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-backlog must be 1000 to "
+                            + "10000000, was " + maxBacklog);
+                }
+                if (maxAttempts < 1 || maxAttempts > 100) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-attempts must be 1 to 100, "
+                            + "was " + maxAttempts);
+                }
+                if (retryBackoff.compareTo(Duration.ofMillis(100)) < 0 || retryBackoff.compareTo(Duration.ofHours(1)) > 0) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.retry-backoff must be PT0.1S to "
+                            + "PT1H, was " + retryBackoff);
+                }
+                if (maxRetryBackoff.compareTo(retryBackoff) < 0 || maxRetryBackoff.compareTo(Duration.ofHours(1)) > 0) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-retry-backoff must be "
+                            + "retry-backoff (" + retryBackoff + ") to PT1H, was " + maxRetryBackoff);
+                }
+            }
+
+            /** @return the defaults: 100, one second, 100,000, 5 attempts, backing off from 5 seconds to 5 minutes */
+            public static Async defaults() {
+                return new Async(100, Duration.ofSeconds(1), 100_000, 5, Duration.ofSeconds(5), Duration.ofMinutes(5));
+            }
+        }
+
+        /**
+         * Returns the mode in force.
+         *
+         * @return the configured mode, or {@code transactional}
+         */
+        public Mode modeOrDefault() {
+            return mode == null ? Mode.TRANSACTIONAL : mode;
+        }
+
+        /**
+         * Returns the async settings in force.
+         *
+         * @return the configured settings, or the defaults
+         */
+        public Async asyncOrDefault() {
+            return async == null ? Async.defaults() : async;
+        }
 
         /** Validates the periods; an out-of-range value fails start-up naming the property. */
         public DecisionLog {

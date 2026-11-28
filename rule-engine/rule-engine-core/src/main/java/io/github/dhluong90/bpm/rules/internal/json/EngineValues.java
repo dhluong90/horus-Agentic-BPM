@@ -30,7 +30,7 @@ import tools.jackson.databind.node.ObjectNode;
  */
 public final class EngineValues {
 
-    /** What a decision row shows when no error mode was stored with it: a row older than the column (RLE-232). */
+    /** What a decision row shows when no error mode was stored with it: a row older than the column (RLE-236). */
     public static final String ERROR_MODE_UNKNOWN = "unknown";
 
     private static final BigDecimal MAX_SAFE = BigDecimal.valueOf(Money.MAX_JSON_SAFE);
@@ -282,6 +282,9 @@ public final class EngineValues {
         if (version.copiedFrom() != null) {
             node.put("copiedFrom", version.copiedFrom());
         }
+        if (version.sourceFileName() != null) {
+            node.put("sourceFileName", version.sourceFileName());
+        }
         // RLE-038: the pending four-eyes retirement, all null when none is pending.
         io.github.dhluong90.bpm.rules.api.RetirementRequest retirement = version.retirementRequest();
         node.set("retireRequestedBy", value(retirement == null ? null : retirement.requestedBy()));
@@ -330,7 +333,8 @@ public final class EngineValues {
                 instant(node.get("retiredAt")),
                 node.has("copiedFrom") && !node.get("copiedFrom").isNull() ? node.get("copiedFrom").asInt() : null,
                 warnings(node.get("warnings")),
-                retirementRequest(node));
+                retirementRequest(node),
+                text(node.get("sourceFileName")));
     }
 
     /** The pending retirement of a stored version result; absent in results recorded before four-eyes retirement. */
@@ -427,6 +431,9 @@ public final class EngineValues {
         node.put("pinned", entry.pinned());
         node.put("loggedAt", entry.loggedAt().toString());
         node.put("durationMicros", entry.durationMicros());
+        if (entry.limit() != null) {
+            node.put("limit", entry.limit());
+        }
         node.put("errorMode", entry.errorMode() == null ? ERROR_MODE_UNKNOWN : entry.errorMode());
         return node;
     }
@@ -456,6 +463,9 @@ public final class EngineValues {
         }
         if (entry.copiedFrom() != null) {
             node.put("copiedFrom", entry.copiedFrom());
+        }
+        if (entry.sourceFileName() != null) {
+            node.put("sourceFileName", entry.sourceFileName());
         }
         node.put("lockVersion", entry.lockVersion());
         node.put("occurredAt", entry.occurredAt().toString());
@@ -499,6 +509,9 @@ public final class EngineValues {
         json.put("clockChosen", d.clockChosen());
         json.put("pinned", d.pinned());
         json.put("durationMicros", d.durationMicros());
+        if (d.limit() != null) {
+            json.put("limit", d.limit());
+        }
         json.put("errorMode", d.errorMode() == null ? ERROR_MODE_UNKNOWN : d.errorMode());
         return json;
     }

@@ -26,7 +26,7 @@ Principle 13 is checked in every design review against six rules. See [[Configur
 
 | # | Rule | Example |
 |---|---|---|
-| 1 | A behaviour that differs between businesses is a setting or an extension point. Its default is the safe choice: controls stay on and nothing is deleted | The decision log is written in your transaction by default; asynchronous writing is a setting (M2) |
+| 1 | A behaviour that differs between businesses is a setting or an extension point. Its default is the safe choice: controls stay on and nothing is deleted | The decision log is written in your transaction by default; asynchronous writing is a setting (1.1) |
 | 2 | A setting that relaxes a control is off by default, logged when used, and shown in the host's `/api/bpm/meta` settings | The emergency single-approver path exists only when you turn it on |
 | 3 | Some guarantees are never settings: tenant isolation, append-only audit, determinism, no code in definitions, fail-closed guardrails, and the four-eyes rule on publication, which only the emergency path relaxes | The FEEL error mode is configurable per model, but a guardrail still fails closed in every mode |
 | 4 | No business values in engine code. Currencies, tiers, fee codes, reason codes, roles, languages, calendars and SLA periods come from definitions, configuration or host extensions. Examples, templates and seed data may use banking data; the engine core may not | SLA breaches are measured against each task definition's own deadline |
