@@ -43,6 +43,8 @@ export interface PlacedEdge {
   isLink?: boolean;
   /** The line from a compensation boundary event to its compensation activity (#488), drawn dotted. */
   isAssociation?: boolean;
+  /** The flow carries a condition (BPMN's small diamond at its start when it leaves an activity). */
+  conditional?: boolean;
   points: Point[];
   /** Centre of the edge's label, in the space dagre kept free for it. */
   labelAt: Point | undefined;
@@ -82,6 +84,8 @@ const TYPE_ROW = 17;
 export const TYPE_INDENT = 22;
 const TASK_MIN_HEIGHT = 56;
 /** Events and gateways: the symbol in a 48 px box, its name centred below in up to CAPTION_WIDTH. */
+/** Room kept at the foot of a step for its loop or compensation marker. */
+export const MARKER_ROW = 16;
 export const SYMBOL_SIZE = 48;
 export const CAPTION_WIDTH = 84;
 export const CAPTION_GAP = 10;
@@ -141,7 +145,9 @@ function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
   if (shape === 'task') {
     const lines = wrapText(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
     const typeLines = wrapText(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
-    const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW;
+    // A step that repeats or undoes another carries a marker at its foot (#496): the box keeps a row for it, clear of the text.
+    const marked = node.loop !== undefined || (node.compensation === true && node.type !== 'serviceTask:compensation');
+    const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW + (marked ? MARKER_ROW : 0);
     return { width: TASK_WIDTH, height: Math.max(TASK_MIN_HEIGHT, content), lines, typeLines };
   }
   const lines = wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);

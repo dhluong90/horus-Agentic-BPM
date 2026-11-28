@@ -93,6 +93,9 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'startEvent:multiple':
       case 'boundaryEvent:multiple':
         return <path d="M8 2l5.5 4.2-2.1 6.8H4.6L2.5 6.2z" {...common} />;
+      case 'intermediateThrowEvent:multiple':
+      case 'endEvent:multiple':
+        return <path d="M8 2l5.5 4.2-2.1 6.8H4.6L2.5 6.2z" {...common} fill="currentColor" />;
       case 'intermediateCatchEvent:parallelMultiple':
       case 'startEvent:parallelMultiple':
       case 'boundaryEvent:parallelMultiple':
