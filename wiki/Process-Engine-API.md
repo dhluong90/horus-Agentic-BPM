@@ -79,6 +79,7 @@ Lists are keyset pages:
 |---|---|---|
 | `horus.bpm.processes.query.max-page-size` | `200` | Most items per page; may be lowered, never raised |
 | `horus.bpm.processes.query.max-range` | `P31D` | Longest start-time range of `GET /instances`; may be lowered, never raised |
+| `horus.bpm.processes.query.statement-timeout` | `PT2S` | Longest one statement of `GET /instances` or `GET /definitions` may run. The read has a read-only transaction of its own with `SET LOCAL statement_timeout`; over the limit it is `503 QUERY_TIMEOUT` and returns no partial page (1.1, `PRE-394`) |
 | `horus.bpm.processes.query.max-roles` | `100` | Most role and group queues one `GET /tasks` reads, 1 to 1,000. A caller with more, who names no `role` or `group`, gets `400 ROLE_FAN_OUT_EXCEEDED` with `cap` and `provided`; naming one `role` or `group` narrows the list to one queue (0.3.0, #408) |
 | `horus.bpm.processes.query.due-soon-window` | `PT1H` | A task due within this time before `dueAt` reads `slaState: DUE_SOON` in `GET /tasks` (0.3.0, #472) |
 | `horus.bpm.processes.lifecycle.reason-max-length` | `2000` | Longest cancellation reason; may be lowered, never raised |
@@ -110,6 +111,7 @@ Every endpoint answers errors as RFC 9457 problem details with a `code`:
 | 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`, `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` |
 | 428 | `PRECONDITION_REQUIRED` |
+| 503 | `QUERY_TIMEOUT` (a list read stopped by `query.statement-timeout`) |
 | 500 | `INTERNAL`, `DEFINITION_INTEGRITY_FAILED`, `EVENT_LISTENER_FAILED` (correlation id only) |
 
 A request the framework refuses before the engine runs (an unreadable body, an unsupported media type) keeps its 4xx status with code `INPUT_INVALID`. `403 TENANT_NOT_ALLOWED` and `401 UNAUTHENTICATED` from the host contract carry the host's correlation id and, on a `401`, the `WWW-Authenticate` challenge. No body ever carries a stack trace, a class name or SQL.
