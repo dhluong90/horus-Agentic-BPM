@@ -5,7 +5,7 @@
 > - demo users share one password and may sign in with HTTP Basic, and `hoa` may both author and approve;
 > - traffic is plain HTTP on 127.0.0.1, with no TLS;
 > - the host connects as the database owner, which also runs the migrations (a role without superuser rights);
-> - there is one instance of each service, and no backups.
+> - there is one instance of each service, and no backups. Backup, restore and the recovery drill are in [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md).
 >
 > For anything shared, start from [Run without demo users](#run-without-demo-users). The host logs a `WARN` at start-up while demo users are on.
 
