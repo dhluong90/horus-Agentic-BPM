@@ -4673,11 +4673,11 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     /**
      * PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen.
      *
-     * @return PRE-390: the validated submission as history keeps it, every field the schema marks {@code mask: true}
-     *     replaced by {@link TaskForms#MASKED}; null when the task has no form to validate against
+     * @return PRE-390: the validated submission as history keeps it: masked fields as a marker, undeclared fields named
+     *     but not stored; null when the task has no form to validate against
      */
     @SuppressWarnings("unchecked")
-    private Map<String, Object> checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
+    private io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
         java.util.Optional<TaskForms.Resolved> resolved;
         try {
             resolved = resolveForm(tenant, row, task);
@@ -4692,7 +4692,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new io.github.dhluong90.bpm.process.api.FormValidationException(
                         "The result does not meet the task's form", violations);
             }
-            return (Map<String, Object>) TaskForms.maskValue(form.schema(), result);
+            return TaskForms.record(form.schema(), result);
         }
         return null;
     }
@@ -4977,7 +4977,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + " task of it cannot complete this four-eyes task");
             }
             java.util.Optional<JobRow> reviewed = checkReviewResult(tenant, row, taskId, values);
-            Map<String, Object> submission = null;
+            io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission submission = null;
             if (reviewed.isEmpty()) {
                 submission = checkForm(tenant, row, task, values);
             }

@@ -3569,10 +3569,18 @@ components:
                 additionalProperties: true
                 description: >-
                   The `TASK_COMPLETED` of a task that has a form (#663, `PRE-390`): the values the user submitted, as
-                  validated and stored in the same transaction. Every field the form schema marks `mask: true` is
-                  `***`; the plain value is never stored and never returned. It does not change when the case's
+                  validated and stored in the same transaction. Every field the form schema marks `mask: true` is the
+                  marker object `{"masked": true}`, so an audit tells a masked value from a real one; the plain value is
+                  never stored and never returned. A field the form does not declare is not stored (see `unrecordedFields`). It does not change when the case's
                   variables change later. Absent for a task completed before this was recorded, for a task without a
                   form, for a link task and for every other entry
+              unrecordedFields:
+                type: array
+                items: { type: string }
+                description: >-
+                  The `TASK_COMPLETED` of a task whose submission held fields the form does not declare (#663): their
+                  paths, for example `note` or `address.floor`, at most 50. Their values are not stored. Absent when
+                  there were none
         compensations:
           type: array
           description: >-

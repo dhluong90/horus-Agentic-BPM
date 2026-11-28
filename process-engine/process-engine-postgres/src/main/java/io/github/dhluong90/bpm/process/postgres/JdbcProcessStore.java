@@ -153,11 +153,14 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 }
             }
             // #663: what the user submitted, as it was stored (masked fields masked); older rows have none.
-            if ("TASK_COMPLETED".equals(type)
-                    && Values.readMap(rs.getString("details")).get("submission") instanceof Map<?, ?> submitted) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> recorded = (Map<String, Object>) submitted;
-                return plain.withSubmission(recorded);
+            if ("TASK_COMPLETED".equals(type)) {
+                Map<String, Object> details = Values.readMap(rs.getString("details"));
+                if (details.get("submission") instanceof Map<?, ?> submitted) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> recorded = (Map<String, Object>) submitted;
+                    List<String> unrecorded = strings(details.get("unrecordedFields"));
+                    return plain.withSubmission(recorded, unrecorded.isEmpty() ? null : unrecorded);
+                }
             }
             return plain;
         }

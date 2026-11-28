@@ -142,10 +142,31 @@ class TaskFormTest {
         var entry = engine.queries.activities(started.id(), 200).entries().stream()
                 .filter(e -> e.type().equals("TASK_COMPLETED")).findFirst().orElseThrow();
         assertThat(entry.submission()).containsEntry("decision", "REJECT")
-                .containsEntry("reason", "income not verified").containsEntry("idNumber", "***");
+                .containsEntry("reason", "income not verified").containsEntry("idNumber", Map.of("masked", true));
         String stored = TestEngine.jdbc().sql("SELECT details::text FROM pre_history WHERE instance_id = ? AND "
                 + "event_type = 'TASK_COMPLETED'").param(started.id()).query(String.class).single();
         assertThat(stored).contains("income not verified").doesNotContain(ID_NUMBER).doesNotContain("changed afterwards");
+    }
+
+    @Test
+    void PRE_390_a_field_the_form_does_not_declare_is_named_but_never_stored() {
+        importFixture();
+        as("an");
+        ProcessInstance started = engine.services.start(new StartRequest("loan-review-form", "LN-2027-0046", Map.of(),
+                null));
+        ProcessInstance.Task approve = open(started, "approve");
+        long claimed = engine.services.claim(approve.id(), approve.lockVersion(), "an-claim-1").lockVersion();
+
+        engine.services.complete(approve.id(), Map.of("decision", "APPROVE", "note", "call me on 0901234567"), claimed,
+                "an-complete-1");
+
+        var entry = engine.queries.activities(started.id(), 200).entries().stream()
+                .filter(e -> e.type().equals("TASK_COMPLETED")).findFirst().orElseThrow();
+        assertThat(entry.submission()).containsOnlyKeys("decision");
+        assertThat(entry.unrecordedFields()).containsExactly("note");
+        assertThat(TestEngine.jdbc().sql("SELECT details::text FROM pre_history WHERE instance_id = ? AND "
+                + "event_type = 'TASK_COMPLETED'").param(started.id()).query(String.class).single())
+                .doesNotContain("0901234567");
     }
 
     @Test

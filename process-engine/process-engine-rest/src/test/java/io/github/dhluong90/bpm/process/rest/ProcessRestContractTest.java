@@ -190,7 +190,8 @@ class ProcessRestContractTest {
                 .contains("\"state\":\"NOT_FULLY_UNDONE\"").contains("\"blockedStep\":\"verify-docs\"")
                 .contains("\"incidentId\":\"01JD0000000000000000000101\"").contains("\"kind\":\"STEP\"")
                 .contains("\"resultVariable\":\"fee2\"")
-                .contains("\"submission\":{\"decision\":\"REJECT\",\"idNumber\":\"***\"}");
+                .contains("\"submission\":{\"decision\":\"REJECT\",\"idNumber\":{\"masked\":true}}")
+                .contains("\"unrecordedFields\":[\"note\"]");
         assertProblem(get(BASE + "/instances/01JD0000000000000000000077/activities"), 404, "INSTANCE_NOT_FOUND");
         assertProblem(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "0"), 400,
                 "QUERY_INVALID");
@@ -574,7 +575,8 @@ class ProcessRestContractTest {
                     .withResultVariable("fee2");
             var decided = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
                     "01JD0000000000000000000103", "TASK_COMPLETED", "approve", "an", NOW.plusSeconds(2))
-                    .withSubmission(java.util.Map.of("decision", "REJECT", "idNumber", "***"));
+                    .withSubmission(java.util.Map.of("decision", "REJECT", "idNumber", java.util.Map.of("masked", true)),
+                            List.of("note"));
             var undoStep = new io.github.dhluong90.bpm.process.api.InstanceActivities.Entry(
                     "01JD0000000000000000000100", "COMPENSATION_STEP_FAILED", "verify-docs", "system:compensation",
                     NOW.plusSeconds(200), "COMPENSATION", "verify-docs", "01JD0000000000000000000098",
