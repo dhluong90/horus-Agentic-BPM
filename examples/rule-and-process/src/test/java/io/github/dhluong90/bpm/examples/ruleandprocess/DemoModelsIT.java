@@ -72,7 +72,7 @@ class DemoModelsIT {
             Map.entry("loan-data", Map.of("creditScore", 0, "profile", Map.of("name", "Nguyen Van An"))));
 
     /** Processes a plain start refuses because only a message or a signal starts them; each has its own test below. */
-    static final List<String> TRIGGERED = List.of("loan-intake", "onboarding");
+    static final List<String> TRIGGERED = List.of("loan-intake", "loan-intake-receive", "onboarding");
 
     @Container
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());

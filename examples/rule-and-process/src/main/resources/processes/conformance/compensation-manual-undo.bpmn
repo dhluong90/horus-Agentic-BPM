@@ -2,7 +2,7 @@
 <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
   <bpmn:process id="loan-payout-manual-undo" isExecutable="true">
     <bpmn:startEvent id="start"/>
-    <bpmn:serviceTask id="disburse" horus:handler="core-banking" horus:mode="remote"/>
+    <bpmn:serviceTask id="disburse" horus:handler="post-debit"/>
     <bpmn:boundaryEvent id="disburse-undo" attachedToRef="disburse" cancelActivity="false">
       <bpmn:compensateEventDefinition/>
     </bpmn:boundaryEvent>
