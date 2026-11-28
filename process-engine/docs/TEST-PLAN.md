@@ -185,6 +185,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-336 | `PRE_336_*` in `AdHocPostgresIT` | Integration on PostgreSQL, permission, idempotent replay, cancel of the remaining task | M3 | `TR-SEC-02`, `TR-IDEM-01` | Done (#500) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
+| PRE-393 | `PRE_393_*` in `TaskFormsTest` | Unit | M3 | `TR-UI-02`, `TR-STD-03` | Done |
 | PRE-219 | `PRE_219_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Done (#79) |
 | PRE-220 | `PRE_220_*` in `TaskFormsTest`; `PRE_031_*` in `TaskFormTest` and `ProcessRestContractTest` | Unit, Testcontainers, WebMvC against `openapi.yaml` | M2 | `TR-SEC-05`, `TR-UI-02` | Done (#79) |
 | PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |
@@ -250,6 +251,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-374 | `PRE_374_*` in `ActivityDefaultFlowAndTerminateTest` and `BoundaryEventsPostgresIT` | A terminate reached from an error boundary ends the instance with every other branch | M3 | `TR-STD-04` | Done |
 | PRE-375 | `PRE_375_*` in `ActivityDefaultFlowAndTerminateTest` | A flow condition reads a field of a rule task result | M3 | `TR-STD-04` | Done |
 | PRE-376 | `PRE_376_*` in `ActivityDefaultFlowAndTerminateTest` | Two boundary paths share one end event | M3 | `TR-STD-04` | Done |
+| PRE-390 | `PRE_390_*` in `TaskFormTest`; `PRE_027_activities_body_*` in `ProcessRestContractTest` | A completed task's history records the submission, masked fields masked | M3 | `TR-SEC-05`, `TR-AUD-01` | Done |
 | PRE-377 | `PRE_377_*` in `SagaCompensationTest` | Each finished undo step raises `processes.compensation.step-completed.v1` | M3 | `TR-COMP-01` | Done |
 | PRE-378 | `PRE_378_*` in `IdempotencyWaitPostgresIT` | A running duplicate is refused within the lock timeout; a later retry replays | M3 | `TR-IDEM-01` | Done |
 | PRE-379 | `PRE_379_*` in `IdempotencyWaitPostgresIT` | A duplicate that waits within the timeout returns the first result | M3 | `TR-IDEM-01` | Done |

@@ -14,7 +14,7 @@ export function PageHead({ id, title, subtitle, preview = false, action }: { id:
       <div className="page-head__text">
         <h1 id={id}>
           {title}
-          {preview ? <> <span className="tag tag--preview">{t('menu.preview')}</span></> : null}
+          {preview ? <> <span className="preview-note">{t('menu.preview')}</span></> : null}
         </h1>
         <p className="page-head__sub">{subtitle}</p>
       </div>

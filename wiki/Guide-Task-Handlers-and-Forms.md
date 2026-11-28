@@ -53,4 +53,28 @@ Put a JSON file in `src/main/resources/forms/credit-review.form.json` (the folde
 
 `schema` is JSON Schema and decides what a completion may contain; a completion that does not match is refused. `hints` only guide a screen. `GET /tasks/{id}/form` returns the resolved form with the instance data it declares (a field marked `"mask": true` is `***`). Another source of forms (a database, a form service) is a bean of type `FormRegistry`. A missing form is `FORM_NOT_REGISTERED` at import.
 
+### Showing values the way people read them
+
+Three more hints change only what a screen shows, never the value that is stored or sent. They are part of the form, so a change is a new definition version, as with `labels`.
+
+```json
+"hints": {
+  "options": {
+    "decision": {
+      "APPROVE": { "label": { "en": "Approve", "vi": "Phê duyệt" },
+                   "consequence": { "en": "The loan is disbursed.", "vi": "Khoản vay được giải ngân." } },
+      "REJECT":  { "label": { "en": "Reject", "vi": "Từ chối" } }
+    }
+  },
+  "units":   { "termMonths": { "en": "months", "vi": "tháng" } },
+  "formats": { "amount": { "currencyFrom": "currency", "grouping": true } }
+}
+```
+
+- `options`: for an `enum` field, a label per language for each value (up to 200 characters) and an optional one-line `consequence` (up to 300). The completion still carries `APPROVE`.
+- `units`: a suffix per language, up to 30 characters.
+- `formats`: `grouping: true` asks for thousands separators in the viewer's language; `currency` is a fixed code such as `VND`, `currencyFrom` names a field that holds the code (use one, not both).
+
+A value for an unknown field or enum value, or any other member, is `FORM_HINTS_INVALID` at import.
+
 Complete a task with `POST /tasks/{id}:claim`, then `:complete`, each with `If-Match` and `Idempotency-Key`. Steps are in the walkthrough, and the example host's `credit-review-form` model is the form demo ([[Process Engine API]]).
