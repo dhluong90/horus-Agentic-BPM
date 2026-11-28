@@ -57,7 +57,7 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
-    void RLE_229_V3_adds_nullable_columns_and_its_documented_rollback_step_removes_them() {
+    void RLE_229_V4_adds_nullable_columns_and_its_documented_rollback_step_removes_them() {
         DataSource db = migratedDatabase();
         JdbcClient jdbc = JdbcClient.create(db);
         String columns = "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE "
@@ -74,7 +74,7 @@ class RuleEngineSchemaMigratorIT {
         assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE is_nullable = 'NO' AND "
                 + "column_name IN ('source_file_name', 'budget_limit', 'step_budget', 'timeout_ms')").query(Long.class).single()).isZero();
 
-        // The rollback step written at the top of V3, run by hand
+        // The rollback step written at the top of V4, run by hand
         jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN source_file_name").update();
         jdbc.sql("ALTER TABLE rle_version DROP COLUMN source_file_name").update();
         jdbc.sql("ALTER TABLE rle_decision DROP COLUMN timeout_ms").update();

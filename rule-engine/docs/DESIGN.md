@@ -818,7 +818,7 @@ CREATE TABLE rle_version (
   source_hash       CHAR(64)    NOT NULL,        -- SHA-256 of the raw request bytes, before any decoding
   lock_version      BIGINT      NOT NULL DEFAULT 0,
   created_by        TEXT,                        -- author (V2); null for versions written before V2
-  source_file_name  TEXT         CHECK (source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')),  -- V3 (RLE-228): the file an import came from, display metadata; outside canonical_hash, source_hash and the approval seal; a restore keeps the copied version's name
+  source_file_name  TEXT         CHECK (source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')),  -- V4 (RLE-228): the file an import came from, display metadata; outside canonical_hash, source_hash and the approval seal; a restore keeps the copied version's name
   requested_by      TEXT,
   requested_at      TIMESTAMPTZ,
   approved_by       TEXT,
@@ -864,7 +864,7 @@ CREATE TABLE rle_version_history (
   occurred_at       TIMESTAMPTZ NOT NULL,
   canonical_hash          CHAR(64),             -- V6: DRAFT_UPDATED rows only, the hash after the replacement
   previous_canonical_hash CHAR(64),             -- V6: DRAFT_UPDATED rows only, the hash before it
-  source_file_name  TEXT         CHECK (source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')),  -- V3 (RLE-228): CREATED rows of an import and DRAFT_UPDATED rows, the name the import sent
+  source_file_name  TEXT         CHECK (source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')),  -- V4 (RLE-228): CREATED rows of an import and DRAFT_UPDATED rows, the name the import sent
   effective_from    TIMESTAMPTZ,                 -- V2 (RLE-223): REQUESTED and APPROVED rows, the date asked for and approved; canonical_hash on those rows is the hash approved
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, version_id) REFERENCES rle_version (tenant_id, id),
@@ -919,7 +919,7 @@ CREATE TABLE rle_decision (
   -- V25 (RLE-058, PD-119): the host functions the rule set calls, 'segmentOf@2027.2', comma separated in name order;
   -- null when it calls none and for rows written before V25. Additive and nullable, so no row is rewritten.
   function_versions TEXT       CHECK (function_versions IS NULL OR length(function_versions) BETWEEN 3 AND 8192),
-  -- V3 (RLE-229): the evaluation limit a decision reached, 'STEPS' or 'TIME', for EVALUATION_BUDGET_EXCEEDED; null otherwise and for earlier
+  -- V4 (RLE-229): the evaluation limit a decision reached, 'STEPS' or 'TIME', for EVALUATION_BUDGET_EXCEEDED; null otherwise and for earlier
   -- rows. Nullable and unconstrained, so adding it rewrites no partition and a later kind needs no migration. Rollback: ALTER TABLE rle_decision DROP COLUMN budget_limit.
   budget_limit      TEXT,
   PRIMARY KEY (tenant_id, created_at, id)
