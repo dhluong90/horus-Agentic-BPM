@@ -47,7 +47,7 @@ export type Route =
   | { name: 'instance'; instanceId: string }
   | { name: 'tasks'; view?: QueueTab | undefined; taskId?: string | undefined; overdue?: boolean | undefined; scope?: Scope | undefined; on?: string | undefined }
   | { name: 'task'; taskId: string }
-  | { name: 'incidents'; view?: IncidentTab | undefined; incidentId?: string | undefined; scope?: Scope | undefined; on?: string | undefined };
+  | { name: 'incidents'; view?: IncidentTab | undefined; incidentId?: string | undefined; process?: string | undefined; version?: number | undefined; step?: string | undefined; scope?: Scope | undefined; on?: string | undefined };
 
 /**
  * `all` is the merged list across the hosts the user can reach (CK-F-28, CK-F-29); absent is the host on screen.
@@ -186,8 +186,21 @@ function incidentRoute(params: URLSearchParams): Route {
     name: 'incidents',
     ...(view !== undefined && (INCIDENT_TABS as readonly string[]).includes(view) ? { view: view as IncidentTab } : {}),
     ...(incident !== undefined && TASK_ID.test(incident) ? { incidentId: incident } : {}),
+    ...incidentFilter(params),
     ...scopeOf(params),
   };
+}
+
+/** A process key or step id as the engine writes it; anything else in a link is ignored, never requested. */
+const NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
+
+/** The process, version and step an incident list is narrowed to (#91); a version needs its process. */
+function incidentFilter(params: URLSearchParams): { process?: string; version?: number; step?: string } {
+  const process = params.get('process') ?? undefined;
+  if (process === undefined || !NAME.test(process)) return {};
+  const version = params.get('version') ?? '';
+  const step = params.get('step') ?? undefined;
+  return { process, ...(/^[1-9]\d{0,8}$/.test(version) ? { version: Number(version) } : {}), ...(step !== undefined && NAME.test(step) ? { step } : {}) };
 }
 
 const MONTH = /^\d{4}-(0[1-9]|1[0-2])$/;
@@ -246,6 +259,11 @@ export function formatRoute(route: Route): string {
       const params = new URLSearchParams();
       if (route.view !== undefined) params.set('view', route.view);
       if (route.incidentId !== undefined) params.set('incident', route.incidentId);
+      if (route.process !== undefined) {
+        params.set('process', route.process);
+        if (route.version !== undefined) params.set('version', String(route.version));
+        if (route.step !== undefined) params.set('step', route.step);
+      }
       scopeParams(params, route);
       const text = params.toString();
       return text === '' ? '#/incidents' : `#/incidents?${text}`;

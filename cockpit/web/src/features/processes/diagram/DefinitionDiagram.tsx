@@ -67,6 +67,20 @@ export interface StepHeat {
   label: string;
 }
 
+/**
+ * The live figures of one step (#91): its active tokens and its open incidents, written under the step as plain
+ * numbers (a dot, a warning sign), each a link to the list it counts. Drawn in the drawing's own space, so a refresh
+ * never moves a step.
+ */
+export interface StepLive {
+  tokens: number;
+  incidents: number;
+  tokensLabel: string;
+  incidentsLabel: string;
+  tokensHref: string;
+  incidentsHref: string;
+}
+
 /** What the instance view adds to the diagram: badges, the selected step and how to select one. */
 export interface DiagramOverlay {
   badges: ReadonlyMap<string, StepBadge>;
@@ -88,6 +102,44 @@ function doneRadius(scale: number): number {
 
 function badgeWidth(badge: StepBadge): number {
   return Math.ceil(badge.text.length * BADGE_CHAR) + 26;
+}
+
+const LIVE_DIGIT = 7.5;
+const LIVE_GAP = 12;
+const LIVE_TOKEN_ICON = 10;
+const LIVE_INCIDENT_ICON = 14;
+
+/** The live figures under a step: a dot and the tokens, a sign and the open incidents; nothing is drawn for zero. */
+function LiveCounts({ node, live, format }: { node: PlacedNode; live: StepLive; format: (n: number) => string }) {
+  const tokens = live.tokens > 0 ? format(live.tokens) : undefined;
+  const incidents = live.incidents > 0 ? format(live.incidents) : undefined;
+  if (tokens === undefined && incidents === undefined) return null;
+  const tokenWidth = tokens === undefined ? 0 : LIVE_TOKEN_ICON + tokens.length * LIVE_DIGIT;
+  const incidentWidth = incidents === undefined ? 0 : LIVE_INCIDENT_ICON + incidents.length * LIVE_DIGIT;
+  const total = tokenWidth + (tokens !== undefined && incidents !== undefined ? LIVE_GAP : 0) + incidentWidth;
+  const left = node.x + node.width / 2 - total / 2;
+  const top = node.y + node.height + 4;
+  const incidentLeft = left + tokenWidth + (tokens !== undefined ? LIVE_GAP : 0);
+  return (
+    <g className="dg-live" data-live-node={node.id}>
+      {tokens !== undefined ? (
+        <a className="dg-live__link dg-live__link--tokens" href={live.tokensHref} aria-label={live.tokensLabel}>
+          <title>{live.tokensLabel}</title>
+          <rect className="dg-live__hit" x={left - 3} y={top - 2} width={tokenWidth + 6} height={20} />
+          <circle className="dg-live__dot" cx={left + 4} cy={top + 8} r={3.5} />
+          <text className="dg-live__figure tnum" x={left + LIVE_TOKEN_ICON} y={top + 12}>{tokens}</text>
+        </a>
+      ) : null}
+      {incidents !== undefined ? (
+        <a className="dg-live__link dg-live__link--incidents" href={live.incidentsHref} aria-label={live.incidentsLabel}>
+          <title>{live.incidentsLabel}</title>
+          <rect className="dg-live__hit" x={incidentLeft - 3} y={top - 2} width={incidentWidth + 6} height={20} />
+          <path className="dg-live__sign" d={`M${(incidentLeft + 6).toFixed(1)} ${String(top + 2)}L${(incidentLeft + 11.5).toFixed(1)} ${String(top + 12)}H${(incidentLeft + 0.5).toFixed(1)}Z M${(incidentLeft + 6).toFixed(1)} ${String(top + 6)}V${String(top + 9)}`} />
+          <text className="dg-live__figure dg-live__figure--incidents tnum" x={incidentLeft + LIVE_INCIDENT_ICON} y={top + 12}>{incidents}</text>
+        </a>
+      ) : null}
+    </g>
+  );
 }
 
 /** A badge across the top edge of a box, or over the symbol of an event or gateway. */
@@ -515,12 +567,16 @@ function Node({ node, typeLabel, loopLabel, badge, heat, crowded, interaction, m
  * `reserve` is the room kept under the canvas, for a docked decision; `fill` makes the canvas take that height, so the
  * change list beside it keeps the same frame.
  */
-export default function DefinitionDiagram({ graph, label, overlay, heat, marks, markLabel, selected: picked, toolbar, reserve = BELOW_CANVAS, fill = false, fitAll = false, sharedScale, onFitAll }: {
+export default function DefinitionDiagram({ graph, label, overlay, heat, live, formatCount, marks, markLabel, selected: picked, toolbar, reserve = BELOW_CANVAS, fill = false, fitAll = false, sharedScale, onFitAll }: {
   graph: DiagramGraph;
   label: string;
   overlay?: DiagramOverlay | undefined;
   /** Timing: the slow time of each step drawn on its box, by step id. */
   heat?: ReadonlyMap<string, StepHeat> | undefined;
+  /** The live tokens and open incidents of each step, under the step (#91). */
+  live?: ReadonlyMap<string, StepLive> | undefined;
+  /** Writes a count in the reader's language; plain digits when absent. */
+  formatCount?: ((n: number) => string) | undefined;
   marks?: DiagramMarks | undefined;
   markLabel?: ((mark: Mark) => string) | undefined;
   selected?: string | undefined;
@@ -655,7 +711,7 @@ export default function DefinitionDiagram({ graph, label, overlay, heat, marks, 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
     const element = frame.current;
     if (!element || view === undefined || event.button !== 0) return;
-    if ((event.target as Element).closest('.dg-node--pick, .dg-toggle') !== null) return;
+    if ((event.target as Element).closest('.dg-node--pick, .dg-toggle, .dg-live__link') !== null) return;
     drag.current = { x: event.clientX, y: event.clientY, left: element.scrollLeft, top: element.scrollTop };
     element.setPointerCapture(event.pointerId);
   };
@@ -746,6 +802,12 @@ export default function DefinitionDiagram({ graph, label, overlay, heat, marks, 
                 onToggle={node.container !== undefined ? () => { toggle(node.id); } : undefined}
                 toggleLabel={node.container !== undefined ? t('diagram.expand', { name: node.name ?? node.id }) : undefined} />
             ))}</g>
+            {live !== undefined ? (
+              <g>{layout.nodes.map((node) => {
+                const figures = live.get(node.id);
+                return figures !== undefined ? <LiveCounts key={node.id} node={node} live={figures} format={formatCount ?? String} /> : null;
+              })}</g>
+            ) : null}
             {overlay !== undefined ? (
               <g>{layout.nodes.map((node) => {
                 const badge = overlay.badges.get(node.id);

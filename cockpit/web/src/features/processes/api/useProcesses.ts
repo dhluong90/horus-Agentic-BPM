@@ -1,4 +1,4 @@
-import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import type { DefinitionApproval, TaskAnswer } from '../../../api/processes/processesClient';
 import type { DefinitionSummary, DefinitionVersion, Task } from '../../../api/processes/schemas';
@@ -20,6 +20,7 @@ export function useKeys() {
     approvals: [...base, 'approvals'] as const,
     version: (key: string, version: number) => [...base, 'definition', key, version] as const,
     graph: (key: string, version: number) => [...base, 'graph', key, version] as const,
+    live: (key: string, version: number) => [...base, 'live', key, version] as const,
     timing: (key: string, version: number, from: string) => [...base, 'timing', key, version, from] as const,
     diff: (key: string, version: number) => [...base, 'diff', key, version] as const,
     task: (id: string) => [...base, 'task', id] as const,
@@ -63,7 +64,7 @@ export function useDefinitionVersion(key: string, version: number, enabled = tru
 }
 
 /** The version's graph, read from its BPMN export. A version is immutable, so its graph never goes stale. */
-export function useDefinitionGraph(key: string, version: number) {
+export function useDefinitionGraph(key: string, version: number, enabled = true) {
   const { client } = useProcessesSession();
   const keys = useKeys();
   return useQuery({
@@ -78,6 +79,7 @@ export function useDefinitionGraph(key: string, version: number) {
       return stored === undefined ? graph : { ...graph, stored };
     },
     staleTime: Infinity,
+    enabled,
   });
 }
 
@@ -307,4 +309,24 @@ export function useStepTiming(key: string, version: number, from: string) {
   const { client } = useProcessesSession();
   const keys = useKeys();
   return useQuery({ queryKey: keys.timing(key, version, from), queryFn: ({ signal }) => client.getStepTiming(key, version, { from }, signal), staleTime: 60_000 });
+}
+
+/** How often the live figures are read again, in seconds: the engine caches an answer for 5 s, and for 15 s on a busy tenant. */
+export const LIVE_REFRESH_SECONDS = 15;
+
+/**
+ * The tokens now at each step and the open incidents of each step (#91). Read again on a timer, paused while the tab is
+ * hidden; the figures on screen stay until the new ones arrive, so the diagram never blinks or moves.
+ */
+export function useLiveCounts(key: string, version: number, enabled = true) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  return useQuery({
+    queryKey: keys.live(key, version),
+    queryFn: ({ signal }) => client.getLiveCounts(key, version, signal),
+    enabled,
+    refetchInterval: () => Math.round(LIVE_REFRESH_SECONDS * 1000 * (0.9 + Math.random() * 0.2)),
+    staleTime: 5_000,
+    placeholderData: keepPreviousData,
+  });
 }
