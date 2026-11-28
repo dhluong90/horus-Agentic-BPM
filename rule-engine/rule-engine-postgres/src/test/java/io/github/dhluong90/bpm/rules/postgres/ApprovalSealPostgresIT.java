@@ -399,7 +399,9 @@ class ApprovalSealPostgresIT {
         String name = "legacy_" + System.nanoTime();
         jdbc.sql("CREATE DATABASE " + name).update();
         DataSource old = dataSource(name);
+        // The after-migrate grant script needs its placeholder; empty is the single-role setup, so it grants nothing.
         org.flywaydb.core.Flyway.configure().dataSource(old).table("rle_schema_history")
+                .placeholders(java.util.Map.of("horusAppRole", ""))
                 .locations(RuleEngineSchemaMigrator.MIGRATION_LOCATION).target("1").load().migrate();
         JdbcClient oldJdbc = JdbcClient.create(old);
         oldJdbc.sql("INSERT INTO rle_rule_set SELECT (jsonb_populate_record(NULL::rle_rule_set, CAST(:j AS jsonb))).*")
