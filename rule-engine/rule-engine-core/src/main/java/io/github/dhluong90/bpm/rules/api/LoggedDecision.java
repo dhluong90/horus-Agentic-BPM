@@ -89,7 +89,7 @@ public record LoggedDecision(String decisionId, String ruleSet, int version, Str
             String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
             String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
-                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, null, null);
+                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, null, null, null);
     }
 
     public LoggedDecision {

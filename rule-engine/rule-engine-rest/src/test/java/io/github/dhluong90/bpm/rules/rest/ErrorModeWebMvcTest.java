@@ -65,7 +65,7 @@ class ErrorModeWebMvcTest {
                     // D1 was made in strict; D0 is a row logged before the mode was stored
                     String mode = args[0].equals("D0") ? null : "strict";
                     return new LoggedDecision(args[0].toString(), "card-fee", 1, "FIRST", "OK", null, "{}", "{}",
-                            List.of("R1"), "pricing", null, AT, AT, 40, false, null, mode);
+                            List.of("R1"), "pricing", null, AT, AT, 40, false, null, null, mode);
                 });
         DecisionLogQuery log = (DecisionLogQuery) Proxy.newProxyInstance(getClass().getClassLoader(),
                 new Class<?>[] {DecisionLogQuery.class}, (self, method, args) -> {
@@ -84,7 +84,7 @@ class ErrorModeWebMvcTest {
 
     static DecisionLogEntry entry(String id, String mode) {
         return new DecisionLogEntry(id, "card-fee", 1, "FIRST", DecisionLogEntry.Outcome.MATCHED, List.of("R1"),
-                Map.of(), Map.of(), "pricing", null, AT, AT, AT, 40, false, null, mode);
+                Map.of(), Map.of(), "pricing", null, AT, AT, AT, 40, false, null, null, mode);
     }
 
     JsonNode read(String url) throws Exception {

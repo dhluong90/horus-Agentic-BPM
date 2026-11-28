@@ -70,7 +70,7 @@ public record DecisionRecord(
             String onBehalfOf, String functionVersions, String budgetLimit) {
         this(tenantId, id, createdAt, ruleSet, version, hitPolicy, outcome, errorCode, maskedInputsJson, outputsJson,
                 matchedRuleIdsJson, callerId, correlationId, evalClock, durationMicros, pinned, onBehalfOf,
-                functionVersions, budgetLimit, null, null);
+                functionVersions, budgetLimit, null, null, null);
     }
 
     /**

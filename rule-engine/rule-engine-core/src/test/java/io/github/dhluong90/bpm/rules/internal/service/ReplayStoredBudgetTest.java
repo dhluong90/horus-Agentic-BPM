@@ -104,7 +104,7 @@ class ReplayStoredBudgetTest {
         stores.decisions.set(0, new DecisionRecord(ran.tenantId(), ran.id(), ran.createdAt(), ran.ruleSet(),
                 ran.version(), ran.hitPolicy(), "EVALUATION_ERROR", "EVALUATION_BUDGET_EXCEEDED", ran.maskedInputsJson(),
                 null, "[]", ran.callerId(), ran.correlationId(), ran.evalClock(), ran.durationMicros(), ran.pinned(),
-                ran.onBehalfOf(), ran.functionVersions(), "TIME", 100_000, 5));
+                ran.onBehalfOf(), ran.functionVersions(), "TIME", 100_000, 5, ran.errorMode()));
 
         // When it is replayed, on a host with any limits
         DecisionResult replayed = engines(withLimits(EvaluationLimits.defaults())).ruleEngine()

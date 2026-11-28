@@ -95,7 +95,7 @@ public record DecisionLogEntry(
             String correlationId, Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros,
             boolean pinned) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, matchedRuleIds, inputs, outputs, callerId,
-                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, null, null);
+                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, null, null, null);
     }
 
     public DecisionLogEntry {
