@@ -495,6 +495,15 @@ final class ProcessListQueries {
                     + "AND (event_type LIKE 'COMPENSATION\\_%' OR event_type = 'COMPENSATED') "
                     + "ORDER BY occurred_at, id LIMIT ?");
 
+    /**
+     * One page of the instances of one tenant that hold an encrypted variable, locked for the re-encryption sweep
+     * (PRE-522), in primary key order after the last id. Parameters: tenant, after id, limit.
+     */
+    static final ListQuery REENCRYPT_INSTANCES = new ListQuery("variable-reencrypt-instances",
+            new Bound.Page("the primary key (tenant_id, id) orders the page; the sweep passes at most 500 rows"),
+            "SELECT id, variables::text AS variables FROM pre_instance WHERE tenant_id = ? AND id > ? "
+                    + "AND variables::text LIKE '%\"$enc\"%' ORDER BY id LIMIT ? FOR UPDATE SKIP LOCKED");
+
     /** Due timers, for every tenant: the poll of each replica. */
     static final ListQuery CLAIM_TIMERS = claim(ClaimKinds.TIMERS);
     /** Due remote steps, for every tenant: the poll of the async runner. */
@@ -518,7 +527,7 @@ final class ProcessListQueries {
                 TOKEN_ENTERED_AT, ROLLUP_SLICE, WINDOW_NODE_SUMS, WINDOW_NODE_HISTOGRAM, GAUGE_ACTIVE_INSTANCES,
                 GAUGE_OPEN_INCIDENTS, GAUGE_OLDEST_DUE_JOB, ESCALATIONS_DUE, CALENDARS, CALENDARS_AFTER, CALENDAR_CHANGES,
                 CALENDAR_CHANGES_AFTER, PENDING_CALENDAR_CHANGES, PENDING_CALENDAR_CHANGES_AFTER, PROPOSED_MIGRATIONS,
-                PROPOSED_MIGRATIONS_AFTER,
+                PROPOSED_MIGRATIONS_AFTER, REENCRYPT_INSTANCES,
                 instances(1, false, false, false, false),
                 instances(3, true, true, true, true)));
         all.addAll(DATED.values());

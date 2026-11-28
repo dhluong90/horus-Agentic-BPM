@@ -4216,7 +4216,7 @@ The acknowledgement therefore covers exactly the inputs that will be logged in c
 
 **Decision.** Process variables (`pre_instance.variables_json`) are stored as plain JSON in the database, with no application-level encryption. Protection relies on database and disk encryption at rest, plus operational discipline: guidance to keep secrets out of variables, mark sensitive fields `mask:true`, or store them outside and keep only a reference.
 
-Application-level encryption of variables is a post-1.0 roadmap item (issue #594).
+Application-level encryption of variables is a post-1.0 roadmap item (issue #594). Delivered in 1.1 as an opt-in setting (`PRE-521` to `PRE-524`); the default stays plain JSON, so this decision still describes a host that does not turn it on.
 
 **Consequences.**
 - The threat model is updated to record acceptance for 1.0.

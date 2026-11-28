@@ -53,6 +53,8 @@ public class ProcessProblemDetails {
             Map.entry("PRECONDITION_REQUIRED", HttpStatus.valueOf(428)),
             Map.entry("IDEMPOTENCY_IN_FLIGHT", HttpStatus.CONFLICT),
             Map.entry("EVENT_LISTENER_FAILED", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("VARIABLE_KEY_UNAVAILABLE", HttpStatus.INTERNAL_SERVER_ERROR),
+            Map.entry("VARIABLE_INTEGRITY_FAILED", HttpStatus.INTERNAL_SERVER_ERROR),
             Map.entry("NO_EFFECTIVE_VERSION", HttpStatus.NOT_FOUND),
             Map.entry("DEFINITION_NOT_FOUND", HttpStatus.NOT_FOUND),
             Map.entry("INSTANCE_NOT_FOUND", HttpStatus.NOT_FOUND),

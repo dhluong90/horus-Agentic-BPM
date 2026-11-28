@@ -190,6 +190,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-518 | `PRE_518_*` in `ProcessEngineTracingTest`; `TracingSpansIT` | Unit, integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 | PRE-519 | `PRE_519_*` in `ProcessServicesQaTest` | Unit | M3 | `TR-OBS-03`, `TR-TEN-01` | Done |
 | PRE-520 | `PRE_520_*` in `TracingExportOffIT` | Integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
+| PRE-521 | `PRE_521_*` in `VariableVaultTest`, `VariableEncryptionPostgresIT`, `VariableEncryptionPropertiesTest` | Unit, Testcontainers: every `pre_*` table searched for the clear amount | M3 | `TR-SEC-05`, `TR-TEN-01` | Done (#594) |
+| PRE-522 | `PRE_522_*` in `VariableVaultTest`, `VariableEncryptionPostgresIT` | Unit, Testcontainers: rotation, sweep, idempotent replay | M3 | `TR-SEC-05`, `TR-IDEM-01` | Done (#594) |
+| PRE-523 | `PRE_523_*` in `VariableVaultTest`, `VariableEncryptionPostgresIT`, `VariableEncryptionPropertiesTest` | Unit, Testcontainers, start-up | M3 | `TR-SEC-05`, `TR-SEC-08` | Done (#594) |
+| PRE-524 | `PRE_524_*` in `VariableVaultTest`, `VariableEncryptionPostgresIT`, `VariableEncryptionHistoryTest` | Unit, Testcontainers: captured log records and span calls | M3 | `TR-SEC-05`, `TR-OBS-03` | Done (#594) |
 | PRE-219 | `PRE_219_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Done (#79) |
 | PRE-220 | `PRE_220_*` in `TaskFormsTest`; `PRE_031_*` in `TaskFormTest` and `ProcessRestContractTest` | Unit, Testcontainers, WebMvC against `openapi.yaml` | M2 | `TR-SEC-05`, `TR-UI-02` | Done (#79) |
 | PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |

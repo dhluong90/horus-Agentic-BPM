@@ -10,6 +10,7 @@ import io.github.dhluong90.bpm.process.internal.json.Ulid;
 import io.github.dhluong90.bpm.process.internal.json.Values;
 import io.github.dhluong90.bpm.process.internal.store.ProcessQueryStore;
 import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
+import io.github.dhluong90.bpm.process.internal.store.VariableVault;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -36,6 +37,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     private final JdbcClient jdbc;
     private final Duration idempotencyLockTimeout;
+    private final VariableVault vault;
 
     /** @param dataSource the host's data source */
     public JdbcProcessStore(DataSource dataSource) {
@@ -48,6 +50,16 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
      *     (#172); longer is {@code 409 IDEMPOTENCY_IN_FLIGHT}
      */
     public JdbcProcessStore(DataSource dataSource, Duration idempotencyLockTimeout) {
+        this(dataSource, idempotencyLockTimeout, VariableVault.NONE);
+    }
+
+    /**
+     * @param dataSource the host's data source
+     * @param idempotencyLockTimeout the longest a request waits for an idempotency key another request holds
+     * @param vault encrypts the configured instance variables on write and decrypts them on read (PRE-395)
+     */
+    public JdbcProcessStore(DataSource dataSource, Duration idempotencyLockTimeout, VariableVault vault) {
+        this.vault = Objects.requireNonNull(vault, "vault must not be null");
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
         this.idempotencyLockTimeout = Objects.requireNonNull(idempotencyLockTimeout, "idempotencyLockTimeout");
     }
@@ -434,7 +446,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         + "VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, definition_key, business_key) WHERE business_key IS NOT NULL DO NOTHING")
                 .params(r.tenantId(), r.id(), r.definitionId(), r.definitionKey(), r.definitionVersion(), r.businessKey(),
-                        r.status(), r.variablesJson(), r.sequence(), r.lockVersion(), r.startedBy(), ts(r.startedAt()),
+                        r.status(), vault.seal(r.tenantId(), r.id(), r.definitionKey(), r.variablesJson()), r.sequence(),
+                        r.lockVersion(), r.startedBy(), ts(r.startedAt()),
                         ts(r.endedAt()))
                 .update() == 1;
     }
@@ -442,20 +455,20 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     @Override
     public Optional<InstanceRow> lockInstance(String tenant, String id) {
         return jdbc.sql("SELECT " + INSTANCE_COLUMNS + " FROM pre_instance WHERE tenant_id = ? AND id = ? FOR UPDATE")
-                .params(tenant, id).query(JdbcProcessStore::instance).optional();
+                .params(tenant, id).query(this::instance).optional();
     }
 
     @Override
     public Optional<InstanceRow> findInstance(String tenant, String id) {
         return jdbc.sql("SELECT " + INSTANCE_COLUMNS + " FROM pre_instance WHERE tenant_id = ? AND id = ?")
-                .params(tenant, id).query(JdbcProcessStore::instance).optional();
+                .params(tenant, id).query(this::instance).optional();
     }
 
     @Override
     public Optional<InstanceRow> findInstanceByBusinessKey(String tenant, String key, String businessKey) {
         return jdbc.sql("SELECT " + INSTANCE_COLUMNS + " FROM pre_instance WHERE tenant_id = ? AND definition_key = ? "
                         + "AND business_key = ?")
-                .params(tenant, key, businessKey).query(JdbcProcessStore::instance).optional();
+                .params(tenant, key, businessKey).query(this::instance).optional();
     }
 
     @Override
@@ -479,21 +492,37 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         }
         params.add(limit);
         return ProcessListQueries.instances(statuses.size(), definitionKey != null, from != null, to != null,
-                afterStartedAt != null).list(jdbc, params, JdbcProcessStore::instance);
+                afterStartedAt != null).list(jdbc, params, JdbcProcessStore::summary);
     }
 
     @Override
     public void updateInstance(InstanceRow r) {
         jdbc.sql("UPDATE pre_instance SET status = ?, variables = ?::jsonb, seq = ?, ended_at = ?, "
                         + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ?")
-                .params(r.status(), r.variablesJson(), r.sequence(), ts(r.endedAt()), r.tenantId(), r.id())
+                .params(r.status(), vault.seal(r.tenantId(), r.id(), r.definitionKey(), r.variablesJson()), r.sequence(),
+                        ts(r.endedAt()), r.tenantId(), r.id())
                 .update();
     }
 
-    private static InstanceRow instance(ResultSet rs, int row) throws SQLException {
+    @Override
+    public boolean encryptsVariable(String definitionKey, String name) {
+        return vault.encrypts(definitionKey, name);
+    }
+
+    /** An instance with its variables decrypted; a key that is missing refuses the read (PRE-395). */
+    private InstanceRow instance(ResultSet rs, int row) throws SQLException {
+        return row(rs, vault.open(rs.getString("tenant_id"), rs.getString("id"), rs.getString("variables")));
+    }
+
+    /** A list row: the summary never shows variables, so one lost key does not stop a page. */
+    private static InstanceRow summary(ResultSet rs, int row) throws SQLException {
+        return row(rs, rs.getString("variables"));
+    }
+
+    private static InstanceRow row(ResultSet rs, String variables) throws SQLException {
         return new InstanceRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("definition_id"),
                 rs.getString("definition_key"), rs.getInt("definition_ver"), rs.getString("business_key"),
-                rs.getString("status"), rs.getString("variables"), rs.getLong("seq"), rs.getLong("lock_version"),
+                rs.getString("status"), variables, rs.getLong("seq"), rs.getLong("lock_version"),
                 rs.getString("started_by"), instant(rs, "started_at"), instant(rs, "ended_at"));
     }
 
@@ -979,7 +1008,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         + "AND expires_at > ?")
                 .params(tenant, operation, key, ts(now))
                 .query((rs, row) -> new IdempotencyRecord(rs.getString("tenant_id"), rs.getString("operation"),
-                        rs.getString("idempotency_key"), rs.getString("request_hash"), rs.getString("body"),
+                        rs.getString("idempotency_key"), rs.getString("request_hash"),
+                        vault.openDocument(tenant, operation + "/" + key, rs.getString("body")),
                         instant(rs, "expires_at")))
                 .optional();
     }
@@ -1000,7 +1030,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public void completeIdempotency(String tenant, String operation, String key, String responseJson) {
         int updated = jdbc.sql("UPDATE pre_idempotency SET status = 'DONE', response_body = ?::jsonb "
                         + "WHERE tenant_id = ? AND operation = ? AND idempotency_key = ? AND status = 'PENDING'")
-                .params(responseJson, tenant, operation, key).update();
+                .params(vault.sealDocument(tenant, operation + "/" + key, responseJson), tenant, operation, key)
+                .update();
         if (updated != 1) {
             throw new IllegalStateException("Idempotency claim lost for " + operation);
         }

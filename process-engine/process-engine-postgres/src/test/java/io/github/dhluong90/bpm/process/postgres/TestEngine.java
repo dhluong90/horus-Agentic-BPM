@@ -173,7 +173,7 @@ final class TestEngine {
                 tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval, EngineDefaults.IDEMPOTENCY_RETENTION,
                 EngineDefaults.MAX_PAGE_SIZE, b.strictApprovalHashes);
         this.strictApprovalHashes = b.strictApprovalHashes;
-        JdbcProcessStore processStore = new JdbcProcessStore(ds, b.idempotencyLockTimeout);
+        JdbcProcessStore processStore = new JdbcProcessStore(ds, b.idempotencyLockTimeout, b.variableVault);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
                 Map.of(SourceFormat.BPMN_XML, reader),
                 Map.of(SourceFormat.BPMN_XML, new io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter()::write),
@@ -327,6 +327,14 @@ final class TestEngine {
         private final String replicaId;
         private final TestClock clock;
         private Duration lease = Duration.ofSeconds(60);
+        /** Encrypts the configured instance variables at rest (PRE-395). */
+        Builder variableVault(io.github.dhluong90.bpm.process.internal.store.VariableVault value) {
+            variableVault = value;
+            return this;
+        }
+
+        private io.github.dhluong90.bpm.process.internal.store.VariableVault variableVault =
+                io.github.dhluong90.bpm.process.internal.store.VariableVault.NONE;
         private Duration readTimeout;
         private int batchSize = 32;
         private Duration retryBackoff = Duration.ofSeconds(10);

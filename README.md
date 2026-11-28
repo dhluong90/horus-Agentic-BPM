@@ -17,7 +17,7 @@ Embeddable Process Engine and Rule Engine for Java and Spring Boot, with a cockp
 - Cockpit: rule editing and approval, decision log, process diagrams, tasks, incidents and a merged inbox across services, embedded in your service or hosted standalone.
 - Spring Boot starters and example hosts that run with Docker Compose.
 
-Not built: application-level encryption of process variables (#594), connectors to outside systems, client libraries beyond Java, a graphical process modeller, an asynchronous decision log, and a built-in shadow mode for agent steps. See [Feature status](../../wiki/Feature-Status).
+Not built: connectors to outside systems, client libraries beyond Java, a graphical process modeller, an asynchronous decision log, and a built-in shadow mode for agent steps. See [Feature status](../../wiki/Feature-Status).
 
 Requirements: Java 21 or 25, PostgreSQL 14 or later (15 or later from 1.0), and Spring Boot 4.x or 3.5.x ([ADR-0011](docs/adr/0011-spring-boot-4-baseline.md)).
 
