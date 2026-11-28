@@ -332,4 +332,98 @@ class DmnItemDefinitionTest {
 
         assertThatThrownBy(() -> DmnWriter.write(yaml)).hasMessageContaining("DMN has one aggregation per table");
     }
+
+    // ------------------------------------------------------------------ allowed values never dropped (RLE-225)
+
+    private static final String TYPES_PLAIN = "<itemDefinition name=\"tRisk\"><typeRef>string</typeRef></itemDefinition>";
+
+    @Test
+    void RLE_225_allowed_values_of_an_alias_of_an_alias_reach_the_input() {
+        String definitions = "<itemDefinition name=\"tBase\"><typeRef>string</typeRef><allowedValues>"
+                + "<text>\"SALARIED\", \"SELF_EMPLOYED\"</text></allowedValues></itemDefinition>"
+                + "<itemDefinition name=\"tEmployment\"><typeRef>tBase</typeRef></itemDefinition>" + TYPES_PLAIN;
+
+        assertThat(read(loanTable(definitions, EMPLOYMENT_INPUT, RISK_OUTPUT, TABLE_FIRST)).canonicalJson())
+                .contains("\"allowed\":[\"SALARIED\",\"SELF_EMPLOYED\"]");
+    }
+
+    @Test
+    void RLE_225_input_values_and_the_allowed_values_of_its_type_both_hold() {
+        String definitions = "<itemDefinition name=\"tEmployment\"><typeRef>string</typeRef><allowedValues>"
+                + "<text>\"SALARIED\", \"SELF_EMPLOYED\", \"RETIRED\"</text></allowedValues></itemDefinition>"
+                + TYPES_PLAIN;
+        String input = "<input><inputExpression typeRef=\"tEmployment\"><text>employment</text></inputExpression>"
+                + "<inputValues><text>\"SALARIED\", \"RETIRED\", \"STUDENT\"</text></inputValues></input>";
+
+        assertThat(read(loanTable(definitions, input, RISK_OUTPUT, TABLE_FIRST)).canonicalJson())
+                .contains("\"allowed\":[\"SALARIED\",\"RETIRED\"]");
+        assertCode(loanTable(definitions, input.replace("\"SALARIED\", \"RETIRED\", \"STUDENT\"", "\"STUDENT\""),
+                RISK_OUTPUT, TABLE_FIRST), "DMN_ALLOWED_VALUES_UNSUPPORTED", "have no value in common");
+    }
+
+    @Test
+    void RLE_225_allowed_values_of_a_component_are_checked_on_an_output_that_has_its_own_type() {
+        String definitions = "<itemDefinition name=\"tOffer\"><itemComponent name=\"status\"><typeRef>string</typeRef>"
+                + "<allowedValues><text>\"APPROVED\", \"DECLINED\"</text></allowedValues></itemComponent>"
+                + "</itemDefinition>";
+        String dmn = HEAD + definitions + "<decision id=\"card-offer\" name=\"Card offer\">"
+                + "<variable name=\"Card offer\" typeRef=\"tOffer\"/>" + TABLE_FIRST
+                + "<input><inputExpression typeRef=\"number\"><text>income</text></inputExpression></input>"
+                + "<output name=\"status\" typeRef=\"string\"/><rule id=\"r1\"><inputEntry><text>-</text></inputEntry>"
+                + "<outputEntry><text>\"PENDING\"</text></outputEntry></rule></decisionTable></decision></definitions>";
+
+        assertCode(dmn, "DMN_OUTPUT_NOT_ALLOWED", "is not one of the output values");
+        assertThat(read(dmn.replace("PENDING", "APPROVED")).model().name()).isEqualTo("card-offer");
+    }
+
+    @Test
+    void RLE_225_allowed_values_on_a_structure_are_refused_not_dropped() {
+        String definitions = "<itemDefinition name=\"tOffer\"><allowedValues><text>\"A\"</text></allowedValues>"
+                + "<itemComponent name=\"status\"><typeRef>string</typeRef></itemComponent></itemDefinition>";
+        String dmn = HEAD + definitions + "<decision id=\"card-offer\" name=\"Card offer\">"
+                + "<variable name=\"Card offer\" typeRef=\"tOffer\"/>" + TABLE_FIRST
+                + "<input><inputExpression typeRef=\"number\"><text>income</text></inputExpression></input>"
+                + "<output name=\"status\" typeRef=\"string\"/><rule id=\"r1\"><inputEntry><text>-</text></inputEntry>"
+                + "<outputEntry><text>\"A\"</text></outputEntry></rule></decisionTable></decision></definitions>";
+
+        assertCode(dmn, "DMN_ALLOWED_VALUES_UNSUPPORTED", "allowed values belong to a component");
+    }
+
+    // ------------------------------------------------------------------ aggregates with no match and null inputs (RLE-227)
+
+    private static String feesOnTier(String aggregation) {
+        return fees(aggregation, "number").replace("<text>txCount</text>", "<text>txCount</text>")
+                .replace("<rule id=\"base\"><inputEntry><text>-</text>", "<rule id=\"base\"><inputEntry><text>&gt;= 1</text>");
+    }
+
+    @Test
+    void RLE_227_with_no_matching_rule_count_is_zero_and_sum_is_null() {
+        // Given a fee table whose first rule needs at least 1 transaction; a customer with none matches no rule
+        Map<String, Object> none = Map.of("txCount", 0);
+
+        DecisionResult.Outcome count = evaluate(read(feesOnTier("COUNT")), none);
+        DecisionResult.Outcome sum = evaluate(read(feesOnTier("SUM")), none);
+
+        // Then, as FEEL: count([]) is 0 and sum([]) is null
+        assertThat(count).isInstanceOf(DecisionResult.NoMatch.class);
+        assertThat(((DecisionResult.NoMatch) count).outputs().get("fee")).hasToString("0");
+        assertThat(sum).isInstanceOf(DecisionResult.NoMatch.class);
+        assertThat(((DecisionResult.NoMatch) sum).outputs().get("fee")).isNull();
+    }
+
+    @Test
+    void RLE_227_a_null_input_matches_no_comparison_so_count_is_zero_and_sum_is_null() {
+        Map<String, Object> nullInput = new java.util.HashMap<>();
+        nullInput.put("txCount", null);
+
+        for (String aggregation : List.of("COUNT", "SUM")) {
+            DecisionResult.Outcome outcome = evaluate(read(feesOnTier(aggregation)), nullInput);
+            Object fee = outcome instanceof DecisionResult.NoMatch n ? n.outputs().get("fee") : "not NoMatch";
+            if (aggregation.equals("COUNT")) {
+                assertThat(fee).as(aggregation).hasToString("0");
+            } else {
+                assertThat(fee).as(aggregation).isNull();
+            }
+        }
+    }
 }

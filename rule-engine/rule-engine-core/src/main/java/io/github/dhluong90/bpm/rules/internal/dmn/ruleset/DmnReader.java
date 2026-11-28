@@ -296,14 +296,27 @@ public final class DmnReader {
         node.put("type", resolved.v1());
         description(input).ifPresent(d -> node.put("description", d));
         columnLabel(input, name).ifPresent(l -> node.put("label", l));
-        XmlTree values = input.child("inputValues").orElse(resolved.allowed());
+        XmlTree own = input.child("inputValues").orElse(null);
+        XmlTree values = own != null ? own : resolved.allowed();
         if (values != null) {
             if (resolved.v1().startsWith("list<")) {
                 throw DmnTypes.refuse("DMN_ALLOWED_VALUES_UNSUPPORTED", "Allowed values of input '" + name
                         + "' on a list type are not supported", values);
             }
+            List<Feel.Value> closed = constants("Allowed values of input '" + name + "'", values);
+            if (own != null && resolved.allowed() != null) {
+                // both the column and its type close the set: a value must be in each
+                Set<String> byType = new HashSet<>();
+                constants("Allowed values of the type of input '" + name + "'", resolved.allowed())
+                        .forEach(v -> byType.add(domainKey(v)));
+                closed = closed.stream().filter(v -> byType.contains(domainKey(v))).toList();
+                if (closed.isEmpty()) {
+                    throw DmnTypes.refuse("DMN_ALLOWED_VALUES_UNSUPPORTED", "Input '" + name + "': the input values and"
+                            + " the allowed values of its type have no value in common", values);
+                }
+            }
             ArrayNode allowed = node.putArray("allowed");
-            for (Feel.Value value : constants("Allowed values of input '" + name + "'", values)) {
+            for (Feel.Value value : closed) {
                 switch (value) {
                     case Feel.Value.Str(String s) -> allowed.add(s);
                     case Feel.Value.Num(BigDecimal n) when n.stripTrailingZeros().scale() <= 0 -> allowed.add(n);
@@ -387,15 +400,38 @@ public final class DmnReader {
         columnLabel(output, name).ifPresent(l -> node.put("label", l));
         // Output entries are literals, so a closed set of output values is checked here, rule by rule, and a literal
         // outside it is refused at import; nothing of the constraint is left to be dropped.
-        XmlTree allowed = outputValues != null ? outputValues : resolved.allowed();
-        if (allowed == null) {
-            domains.add(null);
-        } else {
-            Set<String> keys = new HashSet<>();
-            constants("Output values of output '" + name + "'", allowed).forEach(v -> keys.add(domainKey(v)));
-            domains.add(keys);
+        // Every source of a closed set must hold: the column's outputValues, its type, and the decision's type.
+        List<XmlTree> sources = new java.util.ArrayList<>();
+        for (XmlTree source : java.util.Arrays.asList(outputValues, resolved.allowed(), decisionAllowed(name, context))) {
+            if (source != null && !sources.contains(source)) {
+                sources.add(source);
+            }
         }
+        Set<String> keys = null;
+        for (XmlTree source : sources) {
+            Set<String> one = new HashSet<>();
+            constants("Output values of output '" + name + "'", source).forEach(v -> one.add(domainKey(v)));
+            if (keys == null) {
+                keys = one;
+            } else {
+                keys.retainAll(one);
+            }
+        }
+        domains.add(keys);
         return name;
+    }
+
+    /** The allowed values the decision's own type puts on this output: its component's, or a scalar result's. */
+    private static XmlTree decisionAllowed(String name, OutputContext context) {
+        DmnTypes.Resolved result = context.result();
+        if (result == null) {
+            return null;
+        }
+        if (result.structured()) {
+            DmnTypes.Resolved part = result.components().get(name);
+            return part == null ? null : part.allowed();
+        }
+        return context.outputs() == 1 ? result.allowed() : null;
     }
 
     /** A single output column with no name takes the name of its component, else of the decision (RLE-226). */

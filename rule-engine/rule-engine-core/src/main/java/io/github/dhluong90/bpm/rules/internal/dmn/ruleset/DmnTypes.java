@@ -121,6 +121,10 @@ final class DmnTypes {
                 }
                 parts.put(partName, part);
             }
+            if (allowed != null) {
+                throw refuse("DMN_ALLOWED_VALUES_UNSUPPORTED", "Item definition " + Quote.of(name) + " of " + where
+                        + " is a structure with allowedValues; allowed values belong to a component", allowed);
+            }
             base = new Resolved(null, parts, null);
         } else {
             throw refuse("Item definition " + Quote.of(name) + " of " + where + " has neither a typeRef nor"

@@ -146,10 +146,10 @@ class HitPolicyTest {
         assertThat(onlyR2.outputs().get("flags")).isEqualTo(java.util.Arrays.asList((Object) null));
         assertThat(onlyR2.outputs()).containsEntry("penalty", BigDecimal.ZERO).containsEntry("worst", BigDecimal.ZERO)
                 .containsEntry("hits", BigDecimal.ONE);
-        // (c) NoMatch, every output null, count included
+        // (c) NoMatch, every output null except the count, which is 0 as FEEL count([])
         assertThat(none.outcome()).isInstanceOf(DecisionResult.NoMatch.class);
         assertThat(none.outputs()).containsEntry("flags", null).containsEntry("penalty", null)
-                .containsEntry("worst", null).containsEntry("hits", null);
+                .containsEntry("worst", null).containsEntry("hits", BigDecimal.ZERO);
         // (d) a null under sum is EVALUATION_ERROR naming the output and the rule, no partial outputs, rules logged
         DecisionResult.Failed failed = (DecisionResult.Failed) nullUnderSum.outcome();
         assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
