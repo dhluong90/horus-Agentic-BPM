@@ -1,0 +1,208 @@
+{
+  "schemaVersion": 1,
+  "mode": "baseline",
+  "startedAt": "2026-11-28T11:03:14.991598Z",
+  "base": "http://127.0.0.1:18090",
+  "threads": 16,
+  "durationSeconds": 30,
+  "warmupSeconds": 8,
+  "client": "Mac OS X aarch64, Java 25.0.4.1, 10 CPUs",
+  "machine": "Apple M5 (10 cores), 24 GB, macOS 26 (Darwin 25.6.0), Docker Desktop; host container limited to 2 CPUs and 1 GiB, PostgreSQL container to 1 CPU and 512 MiB (docker-compose.yml)",
+  "scenarios": {
+    "rule-evaluate": {
+      "threads": 16,
+      "measuredSeconds": 30
+    },
+    "process-start": {
+      "threads": 16,
+      "measuredSeconds": 30
+    },
+    "task-flow": {
+      "threads": 16,
+      "measuredSeconds": 30
+    },
+    "message-flow": {
+      "threads": 16,
+      "measuredSeconds": 30
+    },
+    "cockpit-lists": {
+      "threads": 8,
+      "measuredSeconds": 30
+    }
+  },
+  "operations": {
+    "rule.evaluate": {
+      "count": 83840,
+      "errors": 0,
+      "perSecond": 2794.7,
+      "p50Ms": 3.17,
+      "p95Ms": 17.99,
+      "p99Ms": 56.61,
+      "maxMs": 263.24,
+      "meanMs": 5.73,
+      "firstError": null
+    },
+    "process.start": {
+      "count": 4199,
+      "errors": 0,
+      "perSecond": 140.0,
+      "p50Ms": 93.12,
+      "p95Ms": 294.63,
+      "p99Ms": 391.43,
+      "maxMs": 501.39,
+      "meanMs": 114.41,
+      "firstError": null
+    },
+    "task.complete": {
+      "count": 2994,
+      "errors": 0,
+      "perSecond": 99.8,
+      "p50Ms": 67.5,
+      "p95Ms": 99.2,
+      "p99Ms": 120.27,
+      "maxMs": 196.27,
+      "meanMs": 52.02,
+      "firstError": null
+    },
+    "process.start.to-user-task": {
+      "count": 2981,
+      "errors": 0,
+      "perSecond": 99.4,
+      "p50Ms": 19.52,
+      "p95Ms": 95.7,
+      "p99Ms": 113.17,
+      "maxMs": 195.85,
+      "meanMs": 45.39,
+      "firstError": null
+    },
+    "instance.read": {
+      "count": 2983,
+      "errors": 0,
+      "perSecond": 99.4,
+      "p50Ms": 6.54,
+      "p95Ms": 82.85,
+      "p99Ms": 90.64,
+      "maxMs": 111.08,
+      "meanMs": 21.71,
+      "firstError": null
+    },
+    "task.claim": {
+      "count": 2985,
+      "errors": 0,
+      "perSecond": 99.5,
+      "p50Ms": 16.55,
+      "p95Ms": 93.53,
+      "p99Ms": 104.77,
+      "maxMs": 197.83,
+      "meanMs": 42.1,
+      "firstError": null
+    },
+    "message.correlate": {
+      "count": 6495,
+      "errors": 0,
+      "perSecond": 216.5,
+      "p50Ms": 10.74,
+      "p95Ms": 91.77,
+      "p99Ms": 103.14,
+      "maxMs": 191.83,
+      "meanMs": 35.72,
+      "firstError": null
+    },
+    "process.start.to-wait-state": {
+      "count": 6488,
+      "errors": 0,
+      "perSecond": 216.3,
+      "p50Ms": 11.62,
+      "p95Ms": 92.43,
+      "p99Ms": 103.56,
+      "maxMs": 176.25,
+      "meanMs": 38.35,
+      "firstError": null
+    },
+    "list.definitions": {
+      "count": 9980,
+      "errors": 0,
+      "perSecond": 332.7,
+      "p50Ms": 1.17,
+      "p95Ms": 3.05,
+      "p99Ms": 54.72,
+      "maxMs": 74.99,
+      "meanMs": 2.58,
+      "firstError": null
+    },
+    "list.instances": {
+      "count": 9977,
+      "errors": 0,
+      "perSecond": 332.6,
+      "p50Ms": 1.0,
+      "p95Ms": 2.71,
+      "p99Ms": 53.89,
+      "maxMs": 75.11,
+      "meanMs": 2.36,
+      "firstError": null
+    },
+    "list.decisions": {
+      "count": 9984,
+      "errors": 0,
+      "perSecond": 332.8,
+      "p50Ms": 1.89,
+      "p95Ms": 6.24,
+      "p99Ms": 59.56,
+      "maxMs": 75.56,
+      "meanMs": 4.13,
+      "firstError": null
+    },
+    "list.incidents": {
+      "count": 9981,
+      "errors": 0,
+      "perSecond": 332.7,
+      "p50Ms": 0.92,
+      "p95Ms": 2.33,
+      "p99Ms": 44.83,
+      "maxMs": 76.56,
+      "meanMs": 1.72,
+      "firstError": null
+    },
+    "list.tasks": {
+      "count": 9979,
+      "errors": 0,
+      "perSecond": 332.6,
+      "p50Ms": 3.07,
+      "p95Ms": 53.79,
+      "p99Ms": 64.07,
+      "maxMs": 79.5,
+      "meanMs": 7.9,
+      "firstError": null
+    },
+    "list.instances-completed": {
+      "count": 9977,
+      "errors": 0,
+      "perSecond": 332.6,
+      "p50Ms": 1.25,
+      "p95Ms": 3.3,
+      "p99Ms": 53.03,
+      "maxMs": 77.31,
+      "meanMs": 2.66,
+      "firstError": null
+    },
+    "list.rule-sets": {
+      "count": 9981,
+      "errors": 0,
+      "perSecond": 332.7,
+      "p50Ms": 1.18,
+      "p95Ms": 3.04,
+      "p99Ms": 54.92,
+      "maxMs": 75.56,
+      "meanMs": 2.69,
+      "firstError": null
+    }
+  },
+  "regression": {
+    "maxErrorRate": 0.01,
+    "p95Factor": 5.0,
+    "p95FloorMs": 100.0,
+    "throughputFactor": 10.0
+  },
+  "stack": "docker compose: examples/rule-and-process image (Spring Boot 4, Temurin 21.0.13.1, dev profile) and postgres:16-alpine; host limit 2 CPUs and 1 GiB, PostgreSQL limit 1 CPU and 512 MiB",
+  "commit": "2bcaf583"
+}
