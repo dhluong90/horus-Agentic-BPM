@@ -39,7 +39,12 @@ export function ProcessesPage({ pageLimit }: { pageLimit: number }) {
   return (
     <section className="workspace" aria-labelledby="processes-title">
       <PageHead id="processes-title" title={t('processes.title')} subtitle={t('processes.subtitle')}
-        action={can('processes:read') ? <a className="btn" href={formatRoute({ name: 'calendar-changes' })}>{t('processes.calendarChanges')}</a> : undefined} />
+        action={can('processes:read') ? (
+          <>
+            <a className="btn" href={formatRoute({ name: 'calendars' })}>{t('calendars.title')}</a>
+            <a className="btn" href={formatRoute({ name: 'calendar-changes' })}>{t('processes.calendarChanges')}</a>
+          </>
+        ) : undefined} />
       {can('processes:read') ? <DefinitionList pageLimit={pageLimit} /> : (
         <article className="card card--table" aria-labelledby="processes-title"><div className="card__pad"><EmptyState icon="processes" text={t('processes.noRead')} /></div></article>
       )}

@@ -432,7 +432,86 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const calendarBody = () => ({ ...calendarChange, contentHash: calendarHash() });
   /** Approvals sent to the calendar-change endpoints, as the engine received them. */
   const calendarDecisions: { id: string; command: 'approve' | 'reject'; actor: string; body: Record<string, unknown> }[] = [];
-  function calendarRoute(request: ProcessRequest, path: string): ProcessAnswer | undefined {
+  /** The calendars in force (PRE-181), and the changes proposed from the editor (PRE-114, PRE-182). */
+  interface WorkingCalendar { zone: string; week: Record<string, string[]>; holidays: Record<string, string> }
+  const calendars = new Map<string, { version: number; calendar: WorkingCalendar; updatedBy: string; approvedBy: string; updatedAt: string }>([
+    ['vn-banking-hours', {
+      version: 3, updatedBy: 'lan', approvedBy: 'minh', updatedAt: '2026-10-02T03:00:00Z',
+      calendar: { zone: 'Asia/Ho_Chi_Minh', week: { MONDAY: ['08:00-17:00'], TUESDAY: ['08:00-17:00'], WEDNESDAY: ['08:00-17:00'], THURSDAY: ['08:00-17:00'], FRIDAY: ['08:00-17:00'], SATURDAY: ['08:00-12:00'] }, holidays: { '2026-09-02': 'National Day', '2027-02-08': 'Tet' } },
+    }],
+  ]);
+  interface Proposal { id: string; calendarKey: string; status: string; approval: string; baseVersion: number; previous: WorkingCalendar | null; proposed: WorkingCalendar; reason: string; proposedBy: string; proposedAt: string; decidedBy: string | null; decidedAt: string | null; comment: string | null }
+  const proposals: Proposal[] = [];
+  /** Proposals sent from the calendar editor, as the engine received them. */
+  const calendarProposals: { key: string; ifMatch: string | undefined; idempotencyKey: string | undefined; actor: string; body: Record<string, unknown> }[] = [];
+  const proposalBody = (item: Proposal) => ({ ...item, contentHash: fakeHash(JSON.stringify([item.calendarKey, item.baseVersion, item.proposed])) });
+  function calendarEditorRoute(request: ProcessRequest, path: string, url: URL): ProcessAnswer | undefined {
+    const read = request.permissions.includes('processes:read');
+    if (request.method === 'GET' && path === `${BASE}/calendars`) {
+      if (!read) return problem(403, 'PERMISSION_DENIED');
+      const data = [...calendars.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, c]) => ({ key, version: c.version, zone: c.calendar.zone, updatedBy: c.updatedBy, approvedBy: c.approvedBy, updatedAt: c.updatedAt }));
+      return json(200, { data, nextCursor: null, hasNext: false });
+    }
+    const one = /^\/api\/bpm\/processes\/v1\/calendars\/([^/:]+)(\/changes)?$/.exec(path);
+    if (one !== null) {
+      const key = one[1] ?? '';
+      if (one[2] === undefined && request.method === 'GET') {
+        if (!read) return problem(403, 'PERMISSION_DENIED');
+        const found = calendars.get(key);
+        return found === undefined ? problem(404, 'CALENDAR_NOT_FOUND') : json(200, { key, ...found }, { ETag: `"${String(found.version)}"` });
+      }
+      if (one[2] !== undefined && request.method === 'POST') {
+        if (!request.permissions.includes('processes:calendar:manage')) return problem(403, 'PERMISSION_DENIED');
+        const ifMatch = request.headers['If-Match'] ?? request.headers['if-match'];
+        const idempotencyKey = request.headers['Idempotency-Key'] ?? request.headers['idempotency-key'];
+        if (ifMatch === undefined || idempotencyKey === undefined) return problem(428, 'PRECONDITION_REQUIRED');
+        const body = JSON.parse(request.body === '' ? '{}' : request.body) as { calendar?: WorkingCalendar; reason?: string };
+        calendarProposals.push({ key, ifMatch, idempotencyKey, actor: request.user, body });
+        if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(key) || body.calendar === undefined || (body.reason ?? '').trim() === '') return problem(400, 'INPUT_INVALID');
+        const current = calendars.get(key);
+        if (ifMatch !== `"${String(current?.version ?? 0)}"`) return problem(409, 'VERSION_CONFLICT');
+        const item: Proposal = {
+          id: `01KB2R6Q3C0000000000PROP${String(proposals.length + 1).padStart(2, '0')}`, calendarKey: key, status: 'PENDING', approval: 'FOUR_EYES', baseVersion: current?.version ?? 0,
+          previous: current?.calendar ?? null, proposed: body.calendar, reason: body.reason ?? '', proposedBy: request.user, proposedAt: '2026-11-21T04:00:00Z', decidedBy: null, decidedAt: null, comment: null,
+        };
+        proposals.push(item);
+        return json(201, proposalBody(item), { Location: `${BASE}/calendar-changes/${item.id}` });
+      }
+      return undefined;
+    }
+    const changes = /^\/api\/bpm\/processes\/v1\/calendar-changes\/([^/:]+)(:approve|:reject)$/.exec(path);
+    if (changes !== null && request.method === 'POST') {
+      const item = proposals.find((candidate) => candidate.id === changes[1]);
+      if (item === undefined) return undefined;
+      if (!request.permissions.includes('processes:calendar:manage')) return problem(403, 'PERMISSION_DENIED');
+      if (item.status !== 'PENDING') return problem(409, 'INVALID_STATE');
+      const body = JSON.parse(request.body === '' ? '{}' : request.body) as Record<string, unknown>;
+      const approve = changes[2] === ':approve';
+      if (approve && request.user === item.proposedBy) return problem(403, 'SELF_APPROVAL_FORBIDDEN');
+      if (approve && body['expectedChangeHash'] !== proposalBody(item).contentHash) return problem(body['expectedChangeHash'] === undefined ? 400 : 409, body['expectedChangeHash'] === undefined ? 'CONTENT_HASH_REQUIRED' : 'CONTENT_CHANGED');
+      Object.assign(item, { status: approve ? 'APPROVED' : 'REJECTED', decidedBy: request.user, decidedAt: '2026-11-21T05:00:00Z', comment: typeof body['comment'] === 'string' ? body['comment'] : null });
+      if (approve) calendars.set(item.calendarKey, { version: item.baseVersion + 1, calendar: item.proposed, updatedBy: item.proposedBy, approvedBy: request.user, updatedAt: '2026-11-21T05:00:00Z' });
+      return json(200, proposalBody(item));
+    }
+    const byId = /^\/api\/bpm\/processes\/v1\/calendar-changes\/([^/:]+)$/.exec(path);
+    if (byId !== null && request.method === 'GET') {
+      const item = proposals.find((candidate) => candidate.id === byId[1]);
+      if (item === undefined) return undefined;
+      return read ? json(200, proposalBody(item)) : problem(403, 'PERMISSION_DENIED');
+    }
+    if (request.method === 'GET' && path === `${BASE}/calendar-changes`) {
+      if (!read) return problem(403, 'PERMISSION_DENIED');
+      const status = url.searchParams.get('status') ?? 'PENDING';
+      if (!['PENDING', 'APPROVED', 'REJECTED'].includes(status)) return problem(400, 'QUERY_INVALID');
+      const demo = calendarChange !== undefined && calendarChange.status === status ? [calendarBody()] : [];
+      const data = [...proposals.filter((item) => item.status === status).map(proposalBody).reverse(), ...demo];
+      return json(200, { data, nextCursor: null, hasNext: false });
+    }
+    return undefined;
+  }
+  function calendarRoute(request: ProcessRequest, path: string, url: URL): ProcessAnswer | undefined {
+    const editor = calendarEditorRoute(request, path, url);
+    if (editor !== undefined) return editor;
     const m = /^\/api\/bpm\/processes\/v1\/calendar-changes(?:\/([^/:]+)(:approve|:reject)?)?$/.exec(path);
     if (m === null) return undefined;
     if (calendarChange === undefined) return problem(404, 'CALENDAR_NOT_FOUND');
@@ -599,7 +678,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       return json(200, { data, nextCursor: null, hasNext: false });
     }
     if (request.method === 'GET' && path === `${BASE}/approvals`) return pendingApprovals(url, request);
-    const calendar = calendarRoute(request, path);
+    const calendar = calendarRoute(request, path, url);
     if (calendar !== undefined) return calendar;
     if (seed.migration !== undefined) {
       const migration = migrations.handle(request, path, url);
@@ -775,5 +854,7 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     if (item) item.lockVersion += 1;
   };
 
-  return { handle, overrides, completions, requests, decisions, calendarDecisions, handOvers, claimAs, migrations, incidentCommands, touchIncident };
+  /** Another person's change was approved meanwhile: the calendar is one version on. */
+  const advanceCalendar = (key: string) => { const found = calendars.get(key); if (found !== undefined) found.version += 1; };
+  return { handle, overrides, completions, requests, decisions, calendarDecisions, calendarProposals, advanceCalendar, handOvers, claimAs, migrations, incidentCommands, touchIncident };
 }
