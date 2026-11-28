@@ -13,7 +13,8 @@ export interface Box { x: number; y: number; width: number; height: number }
 /** Room kept around the drawing inside the frame, in drawing units. */
 export const FIT_PADDING = 24;
 
-const LABEL_CHAR = 6.8;
+/** Average width of one label character, in drawing units. */
+export const LABEL_CHAR = 6.8;
 const LABEL_HALF_HEIGHT = 10;
 const DATA_CAPTION_WIDTH = 104;
 const DATA_CAPTION_TOP = 16;

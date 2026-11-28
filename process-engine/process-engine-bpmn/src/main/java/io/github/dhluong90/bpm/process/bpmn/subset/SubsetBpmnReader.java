@@ -244,7 +244,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
      * @return the executable process of the document
      */
     public Process read(byte[] source) {
-        return readWithWarnings(source).process();
+        return readPass(source, false).process();
     }
 
     /**
@@ -253,6 +253,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
      */
     @Override
     public Result readWithWarnings(byte[] source) {
+        return readPass(source, true);
+    }
+
+    /**
+     * @param lenient true when a binding gap (a handler, assignee, result variable or correlation key that is missing,
+     *     or an implementation that names no handler) and a process that says {@code isExecutable="false"} are read and
+     *     listed instead of refused (PRE-391, PRE-392); false for the strict read that refuses them
+     */
+    private Result readPass(byte[] source, boolean lenient) {
         if (source.length > limits.maxBytes()) {
             throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
                     + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
@@ -262,9 +271,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
         try {
             XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));
             try {
-                Pass pass = new Pass(xml);
+                Pass pass = new Pass(xml, lenient);
                 List<Process> all = pass.document();
-                return new Result(all.get(0), all, pass.warnings);
+                return new Result(all.get(0), all, pass.warnings, pass.openBindings);
             } finally {
                 xml.close();
             }
@@ -286,6 +295,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private final List<DefinitionProblem> unsupported = new ArrayList<>();
         private boolean unsupportedTruncated;
         private final List<DefinitionProblem> warnings = new ArrayList<>();
+        /** Lenient: binding gaps and non-executable processes are read and listed, not refused (PRE-391, PRE-392). */
+        private final boolean lenient;
+        private final List<DefinitionProblem> openBindings = new ArrayList<>();
         private final List<DefinitionProblem> invalid = new ArrayList<>();
         private final Set<String> ids = new HashSet<>();
         private int depth;
@@ -305,7 +317,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
         /** Where each error or escalation reference was written, to check it once the root elements are read. */
         private final List<DefinitionProblem> codeRefs = new ArrayList<>();
 
-        Pass(XMLStreamReader xml) {
+        Pass(XMLStreamReader xml, boolean lenient) {
+            this.lenient = lenient;
             this.xml = xml;
         }
 
@@ -401,6 +414,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         .forEach(e -> startingCatches.add(e.id()));
             }
             invalid.removeIf(p -> "CORRELATION_KEY_REQUIRED".equals(p.code()) && startingCatches.contains(p.elementId()));
+            openBindings.removeIf(p -> "CORRELATION_KEY_REQUIRED".equals(p.code())
+                    && startingCatches.contains(p.elementId()));
             for (DefinitionProblem ref : unresolvedRefs) {
                 if (!sharedDefinitionIds.contains(ref.message().substring(ref.message().indexOf('\'') + 1,
                         ref.message().indexOf('\'', ref.message().indexOf('\'') + 1)))) {
@@ -424,6 +439,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             // #632: a manual undo runs nothing, so it needs none of what a run would need (the content it carries is
             // refused instead, COMPENSATION_ACTIVITY_CONTENT_UNUSED).
             invalid.removeIf(p -> RUN_ONLY_CODES.contains(p.code()) && manualUndoIds.contains(p.elementId()));
+            openBindings.removeIf(p -> RUN_ONLY_CODES.contains(p.code()) && manualUndoIds.contains(p.elementId()));
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
@@ -434,6 +450,20 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         ? labelled.withCollaboration(resolvedCollaboration) : labelled);
             }
             return out;
+        }
+
+        /**
+         * A binding the step still needs. A lenient read lists it, so the definition is stored as a draft that cannot be
+         * published; the strict read refuses it as before.
+         */
+        private void gap(String code, String message, String element, String id, int line) {
+            DefinitionProblem problem = new DefinitionProblem(code, message, element, safe(id), line);
+            if (!lenient) {
+                invalid.add(problem);
+            } else if (openBindings.size() < MAX_WARNINGS && openBindings.stream().noneMatch(
+                    b -> b.elementId() != null && b.elementId().equals(problem.elementId()) && b.code().equals(code))) {
+                openBindings.add(problem);
+            }
         }
 
         private void warn(String code, String message, String element, String id) {
@@ -473,8 +503,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 for (Read read : processes.stream().limit(1).toList()) {
                     checkKey(read);
                     if (!read.executable()) {
-                        invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
-                                "process", safe(read.process().id()), read.line()));
+                        if (lenient) {
+                            warn("NOT_EXECUTABLE_VIEW_ONLY", "says isExecutable=\"false\": it is stored as a draft that"
+                                    + " can be viewed and exported, and it cannot be published", "process",
+                                    read.process().id());
+                        } else {
+                            invalid.add(new DefinitionProblem("NOT_EXECUTABLE", "Set isExecutable=\"true\" on the process",
+                                    "process", safe(read.process().id()), read.line()));
+                        }
                     }
                 }
                 return processes.isEmpty() ? List.of() : List.of(processes.get(0).process());
@@ -496,6 +532,15 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 if (read.executable()) {
                     checkKey(read);
                     out.add(read.process());
+                }
+            }
+            if (out.isEmpty() && lenient) {
+                // PRE-392: a file whose pools are all marked not executable is kept for viewing, one draft per process.
+                for (Read read : processes) {
+                    checkKey(read);
+                    out.add(read.process());
+                    warn("NOT_EXECUTABLE_VIEW_ONLY", "says isExecutable=\"false\": it is stored as a draft that can be"
+                            + " viewed and exported, and it cannot be published", "process", read.process().id());
                 }
             }
             return out;
@@ -797,9 +842,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
             nesting = 0;
             container(elements, artifacts);
             elements = withLaneAssignees(elements, laneSink);
-            pendingAssignee.forEach((taskId, at) -> invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
+            pendingAssignee.forEach((taskId, at) -> gap("ASSIGNEE_INVALID",
                     "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>, or a named lane to"
-                            + " take the group from", "userTask", safe(taskId), at)));
+                            + " take the group from", "userTask", taskId, at));
             pendingAssignee.clear();
             Process read = withRefs(new Process(key == null ? "_missing_" + line : key, name, ProcessType.NONE,
                     executable, false, elements, artifacts, laneSink, processExt.isEmpty() ? null
@@ -1781,7 +1826,13 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         + " definitions");
             }
             String implementation = attr("implementation");
-            if (implementation != null && !"##unspecified".equals(implementation) && handlerOfUrn(implementation) == null) {
+            if (lenient && implementation != null && !"##unspecified".equals(implementation)
+                    && handlerOfUrn(implementation) == null) {
+                gap("IMPLEMENTATION_UNBOUND", "has implementation " + safe(implementation) + ", which names no handler;"
+                        + " bind the step with horus:handler or implementation=\"" + HANDLER_URN + "<name>\"", local, id,
+                        line());
+            } else if (implementation != null && !"##unspecified".equals(implementation)
+                    && handlerOfUrn(implementation) == null) {
                 unsupported("implementation", id, BpmnStages.NOT_PLANNED,
                         "is not supported; bind the step with horus:handler or implementation=\""
                         + HANDLER_URN + "<name>\" instead of a service implementation");
@@ -2154,9 +2205,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 List<HorusExtension> ext) {
             if (key == null) {
                 if (required) {
-                    invalid.add(new DefinitionProblem("CORRELATION_KEY_REQUIRED", "A step that waits for a message"
+                    gap("CORRELATION_KEY_REQUIRED", "A step that waits for a message"
                             + " needs horus:correlationKey, the variable whose value the message must carry", element,
-                            safe(id), line));
+                            id, line);
                 }
             } else if (!VARIABLE.matcher(key).matches()) {
                 invalid.add(new DefinitionProblem("CORRELATION_KEY_INVALID", "horus:correlationKey is the name of a"
@@ -2344,8 +2395,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
             }
             if (handler == null) {
-                invalid.add(new DefinitionProblem("HANDLER_MISSING", "A serviceTask needs horus:handler", "serviceTask",
-                        id, line));
+                gap("HANDLER_MISSING", "A serviceTask needs horus:handler", "serviceTask", id, line);
             }
             List<HorusExtension> ext = new ArrayList<>();
             ext.add(new HandlerRef(handler, mode, timeout));
@@ -2983,13 +3033,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (assignee == null && nesting == 1) {
                 // #497: a lane may name the work group; decided once the lanes of the process are read.
                 pendingAssignee.put(id, line);
-            } else if (assignee == null || !ASSIGNEE.matcher(assignee).matches()) {
+            } else if (assignee == null) {
+                gap("ASSIGNEE_INVALID",
+                        "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", id, line);
+            } else if (!ASSIGNEE.matcher(assignee).matches()) {
                 invalid.add(new DefinitionProblem("ASSIGNEE_INVALID",
                         "A userTask needs horus:assignee as user:<id>, role:<role> or group:<group>", "userTask", safe(id), line));
             }
             if (result == null) {
-                invalid.add(new DefinitionProblem("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
-                        + " a completion result can never overwrite other process variables", "userTask", safe(id), line));
+                gap("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
+                        + " a completion result can never overwrite other process variables", "userTask", id, line);
             }
             List<HorusExtension> ext = new ArrayList<>();
             if (assignee != null || !"true".equals(attr("isForCompensation"))) {

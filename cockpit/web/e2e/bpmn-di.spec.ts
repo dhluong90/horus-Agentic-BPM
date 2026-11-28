@@ -70,7 +70,7 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1440, height: 1200 }]
     expect(booked.x).toBeGreaterThan(approved.x);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     // A flow name never sits on a step or on another name, and the flows from Capture application and its reminder timer start on different lines.
-    const rects = await page.locator('svg [data-edge] .dg-edge__label rect').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }));
+    const rects = await page.locator('svg [data-edge] .dg-edge__label text').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }));
     const steps = await page.locator('svg [data-node]').evaluateAll((els) => els.filter((el) => el.getAttribute('data-type') !== 'subProcess').map((el) => { const r = (el.querySelector('rect, circle, path') ?? el).getBoundingClientRect(); return { id: el.getAttribute('data-node') ?? '', x: r.x, y: r.y, w: r.width, h: r.height }; }));
     const hit = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 

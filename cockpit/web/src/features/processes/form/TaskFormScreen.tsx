@@ -306,7 +306,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
   if (field.masked && !replaced) {
     control = (
       <div className="taskform__masked">
-        <span id={id} className="masked__tag"><span aria-hidden="true">◍</span> {t('form.masked')}</span>
+        <span id={id} className="masked__label"><span aria-hidden="true">◍</span> {t('form.masked')}</span>
         {!field.readOnly ? <button type="button" className="btn btn--quiet btn--small" disabled={disabled} onClick={() => { onReplace(true); }}>{t('form.replace')}</button> : null}
       </div>
     );

@@ -1,13 +1,15 @@
 /* global document, window */
 // Accessibility check of the built documentation site (CKP-065 "Readable"). Serves site/.generated/.vitepress/dist,
 // opens a page with a diagram and code blocks at 1440x900 and 1440x1200 in light and dark, and fails when the
-// Mermaid diagram is not drawn, a code block has no copy button, or axe-core reports a serious or critical violation.
+// Mermaid diagram is not drawn, a code block has no copy button, axe-core reports a serious or critical violation, or the
+// homepage or the docs home has a chip (a rounded box with a fill or a border around short text; scripts/chip-detector.mjs).
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
+import { CHIP_EXEMPT, detectChips } from './chip-detector.mjs';
 
 const root = fileURLToPath(new URL('../../../site/.generated/.vitepress/dist', import.meta.url));
 // The site is built for a sub-path (SITE_BASE, default the project page); the server below serves it under that path.
@@ -63,6 +65,10 @@ for (const scheme of ['light', 'dark']) {
       for (const v of violations.filter((x) => x.impact === 'serious' || x.impact === 'critical')) {
         failures.push(`${label}: axe ${v.impact} ${v.id} on ${v.nodes.length} node(s), e.g. ${v.nodes[0].target.join(' ')}`);
       }
+      if (!diagram) {
+        // The homepage and the docs home are written by hand: no rounded, filled or bordered box around short text ("No chips").
+        for (const chip of await page.evaluate(detectChips, CHIP_EXEMPT)) failures.push(`${label}: chip ${chip.element} "${chip.text}"`);
+      }
       await page.close();
     }
     await context.close();
@@ -74,4 +80,4 @@ if (failures.length > 0) {
   console.error(`${failures.length} problem(s):\n${failures.join('\n')}`);
   process.exit(1);
 }
-console.log(`${runs} page views (${pages.length} pages, 1440x900 and 1440x1200, light and dark): diagrams drawn, copy buttons present, no serious axe violation`);
+console.log(`${runs} page views (${pages.length} pages, 1440x900 and 1440x1200, light and dark): diagrams drawn, copy buttons present, no serious axe violation, no chip on the homepage and docs home`);

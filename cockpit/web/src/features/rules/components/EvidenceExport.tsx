@@ -73,9 +73,9 @@ export function EvidenceExport({ ruleSet, versions }: { ruleSet: string; version
       </div>
       <fieldset className="evidence__group">
         <legend className="field__label">{t('evidence.versions')}</legend>
-        <div className="evidence__chips">
+        <div className="evidence__versions">
           {versions.map((version) => (
-            <label key={version.version} className="chip-check">
+            <label key={version.version} className="evidence__version">
               <input type="checkbox" checked={chosenVersions.has(version.version)} onChange={() => { setChosenVersions(flip(chosenVersions, version.version)); }} />
               <span>{t('evidence.versionChip', { version: String(version.version), status: t(`statusShort.${version.status}`) })}</span>
             </label>

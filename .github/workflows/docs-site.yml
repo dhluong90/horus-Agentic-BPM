@@ -3,9 +3,9 @@ name: Docs site
 on:
   push:
     branches: [main]
-    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", "cockpit/web/scripts/chip-detector.mjs", ".github/workflows/docs-site.yml"]
   pull_request:
-    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", "cockpit/web/scripts/chip-detector.mjs", ".github/workflows/docs-site.yml"]
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,6 +36,8 @@ jobs:
         # The cockpit's licence script, run over this project's whole tree: every package ends up in the built pages.
         working-directory: site
         run: node ../cockpit/web/scripts/check-licences.mjs --include-dev --exceptions=licence-exceptions.json
+      - name: No chips in the site's stylesheets
+        run: node cockpit/web/scripts/check-no-chips.mjs
       - name: Tests of the generator
         working-directory: site
         run: npm test

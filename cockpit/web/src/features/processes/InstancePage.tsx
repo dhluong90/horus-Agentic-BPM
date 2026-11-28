@@ -404,15 +404,15 @@ function reasonOf(mark: Extract<NodeMark, { kind: 'cancelled' | 'terminated' }>,
 
 function StateLine({ mark, activity }: { mark: NodeMark | undefined; activity: boolean }) {
   const { t } = useI18n();
-  if (mark?.kind === 'incident') return <p className="inspector__state"><span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('instance.state.incident')}</span></p>;
-  if (mark?.kind === 'token') return <p className="inspector__state"><span className="badge badge--accent"><span aria-hidden="true">{TOKEN_ICON[mark.status]}</span> {t(TOKEN_KEY[mark.status])}</span></p>;
-  if (mark?.kind === 'undone') return <p className="inspector__state"><span className="badge badge--warn" title={t('instance.hint.undone')}><span aria-hidden="true">↺</span> {t('instance.state.undone')}</span></p>;
-  if (mark?.kind === 'undoRan') return <p className="inspector__state"><span className="badge badge--neutral" title={t('instance.hint.undoRan')}><span aria-hidden="true">↺</span> {t('instance.state.undoRan')}</span></p>;
-  if (mark?.kind === 'cancelled') return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">⊘</span> {t('instance.state.cancelled')}</span>{reasonOf(mark, t)}</p>;
-  if (mark?.kind === 'terminated') return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">■</span> {t('instance.state.terminated')}</span>{reasonOf(mark, t)}</p>;
-  if (mark?.kind === 'done') return <p className="inspector__state"><span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('instance.state.completed')}</span></p>;
-  if (activity) return <p className="inspector__state"><span className="badge badge--neutral"><span aria-hidden="true">•</span> {t('instance.state.passed')}</span></p>;
-  return <p className="inspector__state"><span className="badge badge--muted"><span aria-hidden="true">○</span> {t('instance.state.notReached')}</span></p>;
+  if (mark?.kind === 'incident') return <p className="inspector__state"><span className="status status--bad"><span aria-hidden="true">✕</span> {t('instance.state.incident')}</span></p>;
+  if (mark?.kind === 'token') return <p className="inspector__state"><span className="status status--accent"><span aria-hidden="true">{TOKEN_ICON[mark.status]}</span> {t(TOKEN_KEY[mark.status])}</span></p>;
+  if (mark?.kind === 'undone') return <p className="inspector__state"><span className="status status--warn" title={t('instance.hint.undone')}><span aria-hidden="true">↺</span> {t('instance.state.undone')}</span></p>;
+  if (mark?.kind === 'undoRan') return <p className="inspector__state"><span className="status status--neutral" title={t('instance.hint.undoRan')}><span aria-hidden="true">↺</span> {t('instance.state.undoRan')}</span></p>;
+  if (mark?.kind === 'cancelled') return <p className="inspector__state"><span className="status status--neutral"><span aria-hidden="true">⊘</span> {t('instance.state.cancelled')}</span>{reasonOf(mark, t)}</p>;
+  if (mark?.kind === 'terminated') return <p className="inspector__state"><span className="status status--neutral"><span aria-hidden="true">■</span> {t('instance.state.terminated')}</span>{reasonOf(mark, t)}</p>;
+  if (mark?.kind === 'done') return <p className="inspector__state"><span className="status status--ok"><span aria-hidden="true">✓</span> {t('instance.state.completed')}</span></p>;
+  if (activity) return <p className="inspector__state"><span className="status status--neutral"><span aria-hidden="true">•</span> {t('instance.state.passed')}</span></p>;
+  return <p className="inspector__state"><span className="status status--muted"><span aria-hidden="true">○</span> {t('instance.state.notReached')}</span></p>;
 }
 
 /** An open incident in words, with its code and when it opened one click away (styleguide: alerts). */

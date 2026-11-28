@@ -2941,3 +2941,23 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The file imports and `warnings` lists `BPMN_IMPORT_IGNORED` and `ITEM_DEFINITION_IGNORED`: the engine's variables are typed by their values and it fetches no other file. The stored source keeps both. `startQuantity` and `completionQuantity` of 1 (the default) were already accepted; any other value stays refused (a token carries no quantity).
 - **Example:** `import` -> warning `BPMN_IMPORT_IGNORED`, `201`.
 - **Test ID:** `PRE_389_an_import_and_an_item_definition_are_ignored_with_a_warning_and_not_refused` (`ModellerFileReadingTest`)
+
+### PRE-391 A step with an open binding is stored as a draft that cannot be published
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A file whose `serviceTask` has no `horus:handler` or an `implementation` that names no handler, whose `userTask` has no `horus:assignee` or `horus:resultVariable`, or whose message wait has no `horus:correlationKey`.
+- **When:** It is imported, then publish is requested or approved.
+- **Then:** The import stores a draft, answers `201` and lists each open binding in `warnings` (`HANDLER_MISSING`, `IMPLEMENTATION_UNBOUND`, `ASSIGNEE_INVALID`, `RESULT_VARIABLE_REQUIRED`, `CORRELATION_KEY_REQUIRED`) with the step id. The draft can be read and exported. It stays a draft under `definitions.auto-approve`. `requestApproval` and `approve` refuse it as `422 VALIDATION_FAILED` with one problem for each binding still open, found by reading the stored source again, before any registration is checked and before anything is written. A wrong value (`horus:assignee="nobody"`) is still refused at import. The strict `SubsetBpmnReader.read` refuses all of these as before. Request, second-person approval, content hash and replay are unchanged.
+- **Example:** A user task with no assignee imports as `DRAFT` with `ASSIGNEE_INVALID` on `approve`; `requestApproval` answers `422` with `ASSIGNEE_INVALID` on `approve`.
+- **Test ID:** `PRE_391_a_step_with_open_bindings_is_stored_as_a_draft_and_publish_names_each_one`, `PRE_391_open_bindings_keep_a_draft_a_draft_under_auto_approve_and_it_cannot_start`, `PRE_391_a_complete_definition_still_needs_a_request_and_a_second_person_to_approve` (`OpenBindingsTest`); `PRE_391_a_missing_assignee_result_variable_and_handler_are_listed_not_refused`, `PRE_391_a_message_wait_without_a_correlation_key_is_listed_and_a_wrong_value_is_still_refused` (`OpenBindingsReaderTest`); on every path that could run a draft: `PRE_391_a_call_activity_never_starts_a_draft_with_open_bindings_by_key_or_by_pinned_version`, `PRE_391_a_message_never_starts_a_draft_with_open_bindings`, `PRE_391_a_migration_cannot_target_a_draft_with_open_bindings` (`OpenBindingsTest`), `PRE_391_the_rest_publish_request_of_a_draft_with_open_bindings_is_422_and_names_each_binding` (`OpenBindingsRestIT`)
+
+### PRE-392 A process that is not executable is a view-only draft
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A file whose only process says `isExecutable="false"`, or a collaboration in which no pool is executable.
+- **When:** It is imported, then publish is requested.
+- **Then:** The import stores a draft (one for each process of such a collaboration) with the warning `NOT_EXECUTABLE_VIEW_ONLY`, in the `dev` profile too. `requestApproval` and `approve` refuse it with `NOT_EXECUTABLE`. In a collaboration with an executable pool the non-executable pools stay display-only as before. The strict read still answers `NOT_EXECUTABLE`.
+- **Example:** `<process id="wfp-6" isExecutable="false">` -> `DRAFT`, `NOT_EXECUTABLE_VIEW_ONLY`; request for publish -> `422 NOT_EXECUTABLE`.
+- **Test ID:** `PRE_392_a_process_marked_not_executable_is_a_view_only_draft_and_publish_refuses_it` (`OpenBindingsTest`); `PRE_392_a_process_that_says_it_is_not_executable_is_read_for_viewing_only` (`OpenBindingsReaderTest`)

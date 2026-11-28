@@ -95,7 +95,7 @@ describe('CKP-017 instance on its diagram', () => {
 
     await userEvent.click(within(diagram).getByRole('button', { name: /^Verify identity documents Agent task/ }));
     expect(within(inspector).getByText('Completed, 2 attempts, 3 min 10 s, by svc-kyc')).toBeInTheDocument();
-    expect(within(inspector).getByText('Completed', { selector: '.badge' })).toBeInTheDocument();
+    expect(within(inspector).getByText('Completed', { selector: '.status' })).toBeInTheDocument();
 
     // The timeline lists the same entries in time order, in words.
     await userEvent.click(screen.getByRole('tab', { name: 'Timeline' }));

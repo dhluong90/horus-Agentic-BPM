@@ -120,7 +120,7 @@ function ReportRow({ row, index }: { row: SimulationReportRow; index: number }) 
       <th scope="row" className="tnum">
         <div className="report__case">
           <span>{name}</span>
-          {row.category === 'FAILED' ? <span className="badge badge--bad">{t('report.failed')}</span> : null}
+          {row.category === 'FAILED' ? <span className="status status--bad">{t('report.failed')}</span> : null}
         </div>
       </th>
       <td className="report__before"><Outcome readings={row.before?.readings} /></td>

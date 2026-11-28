@@ -273,7 +273,7 @@ function Workbench({ version, versions, lens, navigate, say, importVersion, onSh
               {title} {editing ? <StatusBadge status="DRAFT" /> : <StatusBadge status={version.status} />}
             </h1>
             <Subtitle version={version} editing={editing} />
-            <p className="key-chip"><span className="key-chip__term">{t('ruleSet.key')}</span> <code className="key-chip__value">{version.ruleSet}</code> <CopyButton value={version.ruleSet} label={t('ruleSet.copyKey')} iconOnly /></p>
+            <p className="rule-key"><span className="rule-key__term">{t('ruleSet.key')}</span> <code className="rule-key__value">{version.ruleSet}</code> <CopyButton value={version.ruleSet} label={t('ruleSet.copyKey')} iconOnly /></p>
           </div>
           {!editing ? (
             <div className="rs-head__actions">

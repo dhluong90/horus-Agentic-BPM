@@ -265,6 +265,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-387 | `PRE_387_*` in `ModellerFileReadingTest` | A process id that is not a key, an unnamed message and an id-less lane set are read | M3 | `TR-STD-04` | Done |
 | PRE-388 | `PRE_388_*` in `ModellerFileReadingTest` | A process that does not say `isExecutable` is executable | M3 | `TR-STD-04` | Done |
 | PRE-389 | `PRE_389_*` in `ModellerFileReadingTest` | An import and an item definition are ignored with a warning | M3 | `TR-STD-04` | Done |
+| PRE-391 | `PRE_391_*` in `OpenBindingsTest`, `OpenBindingsReaderTest`, `OpenBindingsRestIT` | A step with an open binding is stored as a draft that cannot be published | M3 | `TR-STD-04` | Done |
+| PRE-392 | `PRE_392_*` in `OpenBindingsTest`, `OpenBindingsReaderTest` | A process that is not executable is a view-only draft | M3 | `TR-STD-04` | Done |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 
