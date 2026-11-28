@@ -2,7 +2,6 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import { useI18n } from '../../../i18n/I18nProvider';
 import { ancestorsOf, isKnownNodeType, type DiagramGraph, type LoopKind } from '../model/bpmnGraph';
 import {
-  CAPTION_GAP,
   CAPTION_LINE_HEIGHT,
   EVENT_RADIUS,
   fitScale,
@@ -23,6 +22,7 @@ import {
   type Point,
 } from '../model/layout';
 import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
+import { captionOf } from '../model/captions';
 import { crowdedHeatLabels } from '../model/heatLabels';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
 import { badgeBox, drawingBounds, LABEL_CHAR, type Box } from '../model/bounds';
@@ -272,17 +272,23 @@ function Edge({ edge, marker, defaultLabel, mark, fromGateway }: { edge: PlacedE
  * A data object (a page with a folded corner) or a data store (a drum), BPMN's own shapes (#499). Read only: it takes
  * no focus and no click, but names itself to assistive technology as "Data object: Applicant profile".
  */
+const DATA_KIND_KEY = { dataObject: 'diagram.data.object', dataStore: 'diagram.data.store', dataInput: 'diagram.data.input', dataOutput: 'diagram.data.output' } as const;
+
 function DataSymbol({ item, kindLabel }: { item: PlacedDataItem; kindLabel: string }) {
   const { x, y, width: w, height: h } = item;
   const centre = x + w / 2;
-  const name = item.name ?? item.id;
+  const name = item.name ?? kindLabel;
+  const lines = item.lines.length > 0 ? item.lines : [kindLabel];
   return (
-    <g className={`dg-data dg-data--${item.kind}`} data-data={item.id} data-kind={item.kind} role="img" aria-label={`${kindLabel}: ${name}`}>
-      <title>{`${kindLabel}: ${name}`}</title>
-      {item.kind === 'dataObject' ? (
+    <g className={`dg-data dg-data--${item.kind}`} data-data={item.id} data-kind={item.kind} role="img" aria-label={item.name === undefined ? kindLabel : `${kindLabel}: ${name}`}>
+      <title>{item.name === undefined ? kindLabel : `${kindLabel}: ${name}`}</title>
+      {item.kind !== 'dataStore' ? (
         <>
           <path d={`M${String(x)} ${String(y)} L${String(x + w - 9)} ${String(y)} L${String(x + w)} ${String(y + 9)} L${String(x + w)} ${String(y + h)} L${String(x)} ${String(y + h)} Z`} />
           <path className="dg-data__fold" d={`M${String(x + w - 9)} ${String(y)} L${String(x + w - 9)} ${String(y + 9)} L${String(x + w)} ${String(y + 9)}`} />
+          {item.kind === 'dataInput' || item.kind === 'dataOutput' ? (
+            <path className={item.kind === 'dataOutput' ? 'dg-data__arrow dg-data__arrow--out' : 'dg-data__arrow'} d={`M${String(x + 3)} ${String(y + 4)} h8 v-2.5 l5 4.5 l-5 4.5 v-2.5 h-8 Z`} />
+          ) : null}
         </>
       ) : (
         <>
@@ -291,7 +297,7 @@ function DataSymbol({ item, kindLabel }: { item: PlacedDataItem; kindLabel: stri
         </>
       )}
       <text aria-hidden="true" className="dg-node__caption" x={centre} y={y + h + 16} textAnchor="middle">
-        {item.lines.map((line, index) => <tspan key={index} x={centre} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{line}</tspan>)}
+        {lines.map((line, index) => <tspan key={index} x={centre} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{line}</tspan>)}
       </text>
     </g>
   );
@@ -445,9 +451,8 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const intermediate = node.type.startsWith('intermediate') || boundary;
   const soft = (boundary || node.type.startsWith('startEvent')) && node.interrupting === false;
   const marked = intermediate || node.type.includes(':');
-  const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
-  const captionX = node.shape === 'gateway' ? centre.x + 8 : centre.x;
+  const caption = captionOf(node);
   return (
     <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary || node.type.startsWith('startEvent') ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
@@ -476,8 +481,8 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
       )}
       {node.lines.length > 0 ? (
         // A gateway's name stands to the lower right of the diamond: flows leave a gateway at its bottom point, so a name centred under it is crossed by them.
-        <text aria-hidden="true" className="dg-node__caption" x={captionX} y={captionTop + 12} textAnchor={node.shape === 'gateway' ? 'start' : 'middle'}>
-          {node.lines.map((line, index) => <tspan key={index} x={captionX} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
+        <text aria-hidden="true" className="dg-node__caption" x={caption.x} y={caption.y} textAnchor={caption.anchor}>
+          {node.lines.map((line, index) => <tspan key={index} x={caption.x} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
         </text>
       ) : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={centre.x + 20} y={centre.y - 20} /> : null}
@@ -730,7 +735,7 @@ export default function DefinitionDiagram({ graph, label, overlay, heat, marks, 
             {layout.data !== undefined ? (
               <g className="dg-data-layer">
                 {layout.data.links.map((link) => <DataLine key={link.id} link={link} marker={marker} />)}
-                {layout.data.items.map((item) => <DataSymbol key={item.id} item={item} kindLabel={t(item.kind === 'dataStore' ? 'diagram.data.store' : 'diagram.data.object')} />)}
+                {layout.data.items.map((item) => <DataSymbol key={item.id} item={item} kindLabel={t(DATA_KIND_KEY[item.kind])} />)}
               </g>
             ) : null}
             <g>{layout.nodes.filter((node) => node.container?.open !== true).map((node) => (

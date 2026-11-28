@@ -410,6 +410,8 @@ export const en = {
   'diagram.data.object': 'Data object',
   'diagram.note': 'Note',
   'diagram.group': 'Group',
+  'diagram.data.input': 'Data input',
+  'diagram.data.output': 'Data output',
   'diagram.data.store': 'Data store',
   'diagram.fit': 'Fit',
   'diagram.fitAt': 'Fit · {percent} %',

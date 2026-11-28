@@ -412,6 +412,8 @@ export const vi: Record<MessageKey, string> = {
   'diagram.data.object': 'Đối tượng dữ liệu',
   'diagram.note': 'Ghi chú',
   'diagram.group': 'Nhóm',
+  'diagram.data.input': 'Dữ liệu vào',
+  'diagram.data.output': 'Dữ liệu ra',
   'diagram.data.store': 'Kho dữ liệu',
   'diagram.fit': 'Vừa khung',
   'diagram.fitAt': 'Vừa khung · {percent} %',
