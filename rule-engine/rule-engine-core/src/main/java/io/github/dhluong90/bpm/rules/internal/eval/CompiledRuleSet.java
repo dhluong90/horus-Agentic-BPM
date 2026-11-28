@@ -754,13 +754,15 @@ public final class CompiledRuleSet {
             return new Expr.Literal(Boolean.FALSE);
         }
         Expr expr = located.expr();
-        ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(expr, inputs);
+        // One scope for the cell: each node's type is worked out once for both checks (#359).
+        ConditionTypes.Scope types = new ConditionTypes.Scope(inputs);
+        ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(expr, types);
         if (operands != null) {
             problems.add(located(ruleId, input, ExpressionError.TYPE_MISMATCH, operands.message(),
                     located.position(operands.node()) - shift));
             return expr;
         }
-        String problem = ConditionTypes.conditionProblem(expr, inputs);
+        String problem = ConditionTypes.conditionProblem(expr, types);
         if (problem != null) {
             problems.add(new Violation(ruleId, input, problem, ExpressionError.TYPE_MISMATCH.name()));
         }
@@ -871,6 +873,7 @@ public final class CompiledRuleSet {
     /** Parses one output cell (or an output default, with no rule id) and checks it against the output's type. */
     private static Expr output(Cell cell, OutputClause output, Map<String, Integer> slots, List<InputClause> inputs,
             String ruleId, Problems problems) {
+        ConditionTypes.Scope outputTypes = new ConditionTypes.Scope(inputs);
         Expr expr = switch (cell) {
             case Cell.Literal literal -> new Expr.Literal(literal.value());
             case Cell.Expression expression when expression.source() == null -> {
@@ -882,7 +885,7 @@ public final class CompiledRuleSet {
                 try {
                     Parser.Located located = Parser.parseLocated(expression.source(),
                             name -> slots.getOrDefault(name, -1), null, problems.functions);
-                    ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(located.expr(), inputs);
+                    ConditionTypes.TypeProblem operands = ConditionTypes.operandProblem(located.expr(), outputTypes);
                     if (operands != null) {
                         problems.add(located(ruleId, output.name(), ExpressionError.TYPE_MISMATCH,
                                 "output " + output.name() + ": " + operands.message(),
@@ -897,7 +900,7 @@ public final class CompiledRuleSet {
                 }
             }
         };
-        String problem = ConditionTypes.outputProblem(expr, output, inputs);
+        String problem = ConditionTypes.outputProblem(expr, output, outputTypes);
         if (problem != null) {
             problems.add(new Violation(ruleId, output.name(), problem, ExpressionError.TYPE_MISMATCH.name()));
         }

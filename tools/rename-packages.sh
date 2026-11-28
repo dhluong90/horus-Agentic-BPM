@@ -241,7 +241,7 @@ cmd_flyway_check() {
   build_classpath "$ROOT" "$work/cp-new.txt"
 
   FC_CONTAINER=$(docker run -d -e POSTGRES_PASSWORD=rename -e POSTGRES_DB=host -p 127.0.0.1::5432 \
-    "${POSTGRES_IMAGE:-postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857}")
+    "${POSTGRES_IMAGE:-postgres@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d}")
   port=$(docker port "$FC_CONTAINER" 5432/tcp | head -1 | sed 's/.*://')
   for _ in $(seq 1 60); do docker exec "$FC_CONTAINER" pg_isready -U postgres -d host >/dev/null 2>&1 && break; sleep 1; done
   url="jdbc:postgresql://127.0.0.1:$port/host"

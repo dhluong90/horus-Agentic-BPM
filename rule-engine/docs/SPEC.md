@@ -57,7 +57,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **When:** Import it, or call `validate` or `requestPublish` on a stored draft.
 - **Then:** Validation fails with row ID (`R1`), column, a stable `code` (`UNKNOWN_INPUT`, `TYPE_MISMATCH`, `FORBIDDEN_CONSTRUCT`) and the character position in the cell as written; status remains `DRAFT`; version cannot transition to `PENDING_APPROVAL` or `PUBLISHED`. A forbidden construct is refused before anything inside it is bound or evaluated. Operands are checked under every operator, in conditions and in output cells computed from inputs. A table whose worst-case step count (the sum of its node counts: every condition, plus the outputs of the rules its hit policy can evaluate) is over the host's step budget is refused the same way with code `EVALUATION_BUDGET_EXCEEDED` on the first rule from which it is over, using the limits evaluation will apply, not the defaults. A cell whose tree is deeper than 64 levels, a left-associative chain such as `a + a + ...` included, is `EXPRESSION_TOO_DEEP`. Failures that depend on the input stay at evaluation and fail closed: a currency mismatch against an input, division by zero, money overflow.
 - **Example:** `when: { balance: "balance + 100 > 0" } -> 422 VALIDATION_FAILED, R1, column balance, TYPE_MISMATCH at position 8 ("+ is not defined for money and number: write the number with a currency, for example 100 VND")`.
-- **Test ID:** `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` (`RLE_004_*` in `ExpressionValidationTest`, `ExpressionTypeCheckPropertiesTest`)
+- **Test ID:** `RLE_004_publish_rejects_unparsable_or_ill_typed_expressions` (`RLE_004_*` in `ExpressionValidationTest`, `ExpressionTypeCheckPropertiesTest`); the cost of the check (#359): `RLE_004_a_5000_rule_import_with_64_level_cells_works_out_each_nodes_type_once` (the type of each node is worked out once per cell, bottom-up, so checking an import takes time in proportion to its size; what is accepted or refused, the codes and the positions do not change)
 
 ### RLE-082 A host sets the evaluation step budget and time backstop, and a decision past them fails with a named reason
 - **Traces to:** `TR-SEC-01`, `TR-STD-23`, `TR-DET-01`
@@ -1125,9 +1125,9 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Kind:** control
 - **Given:** Rule set `minor-review` with input `nationalId` (`mask: true`) loaded at start-up through `definitions`. Case A: no `horus.bpm.rules.masking.hmac-key`. Case B: a Base64 key that decodes to 31 bytes. Case C: a Base64 key `k32` that decodes to 32 bytes, with log capture on.
 - **When:** The host starts in each case; in case C it evaluates `minor-review` with `nationalId = "079090001234"`, reads the decision through `GET /decisions/{id}` and its explanation, and computes HMAC-SHA256 of `079090001234` under `k32` in the test.
-- **Then:** Cases A and B fail start-up with a message that names `horus.bpm.rules.masking.hmac-key` and the rule set `minor-review`, and no decision is accepted. The check covers every version that is not retired, in every tenant, and an input masked by the tenant's `decision-log.mask-default` as well as by `mask: true`; a tenant with its own key setting (`masking.tenants.<tenant>.hmac-key`) is checked against that key only. Case C starts; no log line, response body, problem body, event or metric label contains `k32` or `079090001234`; the stored `masked_inputs.nationalId` equals `hmac:`, the key id (`k1` by default), `:` and the hex of the HMAC-SHA256, under the tenant's HKDF subkey of `k32` (DESIGN section 6), of `079090001234`, which the test computes on its own, so an exact-match lookup by the masked value finds the decision (`RLE-012`). Key ids (#281, `TR-SEC-10`): two keys with the same id for one tenant (or among the host keys), a tenant key id equal to a host key id, or a previous key equal to a configured key fail start-up naming the setting and never the key; a key id already recorded in `rle_masking_key_check` with a different check value fails start-up naming the key id and both check values, never the key; a key id recorded for the host and then configured for a tenant (for example `bank-a` taking `k1` after the host retired it), or the reverse, fails start-up and records nothing; a tenant configured as `*` fails start-up naming the setting; and a host `MaskingPolicy` that hands out a key for a tenant with live rule sets without declaring it in `configuredKeys()` fails start-up naming the policy class, the tenant and the key id.
+- **Then:** Cases A and B fail start-up with a message that names `horus.bpm.rules.masking.hmac-key` and the rule set `minor-review`, and no decision is accepted. The check covers every version that is not retired, in every tenant, and an input masked by the tenant's `decision-log.mask-default` as well as by `mask: true`; a tenant with its own key setting (`masking.tenants.<tenant>.hmac-key`) is checked against that key only. Case C starts; no log line, response body, problem body, event or metric label contains `k32` or `079090001234`; the stored `masked_inputs.nationalId` equals `hmac:`, the key id (`k1` by default), `:` and the hex of the HMAC-SHA256, under the tenant's HKDF subkey of `k32` (DESIGN section 6), of `079090001234`, which the test computes on its own, so an exact-match lookup by the masked value finds the decision (`RLE-012`). Key ids (#281, `TR-SEC-10`): two keys with the same id for one tenant (or among the host keys), a tenant key id equal to a host key id, or a previous key equal to a configured key fail start-up naming the setting and never the key; a key id already recorded in `rle_masking_key_check` with a different check value fails start-up naming the key id and both check values, never the key; a key id recorded for the host and then configured for a tenant (for example `bank-a` taking `k1` after the host retired it), or the reverse, fails start-up and records nothing; a tenant configured as `*` fails start-up naming the setting; and a host `MaskingPolicy` that hands out a key for a tenant with live rule sets without declaring it in `configuredKeys()` fails start-up naming the policy class, the tenant and the key id. A key that start-up never saw (a host policy that declares nothing, a rule set imported after start-up) is checked the first time `hmacKey(tenant)` returns it to write a decision with a masked input (#340): its check value is recorded or compared by scope and key id in a short transaction of its own, a key id first seen with other bytes (or recorded for the host with another check value) is refused as `422 EVALUATION_ERROR` with `error_code = MASKING_KEY_MISMATCH`; the `detail` is the code and the rule set only (no key id, check value, tenant or key), because a check value is a key-derived confirmation value that would let a caller test guesses offline; the server log names the tenant, rule set and key id with the check values withheld; no plain value is stored; the result is remembered, so 1,000 later decisions read the check value from the database once.
 - **Example:** `no key -> start-up fails naming the key setting and minor-review; 31-byte key -> fails; 32-byte key -> starts, 0 occurrences of key or plain value in logs and responses; k1 back with other bytes -> fails naming host masking key id k1`.
-- **Test ID:** `RLE_035_masking_key_required_at_startup_and_never_leaked`
+- **Test ID:** `RLE_035_masking_key_required_at_startup_and_never_leaked`; first use (#340, `TR-SEC-10`): `TR_SEC_10_the_refusal_an_api_caller_sees_is_a_code_and_the_rule_set_and_no_check_value`, `TR_SEC_10_the_first_decision_with_a_key_id_first_seen_with_other_bytes_is_refused_and_logs_no_plain_value`, `TR_SEC_10_a_key_returned_again_is_checked_against_the_database_once_for_a_thousand_decisions`, `TR_SEC_10_a_declared_host_key_is_recorded_under_the_host_scope_at_first_use_for_a_tenant_without_rule_sets`, `TR_SEC_10_a_key_first_used_after_start_up_is_checked_against_the_id_recorded_for_the_host`
 
 ### RLE-036 Every Rule Engine REST error is a Problem Details body with a stable code
 - **Traces to:** `TR-SEC-08`
@@ -1285,6 +1285,74 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - An unknown `expressionLanguage` or `typeLanguage` is `422 EXPRESSION_LANGUAGE_UNSUPPORTED` with the element, its line and its stage (`not planned`) in `unsupportedElements`.
 - **Example:** `fees.dmn with BKM and decision service -> 422 DMN_UNSUPPORTED_ELEMENT, 4 entries`.
 - **Test ID:** `RLE_061_dmn_elements_outside_the_stage_are_listed_with_id_line_and_stage_in_document_order`, `RLE_061_a_wire_to_input_data_is_not_a_refusal`, `RLE_061_at_most_100_entries_are_listed_and_the_rest_set_the_truncated_flag`, `RLE_061_ids_lose_control_characters_and_are_cut_at_200_characters`, `RLE_061_an_unknown_expression_language_is_refused_with_its_line_and_stage`, `RLE_061_each_entry_carries_element_id_line_stage_and_message_in_unsupported_elements`, `RLE_061_a_list_over_100_entries_is_cut_and_says_so`, `RLE_061_dmn_elements_outside_the_stage_are_listed_and_nothing_is_stored`
+
+### RLE-078 A decision table saved by a modelling tool imports as a draft and evaluates as its author expects
+- **Traces to:** `TR-STD-25`, `TR-STD-01`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** Tenant `bank-a`; caller `lan` holds `rules:author`. `card-fee-modeller.dmn` (DMN 1.3, as a widely used modeller writes it: generated rule ids, labels, an empty cell, DMNDI) has decision id `card-fee`, inputs `tier` (string) and `txCount` (integer), output `fee` (number) and hit policy `FIRST`; rows `"GOLD"` gives 0, `>= 3` gives 10000, `-` gives 50000. The corpus `rules/dmn/modellers/` holds one table each in the style of KIE/Drools (DMN 1.2, `UNIQUE`), Trisotech (DMN 1.4, `COLLECT`) and Camunda Modeler 5 (DMN 1.3, `FIRST`, date and boolean inputs, two outputs), each with an `.expected.json` of inputs, matched rule ids and outputs.
+- **When:** `lan` imports `card-fee-modeller.dmn`, then each corpus file; the first is exported as DMN and imported again as v2; a second person approves each; each expected case is evaluated.
+- **Then:**
+  - `card-fee` v1 is a `DRAFT` with `sourceFormat: DMN_XML` and the file kept byte for byte with its `sourceHash`, DMNDI included. Nothing is published by an import.
+  - Rule ids are those of the file, labels are kept, a DMN `number` becomes `decimal`.
+  - `{ tier: GOLD, txCount: 5 }` gives `fee 0`, `{ tier: SILVER, txCount: 3 }` gives 10000, `{ tier: SILVER, txCount: 2 }` gives 50000.
+  - Every corpus file imports and gives exactly its expected outputs and matched rules; export as DMN and import again keeps the canonical hash (`RLE-045`). Extension elements and foreign attributes change neither the table nor the hash.
+  - A rule id that does not start with a letter is mapped on import (`RLE-224`).
+- **Example:** `card-fee-modeller.dmn -> card-fee v1 DRAFT, fee 10000 for SILVER with 3 transactions`.
+- **Test ID:** `RLE_078_a_modeller_decision_table_imports_as_a_draft_and_evaluates_as_expected`
+
+### RLE-079 Anything the release cannot import is refused by name, with its line and the stage that adds it
+- **Traces to:** `TR-STD-04`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** The table of `RLE-078`, varied one feature at a time.
+- **When:** `lan` imports it with: hit policy `PRIORITY`, `ANY`, `RULE ORDER` or `OUTPUT ORDER`; `COLLECT` with `aggregation="SUM"`; an output entry `age * 2`; an input expression `applicant.age`; `typeRef="tAge"`; a `businessKnowledgeModel`; a `literalExpression` decision; two decisions; decision id `Decision_1`; `expressionLanguage="javascript"`; a CMMN root; the input entries `? > 18`, `abs(-20)`, `!= 18`, `> 18 and < 65` and `date("2026-02-30")`.
+- **Then:**
+  - Each is refused and nothing is stored: no version and no source.
+  - The message names the feature, its line and the stage that adds it where one does ("Hit policy PRIORITY arrives in stage S1"); an element outside the table is listed as `{ element, elementId, line, stage }` (`RLE-061`); a cell names its rule and column (`RLE-041`).
+  - `Decision_1` is refused with "give the decision a kebab-case id such as card-fee", because the decision id becomes the rule set name.
+  - Nothing is dropped or ignored silently.
+- **Example:** `hitPolicy="PRIORITY" -> 422 "Hit policy PRIORITY arrives in stage S1 (line 5)"`.
+- **Test ID:** `RLE_079_unsupported_dmn_content_is_refused_by_name_with_line_and_stage`
+
+### RLE-080 A DMN file is read safely and within limits, in the caller's tenant only
+- **Traces to:** `TR-SEC-07`, `TR-TEN-01`, #121
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Files with a DTD declaring an external entity, a billion-laughs entity chain, elements nested 40 deep, a 70,000-character cell, 1,048,577 bytes, and text that is not well-formed; callers `dan` with `rules:read` only and `binh` of `bank-b`.
+- **When:** Each file is imported; `dan` imports the valid table; `binh` reads `card-fee` after `lan`'s import in `bank-a`.
+- **Then:**
+  - The DTD files are refused with "DTDs are not allowed in a DMN document" and no entity is resolved; the deep, long and malformed files are refused naming the limit (depth 32, text 65,536 characters); the large file is `413 PAYLOAD_TOO_LARGE`.
+  - `dan` gets `403 PERMISSION_DENIED` (`RLE-044`); `binh` gets `404 RULE_SET_NOT_FOUND`. Nothing is stored in a refused case.
+- **Example:** `DOCTYPE with SYSTEM "file:///etc/passwd" -> 422, nothing read`.
+- **Test ID:** `RLE_080_dmn_files_are_read_safely_within_limits_and_per_tenant`
+
+### RLE-081 An imported model evaluates in strict mode, keeps one hash with YAML, and refuses the spec error mode
+- **Traces to:** `TR-STD-03`, `TR-STD-25`, PD-125, PD-143, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `card-fee-modeller.dmn` and a YAML document with the same inputs, output, labels, rule ids and cells.
+- **When:** Both are imported, in two tenants; then the DMN file is imported with the root attribute `horus:errorMode` set to `strict`, `spec` and `lenient`.
+- **Then:**
+  - Both versions have the same `canonical_hash`; the canonical document carries no `errorMode`, because strict is what every schema version 1 rule set evaluates in (`RLE-096`).
+  - `strict` keeps the hash. `spec` is refused with its line and "is added in stage S1" and any other value is refused, never read as if absent.
+- **Example:** `horus:errorMode="spec" -> 422 "horus:errorMode spec is added in stage S1" (line 2)`.
+- **Test ID:** `RLE_081_imported_model_records_its_error_mode_and_keeps_hash_identity`
+
+### RLE-224 A DMN rule id that does not start with a letter is mapped on import, and export gives the original id back
+- **Traces to:** `TR-STD-25`, `RLE-024`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A table whose rules have the ids `_5f3a1` and `_9c2b7` (a modeller writes ids that start with an underscore), and a second table whose rules `_a1` and `r_a1` both exist. The v1 rule id pattern `^[A-Za-z][A-Za-z0-9_-]{0,63}$` (`RLE-024`) is unchanged for YAML, JSON and CSV.
+- **When:** Each table is imported as DMN, evaluated, exported as DMN and imported again.
+- **Then:**
+  - The mapping is made in the DMN reader only and is deterministic: a valid id is kept; otherwise characters other than letters, digits, `_` and `-` are removed, `r` is put in front when the result does not start with a letter, and the result is cut at 64 characters. `_5f3a1` becomes `r_5f3a1`.
+  - The original id is kept in the rule description as a trailing note `(DMN id _5f3a1)`, so the diff, the decision log and the cockpit show where the row came from.
+  - Two ids that map to the same id are refused with `422 VALIDATION_FAILED`, problem code `DMN_RULE_ID_COLLISION`, naming both ids and the line; nothing is stored. Two rules with the same id stay `Duplicate rule id`.
+  - Export writes the original id and the description without the note; importing that file again gives the same canonical hash.
+  - An id with other characters (a space, a non-ASCII letter) is refused as before.
+- **Example:** `_5f3a1 -> r_5f3a1 with description "(DMN id _5f3a1)"; _a1 with r_a1 -> DMN_RULE_ID_COLLISION`.
+- **Test ID:** `RLE_224_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written`, `RLE_224_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code`
 
 ## Host-Registered Functions (RE-F-27, PD-119)
 

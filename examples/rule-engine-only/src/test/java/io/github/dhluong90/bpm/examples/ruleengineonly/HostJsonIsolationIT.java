@@ -151,7 +151,7 @@ class HostJsonIsolationIT {
             body = bound;
         }
         HttpRequest.Builder request = HttpRequest.newBuilder(
-                        URI.create("http://localhost:" + environment.getProperty("local.server.port") + path))
+                        URI.create("http://127.0.0.1:" + environment.getProperty("local.server.port") + path))
                 .header("Authorization", TestTokens.bearer(user))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
         if (contentType != null) {

@@ -15,6 +15,19 @@ public interface TransactionRunner {
     <T> T inTransaction(Supplier<T> work);
 
     /**
+     * Runs work in a transaction of its own, committed before the caller's, so a short write never waits on or holds
+     * a lock beyond itself (the first-use masking key check, TR-SEC-10). The default runs in the caller's transaction,
+     * for stores without transactions.
+     *
+     * @param work the work
+     * @param <T> the result type
+     * @return the result
+     */
+    default <T> T inIndependentTransaction(Supplier<T> work) {
+        return inTransaction(work);
+    }
+
+    /**
      * Runs a read in a read-only transaction. Used off the request path, by the cursor key refresh. The default
      * runs in an ordinary transaction, for stores without transactions.
      *

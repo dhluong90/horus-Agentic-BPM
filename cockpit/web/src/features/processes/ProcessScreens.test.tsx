@@ -221,6 +221,14 @@ async function openTimeline(instanceId: string) {
 
 const rowTexts = (table: HTMLElement) => within(table).getAllByRole('row').slice(1).map((row) => row.textContent);
 
+describe('#609 the timeline step cell is a table cell', () => {
+  it('the Step column is not styled as the rule history grid, so its words flow on one line', async () => {
+    const table = await openTimeline(BOOKED_INSTANCE_ID);
+    expect(table.querySelectorAll('td.timeline__step')).toHaveLength(0);
+    expect(table.querySelectorAll('td.timeline__cell').length).toBeGreaterThan(0);
+  });
+});
+
 describe('#518 the result variable of a script step comes from the history', () => {
   it('CKP_033_the_timeline_names_the_variable_a_script_step_set_from_its_history_entry', async () => {
     const table = await openTimeline(BOOKED_INSTANCE_ID);

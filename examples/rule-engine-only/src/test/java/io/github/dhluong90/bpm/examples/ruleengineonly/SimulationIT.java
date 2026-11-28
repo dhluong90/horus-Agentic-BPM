@@ -214,7 +214,7 @@ class SimulationIT {
     }
 
     private Reply send(String bearer, String path, String contentType, byte[] body) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", bearer)
                 .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
