@@ -1387,7 +1387,7 @@ paths:
         The form the task's step declares in the definition (PRE-031), resolved for this task: the JSON Schema of the
         result (types `string`, `integer`, `number`, `boolean`, `enum`, `format: date` or `date-time`, and the money
         object `{currency, amount}`; one root `if`/`then`/`else` for a field required only in some cases), the display
-        hints (`order`, `widgets`, `labels` per locale, `readOnly`), and `data`, the values of the instance variables
+        hints (`order`, `widgets`, `labels` per locale, `readOnly`, and since `PRE-393` `options`, `units`, `formats`), and `data`, the values of the instance variables
         the schema declares. A field the schema marks `"mask": true` carries the placeholder `***` in `data` whenever
         the variable exists: the clear value never leaves the engine through a form (PRE-220). The caller must be an
         assignee, the claimer or hold `processes:task:manage`, otherwise `404 TASK_NOT_FOUND` (`PRE-358`). A step that declares a
@@ -3026,6 +3026,36 @@ components:
                     type: object
                     additionalProperties: { type: string, maxLength: 200 }
                 readOnly: { type: array, items: { type: string } }
+                options:
+                  type: object
+                  description: |
+                    PRE-393. Per enum field, per value: `{label: {locale: text}, consequence?: {locale: text}}`.
+                    Display only; the value sent on completion is the enum value.
+                  additionalProperties:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      required: [label]
+                      properties:
+                        label: { type: object, additionalProperties: { type: string, maxLength: 200 } }
+                        consequence: { type: object, additionalProperties: { type: string, maxLength: 300 } }
+                units:
+                  type: object
+                  description: PRE-393. Per field, a suffix per locale such as `months`
+                  additionalProperties:
+                    type: object
+                    additionalProperties: { type: string, maxLength: 30 }
+                formats:
+                  type: object
+                  description: |
+                    PRE-393. Per field, display of a number or amount: `grouping` (locale-aware thousands), and
+                    at most one of `currency` (fixed ISO 4217 code) and `currencyFrom` (a declared field holding it).
+                  additionalProperties:
+                    type: object
+                    properties:
+                      grouping: { type: boolean }
+                      currency: { type: string, pattern: '^[A-Z]{3}$' }
+                      currencyFrom: { type: string }
               additionalProperties: true
             data:
               type: object

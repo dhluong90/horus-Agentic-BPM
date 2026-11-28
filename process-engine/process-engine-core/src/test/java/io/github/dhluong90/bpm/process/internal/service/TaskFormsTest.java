@@ -122,4 +122,64 @@ class TaskFormsTest {
         assertThat(forms.checkSchema(Map.of("type", "string"))).contains("$: type must be object");
         assertThat(forms.checkSchema(reviewForm())).isEmpty();
     }
+
+    private static Map<String, Object> loanForm() {
+        Map<String, Object> properties = new LinkedHashMap<>();
+        properties.put("decision", Map.of("enum", List.of("APPROVE", "REJECT")));
+        properties.put("termMonths", Map.of("type", "integer"));
+        properties.put("amount", Map.of("type", "integer"));
+        properties.put("currency", Map.of("type", "string"));
+        return Map.of("type", "object", "properties", properties);
+    }
+
+    private static Map<String, Object> goodHints() {
+        return Map.of(
+                "options", Map.of("decision", Map.of(
+                        "APPROVE", Map.of("label", Map.of("en", "Approve", "vi", "Phê duyệt"),
+                                "consequence", Map.of("en", "The loan is disbursed.", "vi", "Khoản vay được giải ngân.")),
+                        "REJECT", Map.of("label", Map.of("en", "Reject", "vi", "Từ chối")))),
+                "units", Map.of("termMonths", Map.of("en", "months", "vi", "tháng")),
+                "formats", Map.of("amount", Map.of("currencyFrom", "currency", "grouping", true)));
+    }
+
+    @Test
+    void PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted() {
+        assertThat(TaskForms.checkHints(goodHints(), loanForm())).isEmpty();
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currency", "VND"))), loanForm()))
+                .isEmpty();
+    }
+
+    @Test
+    void PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused() {
+        Map<String, Object> ghostValue = Map.of("options", Map.of("decision",
+                Map.of("MAYBE", Map.of("label", Map.of("en", "Maybe")))));
+        Map<String, Object> notEnum = Map.of("options", Map.of("termMonths",
+                Map.of("12", Map.of("label", Map.of("en", "One year")))));
+        Map<String, Object> noLabel = Map.of("options", Map.of("decision",
+                Map.of("APPROVE", Map.of("consequence", Map.of("en", "Disbursed")))));
+        Map<String, Object> extra = Map.of("options", Map.of("decision",
+                Map.of("APPROVE", Map.of("label", Map.of("en", "Approve"), "color", "green"))));
+
+        for (Map<String, Object> bad : List.of(ghostValue, notEnum, noLabel, extra)) {
+            assertThat(TaskForms.checkHints(bad, loanForm())).hasSize(1).first().asString().startsWith("options:");
+        }
+    }
+
+    @Test
+    void PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named() {
+        assertThat(TaskForms.checkHints(Map.of("units", Map.of("ghost", Map.of("en", "months"))), loanForm()))
+                .hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("units", Map.of("termMonths", Map.of("EN", "months"))), loanForm()))
+                .hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currency", "vnd"))), loanForm()))
+                .hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount",
+                Map.of("currency", "VND", "currencyFrom", "currency"))), loanForm())).hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("currencyFrom", "ghost"))),
+                loanForm())).hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("formats", Map.of("amount", Map.of("pattern", "#,##0"))), loanForm()))
+                .hasSize(1);
+        assertThat(TaskForms.checkHints(Map.of("palette", "dark"), loanForm())).containsExactly(
+                "has an unknown member palette");
+    }
 }
