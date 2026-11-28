@@ -578,6 +578,16 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Example:** `options.decision.APPROVE.label.vi -> "Phê duyệt"; amount 250000000 + currency VND -> shown "250.000.000 ₫" in vi`.
 - **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named`, `PRE_393_a_currency_must_be_a_real_iso_4217_code`, `PRE_393_currency_from_must_name_another_field_that_is_not_masked` (`TaskFormsTest`)
 
+### PRE-394 A list read that runs longer than the statement timeout is stopped with `QUERY_TIMEOUT`, and returns no partial page
+- **Traces to:** `TR-PERF-07`, ADR-0015, #254
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Tenant `bank-a` with `query.statement-timeout` of 500 ms (2 s by default); another connection holds an exclusive lock on `pre_definition`, then on `pre_instance`, so a list read waits; a host `@Transactional` method has inserted one row of its own and then calls the list.
+- **When:** `GET /definitions` and `GET /instances` are read while the lock is held; then the lock is released and `GET /definitions` is read again.
+- **Then:** Each read is stopped by the database after the limit and answered `503 QUERY_TIMEOUT` with a correlation id and no items; the host transaction is untouched and commits its row, because the read runs in a read-only transaction of its own that never joins it; once the lock is gone the list answers, and `SHOW statement_timeout` on a pooled connection is back to the server value, because the limit is transaction-local. A page that does answer is complete: it carries `nextCursor` when more items follow and none on the last page.
+- **Example:** `GET /instances with pre_instance locked -> 503 QUERY_TIMEOUT after 0.5 s`.
+- **Test ID:** `PRE_394_a_definition_list_slower_than_the_limit_is_stopped_with_a_named_code`, `PRE_394_an_instance_list_slower_than_the_limit_is_stopped_with_a_named_code`, `PRE_394_a_host_write_transaction_around_the_timed_out_read_is_untouched`, `PRE_394_the_list_answers_once_the_lock_is_gone_and_the_limit_does_not_stay_on_the_connection` (`ReadTimeoutPostgresIT`), `TR_SEC_08_every_code_of_the_error_matrix_is_a_problem_with_code_correlation_id_and_type`
+
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
 - **Milestone:** M2
@@ -2962,7 +2972,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `<process id="wfp-6" isExecutable="false">` -> `DRAFT`, `NOT_EXECUTABLE_VIEW_ONLY`; request for publish -> `422 NOT_EXECUTABLE`.
 - **Test ID:** `PRE_392_a_process_marked_not_executable_is_a_view_only_draft_and_publish_refuses_it` (`OpenBindingsTest`); `PRE_392_a_process_that_says_it_is_not_executable_is_read_for_viewing_only` (`OpenBindingsReaderTest`)
 
-### PRE-394 Each step the kernel applies is a span with ids, versions, codes and outcomes only
+### PRE-518 Each step the kernel applies is a span with ids, versions, codes and outcomes only
 - **Traces to:** `TR-OBS-03`, `TR-SEC-05`
 - **Milestone:** M3
 - **Kind:** control
@@ -2974,4 +2984,24 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - No span carries a business key, instance id, variable, input, output or masked value. `horus.tenant_id` is present only when `horus.bpm.tracing.tenant-attribute` is `true` (default).
   - A host without a tracer starts and runs unchanged: the engine uses a no-op port. A tracer that throws never fails or rolls back a step.
 - **Example:** `POST /api/cards/applications -> horus.process.step START OK, child horus.rule.evaluate; no attribute contains TRACE-APP-7731`.
-- **Test ID:** `PRE_394_a_step_is_one_span_with_the_definition_the_kind_and_the_outcome`, `PRE_394_the_tenant_attribute_can_be_turned_off_and_a_failure_records_its_code_and_type_never_its_message` (`ProcessEngineTracingTest`); `PRE_394_RLE_228_a_started_application_produces_step_and_evaluation_spans_with_ids_and_codes_only` (`TracingSpansIT`)
+- **Test ID:** `PRE_518_a_step_is_one_span_with_the_definition_the_kind_and_the_outcome`, `PRE_518_the_tenant_attribute_can_be_turned_off_and_a_failure_records_its_code_and_type_never_its_message` (`ProcessEngineTracingTest`), `PRE_518_a_step_that_ends_on_an_Error_leaves_no_current_span_for_the_next_tenant` (`ProcessEngineTracingTest`); `PRE_518_RLE_228_a_started_application_produces_step_and_evaluation_spans_with_ids_and_codes_only` (`TracingSpansIT`)
+
+### PRE-519 An Error thrown in a step ends its span, so no trace is stitched across tenants
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`, `TR-TEN-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A tracing binding whose current span stays on the thread until the step's span ends, and a service task whose handler throws an `Error`.
+- **When:** The step fails with the `Error`, then the next unit of work, of another tenant, starts on the same thread.
+- **Then:** Every span that started has ended, the failed one with outcome `FAILED` and the `Error` class as its failure; no span is current on the thread; the next span has no parent.
+- **Example:** `AssertionError in bank-a step -> span ended FAILED; bank-b START has parent null`.
+- **Test ID:** `PRE_519_an_error_thrown_in_a_step_ends_its_span_so_the_next_unit_of_work_of_another_tenant_has_no_parent` (`ProcessServicesQaTest`)
+
+### PRE-520 Trace export is off until a bank turns it on
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The example host started with no tracing property.
+- **When:** It takes traffic that makes engine spans.
+- **Then:** The context holds no span exporter bean, and nothing connects to the default OTLP ports 4317 and 4318.
+- **Example:** `20 POST /api/cards/applications -> 0 connections on 4317 and 4318`.
+- **Test ID:** `PRE_520_with_no_tracing_property_nothing_is_exported_and_no_exporter_connects_anywhere` (`TracingExportOffIT`)

@@ -63,6 +63,10 @@ jobs:
       - name: Archive check of the github-release job (tampered, trial, other commit, dirty, duplicate names)
         run: tools/release/test-release-upload.sh
 
+      # #664: the attestation gate of the attest job, run against a fake GitHub CLI. Nothing is signed.
+      - name: Dry run of the attestation gate (missing, unsigned, mismatched or wrong-tag statements are refused)
+        run: tools/release/test-release-verify.sh
+
   release-dry-run:
     name: Release dry run (cockpit bundle, artifacts, release SBOM)
     runs-on: ubuntu-latest
@@ -257,18 +261,47 @@ jobs:
           (( jars > 0 )) || { echo "ERROR: no jar under maven-repo; nothing is attested."; exit 1; }
           echo "SHA256SUMS: $(wc -l < SHA256SUMS | tr -d ' ') file(s) match. Subjects: $jars jar(s), $poms POM(s)."
 
-      - name: Build provenance for every staged jar and POM
+      - name: Build provenance for every staged jar and POM, SHA256SUMS, BUILD-INFO.json and bom-release.json
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: |
             ${{ runner.temp }}/archive/release/maven-repo/**/*.jar
             ${{ runner.temp }}/archive/release/maven-repo/**/*.pom
+            ${{ runner.temp }}/archive/release/SHA256SUMS
+            ${{ runner.temp }}/archive/release/BUILD-INFO.json
+            ${{ runner.temp }}/archive/release/bom-release.json
 
       - name: SBOM attestation, bom-release.json over every staged jar
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
         with:
           subject-path: ${{ runner.temp }}/archive/release/maven-repo/**/*.jar
           sbom-path: ${{ runner.temp }}/archive/release/bom-release.json
+
+      # #664, #258: the gate. Every jar and POM must verify against its provenance statement and every jar
+      # against the SBOM statement, signed by this workflow at this tag. A missing or invalid statement fails
+      # this job, and github-release needs this job, so no Release is created. The script needs no checkout.
+      - name: Verify the signatures and attestations before anything is published
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_DIGEST: ${{ github.sha }}
+          ARCHIVE: ${{ runner.temp }}/archive/release
+          SCRIPT_REF: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          curl -sSfL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw+json" \
+            -o "$RUNNER_TEMP/verify-release-attestations.sh" \
+            "https://api.github.com/repos/$REPO/contents/tools/release/verify-release-attestations.sh?ref=$SCRIPT_REF"
+          chmod +x "$RUNNER_TEMP/verify-release-attestations.sh"
+          "$RUNNER_TEMP/verify-release-attestations.sh" "$ARCHIVE" | tee "$RUNNER_TEMP/verify.out"
+          {
+            echo "### Attestation gate"
+            echo
+            echo '```'
+            tail -n 1 "$RUNNER_TEMP/verify.out"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   github-release:
     # TR-SEC-06: a passing tag run becomes a GitHub Release, with the exact bytes the release build staged

@@ -29,7 +29,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * Spans of the engines in a host's trace (#114, TR-OBS-03, PRE-394, RLE-228, TR-SEC-05): a card application started
+ * Spans of the engines in a host's trace (#114, TR-OBS-03, PRE-518, RLE-228, TR-SEC-05): a card application started
  * over HTTP produces process step spans and rule evaluation spans with bounded attributes, and no span carries the
  * application id, the customer id or any other value of the request. Export is switched on here only so the in-memory
  * exporter sees the spans; the host's default is off.
@@ -71,7 +71,7 @@ class TracingSpansIT {
     InMemorySpanExporter exporter;
 
     @Test
-    void PRE_394_RLE_228_a_started_application_produces_step_and_evaluation_spans_with_ids_and_codes_only() throws Exception {
+    void PRE_518_RLE_228_a_started_application_produces_step_and_evaluation_spans_with_ids_and_codes_only() throws Exception {
         // When a teller starts a card application, which prices the card and opens the review process
         HttpResponse<String> submitted = send("tuan", "{\"applicationId\":\"" + APPLICATION_ID + "\",\"customerId\":\""
                 + CUSTOMER_ID + "\"}");

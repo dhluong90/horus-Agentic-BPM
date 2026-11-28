@@ -140,7 +140,8 @@ final class TestEngine {
     private TestEngine(Builder b) {
         DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
-        ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager);
+        ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager,
+                org.springframework.jdbc.core.simple.JdbcClient.create(ds));
         this.replicaDataSource = ds;
         this.replicaTransactions = tx;
         this.replicaClock = b.clock;
@@ -189,6 +190,9 @@ final class TestEngine {
         }
         if (b.forms != null) {
             services.useFormRegistry(b.forms, b.formLinkOrigins);
+        }
+        if (b.readTimeout != null) {
+            services.useReadTimeout(b.readTimeout);
         }
         services.useMessageAdapter(b.messageAdapter);
         Map<String, io.github.dhluong90.bpm.process.spi.DataStoreAdapter> stores = new java.util.LinkedHashMap<>();
@@ -323,6 +327,7 @@ final class TestEngine {
         private final String replicaId;
         private final TestClock clock;
         private Duration lease = Duration.ofSeconds(60);
+        private Duration readTimeout;
         private int batchSize = 32;
         private Duration retryBackoff = Duration.ofSeconds(10);
         private boolean autoApprove = true;
@@ -385,6 +390,12 @@ final class TestEngine {
         /** Stores the diagram of an imported BPMN file as layout revision 1, as the starter does (#445). */
         Builder importedLayouts() {
             importedLayouts = true;
+            return this;
+        }
+
+        /** Limits the instance and definition lists to this long (PRE-394); unlimited by default. */
+        Builder readTimeout(Duration value) {
+            readTimeout = value;
             return this;
         }
 

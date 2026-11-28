@@ -242,6 +242,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     private volatile boolean configuredCursors;
+    /** Longest one list read of instances or definitions may run; null leaves it to the database (PRE-394). */
+    private volatile java.time.Duration readTimeout;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
     /** The host's task forms (PRE-031); none until the starter installs them, so no declared form is accepted. */
     private volatile TaskForms forms = TaskForms.NONE;
@@ -1461,8 +1463,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (after != null && !isKey(after)) {
             throw Cursors.invalid();
         }
-        List<DefinitionSummary> rows = transactions.inTransaction(() -> store.definitionKeys(tenant, after, limit + 1,
-                clock.instant()));
+        List<DefinitionSummary> rows = transactions.inReadTransaction(readTimeout, () -> store.definitionKeys(tenant,
+                after, limit + 1, clock.instant()));
         if (rows.size() <= limit) {
             return new Page<>(rows, null);
         }
@@ -1631,8 +1633,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Instant upper = to;
         Instant afterAt = afterStartedAt;
         String afterInstance = afterId;
-        List<InstanceRow> rows = transactions.inTransaction(() -> store.instances(tenant, statuses, q.definitionKey(),
-                lower, upper, afterAt, afterInstance, limit + 1));
+        List<InstanceRow> rows = transactions.inReadTransaction(readTimeout, () -> store.instances(tenant, statuses,
+                q.definitionKey(), lower, upper, afterAt, afterInstance, limit + 1));
         List<InstanceSummary> items = rows.stream().limit(limit).map(r -> new InstanceSummary(r.id(), r.definitionKey(),
                 r.definitionVersion(), r.businessKey(), r.status(), r.lockVersion(), r.startedBy(), r.startedAt(),
                 r.endedAt())).toList();
@@ -1641,6 +1643,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         InstanceSummary last = items.get(limit - 1);
         return new Page<>(items, cursors().sign(tenant, scope, "instances", last.startedAt() + "|" + last.id()));
+    }
+
+    /**
+     * Limits each list read of instances and definitions to {@code limit} in a read-only transaction of its own
+     * ({@code query.statement-timeout}, ADR-0015). A read that exceeds it fails with {@code 503 QUERY_TIMEOUT} and
+     * returns no partial page (PRE-394).
+     *
+     * @param limit the longest one statement of the read may run; positive
+     */
+    public void useReadTimeout(java.time.Duration limit) {
+        if (limit == null || limit.isNegative() || limit.isZero()) {
+            throw new IllegalArgumentException("The read timeout must be positive");
+        }
+        this.readTimeout = limit;
     }
 
     /**
@@ -2146,6 +2162,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String payloadJson = boundedJson(fields, "payload");
         String requestHash = Hashes.sha256Parts("message-correlate", caller, messageName, correlationKey, payloadJson);
         // A refusal throws, so the transaction rolls back with the idempotency claim: nothing is stored (#491).
+        try {
+            return correlateInTransaction(tenant, caller, messageName, correlationKey, fields, idempotencyKey, requestHash);
+        } catch (MessageNotCorrelatedException e) {
+            metrics.messageRefused("NOT_CORRELATED");
+            throw e;
+        } catch (MessageAmbiguousException e) {
+            metrics.messageRefused("AMBIGUOUS");
+            throw e;
+        }
+    }
+
+    private MessageDelivery correlateInTransaction(String tenant, String caller, String messageName,
+            String correlationKey, Map<String, Object> fields, String idempotencyKey, String requestHash) {
         return transactions.inTransaction(() -> idempotent(tenant, "message-correlate", idempotencyKey, requestHash,
                 () -> correlateOnce(tenant, caller, messageName, correlationKey, fields),
                 d -> Values.write(java.util.Map.of("outcome", d.outcome().name(),
@@ -5154,7 +5183,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private static void endStepSpan(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span, String outcome,
-            RuntimeException failure) {
+            Throwable failure) {
         try {
             span.end(outcome, failure instanceof ExecutionException e ? e.code() : null, failure);
         } catch (RuntimeException ignored) {
@@ -5504,7 +5533,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 Command command = item.command();
                 var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command));
                 String spanOutcome = "OK";
-                RuntimeException spanFailure = null;
+                Throwable spanFailure = null;
                 Transition t;
                 long appliedAt;
                 try {
@@ -5528,7 +5557,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
                         throw e;
                     }
-                } catch (RuntimeException e) {
+                } catch (RuntimeException | Error e) {
+                    // An Error ends the span too: a scope left open would parent the next unit of work, of any tenant.
                     spanOutcome = "FAILED";
                     spanFailure = e;
                     throw e;

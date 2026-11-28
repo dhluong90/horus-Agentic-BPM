@@ -186,7 +186,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
 | PRE-393 | `PRE_393_*` in `TaskFormsTest` | Unit | M3 | `TR-UI-02`, `TR-STD-03` | Done |
-| PRE-394 | `PRE_394_*` in `ProcessEngineTracingTest`; `TracingSpansIT` | Unit, integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
+| PRE-394 | `PRE_394_*` in `ReadTimeoutPostgresIT`; `TR_SEC_08_*` in `ProcessRestErrorMatrixTest` | Testcontainers: a list slowed by a table lock held on another connection, a host write transaction around the read | M3 | `TR-PERF-07` | Done (#254) |
+| PRE-518 | `PRE_518_*` in `ProcessEngineTracingTest`; `TracingSpansIT` | Unit, integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
+| PRE-519 | `PRE_519_*` in `ProcessServicesQaTest` | Unit | M3 | `TR-OBS-03`, `TR-TEN-01` | Done |
+| PRE-520 | `PRE_520_*` in `TracingExportOffIT` | Integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 | PRE-219 | `PRE_219_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Done (#79) |
 | PRE-220 | `PRE_220_*` in `TaskFormsTest`; `PRE_031_*` in `TaskFormTest` and `ProcessRestContractTest` | Unit, Testcontainers, WebMvC against `openapi.yaml` | M2 | `TR-SEC-05`, `TR-UI-02` | Done (#79) |
 | PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |

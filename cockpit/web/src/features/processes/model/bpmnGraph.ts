@@ -437,6 +437,12 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   const defaults = new Set<string>();
   const sinks: Sinks = { annotations: [], groups: [] };
   readContainer(process, undefined, nodes, edges, defaults, 0, sinks);
+  // A group drawn across several pools belongs to the collaboration, not to a process (MIWG B.1.0).
+  for (const collaboration of Array.from(document.getElementsByTagNameNS(BPMN, 'collaboration'))) {
+    for (const child of Array.from(collaboration.children)) {
+      if (child.localName === 'group' && child.namespaceURI === BPMN) sinks.groups.push({ id: child.getAttribute('id') ?? '', categoryValueRef: nonEmpty(child.getAttribute('categoryValueRef')) });
+    }
+  }
   const ids = new Set(nodes.map((node) => node.id));
   // A link throw is joined to the catch of the same name in the same container by a dashed line (#493).
   for (const thrown of nodes.filter((node) => node.type === 'intermediateThrowEvent:link' && node.linkName !== undefined)) {

@@ -7,13 +7,13 @@ import io.micrometer.tracing.test.simple.SimpleSpan;
 import io.micrometer.tracing.test.simple.SimpleTracer;
 import org.junit.jupiter.api.Test;
 
-/** The step span of PRE-394 on an in-memory tracer: bounded attributes, no message, tenant on request. */
+/** The step span of PRE-518 on an in-memory tracer: bounded attributes, no message, tenant on request. */
 class ProcessEngineTracingTest {
 
     private final SimpleTracer tracer = new SimpleTracer();
 
     @Test
-    void PRE_394_a_step_is_one_span_with_the_definition_the_kind_and_the_outcome() {
+    void PRE_518_a_step_is_one_span_with_the_definition_the_kind_and_the_outcome() {
         // Given the binding with the tenant attribute on
         ProcessTracing tracing = new ProcessEngineTracing(tracer, true);
 
@@ -30,7 +30,7 @@ class ProcessEngineTracingTest {
     }
 
     @Test
-    void PRE_394_the_tenant_attribute_can_be_turned_off_and_a_failure_records_its_code_and_type_never_its_message() {
+    void PRE_518_the_tenant_attribute_can_be_turned_off_and_a_failure_records_its_code_and_type_never_its_message() {
         // Given the binding with the tenant attribute off
         ProcessTracing tracing = new ProcessEngineTracing(tracer, false);
 
@@ -45,6 +45,23 @@ class ProcessEngineTracingTest {
                 .containsEntry("horus.error_type", "IllegalStateException");
         assertThat(span.getTags().values()).noneMatch(v -> v.contains("079090001234"));
         assertThat(span.getError()).hasMessage("ADAPTER_TIMEOUT").hasNoCause();
+    }
+
+    @Test
+    void PRE_518_a_step_that_ends_on_an_Error_leaves_no_current_span_for_the_next_tenant() {
+        // Given a step of one tenant that fails with an Error, not an Exception
+        ProcessTracing tracing = new ProcessEngineTracing(tracer, true);
+        tracing.startStep("bank-a", "loan-disbursement", 3, "START").end("FAILED", null,
+                new StackOverflowError());
+        assertThat(tracer.currentSpan()).isNull();
+
+        // When the next unit of work, of another tenant, starts on the same thread
+        tracing.startStep("bank-b", "loan-disbursement", 3, "START").end("OK", null, null);
+
+        // Then its span has no parent from the earlier span
+        assertThat(tracer.getSpans()).hasSize(2);
+        assertThat(tracer.getSpans().getLast().context().parentId()).isNullOrEmpty();
+        assertThat(tracer.getSpans()).allSatisfy(span -> assertThat(span.getEndTimestamp()).isNotNull());
     }
 
     private static SimpleSpan only(SimpleTracer tracer) {

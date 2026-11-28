@@ -65,4 +65,5 @@
 **Project**
 - [[Contributing]]
 - [[Technical stack|Technical-Stack]]
+- [[Metrics, alerts and dashboards|Metrics-Alerts-and-Dashboards]]
 - [[FAQ]]

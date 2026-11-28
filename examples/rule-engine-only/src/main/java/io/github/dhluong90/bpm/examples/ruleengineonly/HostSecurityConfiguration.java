@@ -89,6 +89,7 @@ class HostSecurityConfiguration {
         // send the same challenge.
         http.authorizeHttpRequests(requests -> requests
                         .requestMatchers("/actuator/health", "/actuator/health/**").permitAll()
+                        .requestMatchers(prometheusOnManagementPort(environment)).permitAll()
                         // The sign-in page with any query (?lang=vi, ?error, ?logout), and its own styles and script.
                         // Form login's permitAll() matches its URLs exactly, query included, so /login?lang=vi needs this.
                         .requestMatchers("/login", "/sign-in/**").permitAll()
@@ -263,5 +264,18 @@ class HostSecurityConfiguration {
             return authorities;
         });
         return converter;
+    }
+
+    /**
+     * The Prometheus scrape, only when it arrives on the management port ({@code management.server.port}, which
+     * deploy/observability sets and does not publish outside the compose network or the cluster). On the application's
+     * own port the endpoint stays behind the sign-in, so exposing it never opens it to the host's users' network.
+     */
+    static RequestMatcher prometheusOnManagementPort(Environment environment) {
+        RequestMatcher path = PathPatternRequestMatcher.withDefaults().matcher("/actuator/prometheus");
+        return request -> {
+            Integer management = environment.getProperty("local.management.port", Integer.class);
+            return management != null && request.getLocalPort() == management && path.matches(request);
+        };
     }
 }

@@ -26,12 +26,23 @@ final class ProcessEngineTracing implements ProcessTracing {
     @Override
     public ProcessTracing.Span startStep(String tenantId, String definitionKey, int definitionVersion, String stepKind) {
         io.micrometer.tracing.Span span = tracer.nextSpan().name(SPAN).start();
-        Tracer.SpanInScope scope = tracer.withSpan(span);
-        span.tag("horus.definition_key", definitionKey);
-        span.tag("horus.definition_version", Integer.toString(definitionVersion));
-        span.tag("horus.step_kind", stepKind);
-        if (tenantAttribute && tenantId != null) {
-            span.tag("horus.tenant_id", tenantId);
+        Tracer.SpanInScope scope;
+        try {
+            scope = tracer.withSpan(span);
+        } catch (Throwable t) {
+            span.end();
+            throw t;
+        }
+        try {
+            span.tag("horus.definition_key", definitionKey);
+            span.tag("horus.definition_version", Integer.toString(definitionVersion));
+            span.tag("horus.step_kind", stepKind);
+            if (tenantAttribute && tenantId != null) {
+                span.tag("horus.tenant_id", tenantId);
+            }
+        } catch (Throwable t) {
+            close(scope, span);
+            throw t;
         }
         return (outcome, errorCode, failure) -> {
             try {
@@ -44,13 +55,18 @@ final class ProcessEngineTracing implements ProcessTracing {
                     span.error(new TracedFailure(errorCode));
                 }
             } finally {
-                try {
-                    scope.close();
-                } finally {
-                    span.end();
-                }
+                close(scope, span);
             }
         };
+    }
+
+    /** Closes the scope and ends the span, whatever either throws, so no span stays current on the thread. */
+    private static void close(Tracer.SpanInScope scope, io.micrometer.tracing.Span span) {
+        try {
+            scope.close();
+        } finally {
+            span.end();
+        }
     }
 
     /** What a span records as its error: a code, never the message or stack of the real exception. */

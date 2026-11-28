@@ -1,0 +1,133 @@
+# Alert rules for a host that embeds the Process Engine and the Rule Engine (#659).
+# Thresholds are starting points for a pilot: change them to the bank's service levels, then run
+#   docker run --rm -v "$PWD:/w" --entrypoint promtool prom/prometheus check rules /w/prometheus/rules/horus-bpm.rules.yml
+#   docker run --rm -v "$PWD:/w" --entrypoint promtool prom/prometheus test rules /w/prometheus/tests/horus-bpm.rules.test.yml
+# Every alert links a runbook section. The anchors are placeholders until the operations guide (#661) fills them.
+groups:
+  - name: horus-bpm-rule-engine
+    rules:
+      - alert: HorusRuleEvaluationErrors
+        expr: |
+          sum(rate(horus_rle_evaluations_seconds_count{outcome="failed"}[5m]))
+            / clamp_min(sum(rate(horus_rle_evaluations_seconds_count[5m])), 0.001) > 0.01
+          and sum(rate(horus_rle_evaluations_seconds_count[5m])) > 0.05
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "More than 1% of rule evaluations end in an evaluation error"
+          description: "Failed evaluations are logged as EVALUATION_ERROR decisions. Check horus_rle_evaluation_errors_total by code."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusRuleEvaluationErrors"
+      - alert: HorusRuleEvaluationSlow
+        expr: |
+          histogram_quantile(0.99, sum by (le) (rate(horus_rle_evaluations_seconds_bucket{outcome=~"matched|no_match"}[5m]))) > 0.25
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Rule evaluation p99 above 250 ms for 10 minutes"
+          description: "The time includes the decision log write. Check database latency and the connection pool panels."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusRuleEvaluationSlow"
+      - alert: HorusDecisionLogDefaultPartitionRows
+        expr: max(horus_rle_partition_default_rows) > 0
+        for: 15m
+        labels: {severity: warning}
+        annotations:
+          summary: "Decision rows sit outside every monthly partition"
+          description: "The roll-over job has not created the month. Rows in the default partition can be erased by the roll-over."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusDecisionLogDefaultPartitionRows"
+      - alert: HorusUnkeyedSealAccepted
+        expr: increase(horus_rle_seal_unkeyed_accepted_total[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "A version was served on an unkeyed approval seal while a seal key is set"
+          description: "Re-approve or re-seal the version with the key."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusUnkeyedSealAccepted"
+  - name: horus-bpm-process-engine
+    rules:
+      - alert: HorusOpenIncidents
+        expr: max(horus_pre_incidents_open) > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "Process incidents stay open for 30 minutes"
+          description: "Open incidents hold instances. Resolve or retry them in the cockpit."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusOpenIncidents"
+      - alert: HorusIncidentSpike
+        expr: sum(increase(horus_pre_incidents_raised_total[10m])) > 10
+        labels: {severity: critical}
+        annotations:
+          summary: "More than 10 incidents opened in 10 minutes"
+          description: "Look at horus_pre_incidents_raised_total by errorCode: one code points at one adapter or rule."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusIncidentSpike"
+      - alert: HorusInstancesFailing
+        expr: sum(increase(horus_pre_instances_failed_total[15m])) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "Instances ended FAILED in the last 15 minutes"
+          description: "A FAILED instance cannot be resumed."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusInstancesFailing"
+      - alert: HorusDueJobsBackedUp
+        expr: max by (kind) (horus_pre_jobs_due_oldest_age_seconds) > 120
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "The oldest due {{ $labels.kind }} job has waited more than 2 minutes"
+          description: "No replica claims due jobs fast enough, or none is running. Check the job runner and the replicas."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusDueJobsBackedUp"
+      - alert: HorusTimerLagHigh
+        expr: |
+          sum(rate(horus_pre_timer_lag_seconds_sum[10m])) / clamp_min(sum(rate(horus_pre_timer_lag_seconds_count[10m])), 0.0001) > 30
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Timers fire on average more than 30 seconds late"
+          description: "Same causes as a backed-up job queue, seen from the timers that did fire."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusTimerLagHigh"
+      - alert: HorusAsyncAttemptsFailing
+        expr: |
+          sum(rate(horus_pre_async_attempts_total{outcome=~"FAILED|REFUSED"}[10m]))
+            / clamp_min(sum(rate(horus_pre_async_attempts_total[10m])), 0.001) > 0.2
+          and sum(rate(horus_pre_async_attempts_total[10m])) > 0.02
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "More than 20% of async service and agent attempts fail or are refused"
+          description: "Check the adapter or agent behind the step."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusAsyncAttemptsFailing"
+      - alert: HorusMessageCorrelationRefusals
+        expr: sum(increase(horus_pre_messages_refused_total[10m])) > 5
+        labels: {severity: warning}
+        annotations:
+          summary: "Messages were refused in the last 10 minutes: no instance waits, or two do"
+          description: "Check the correlation key the sender uses, by reason (NOT_CORRELATED or AMBIGUOUS)."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusMessageCorrelationRefusals"
+  - name: horus-bpm-platform
+    rules:
+      - alert: HorusHostDown
+        expr: up{job="horus-bpm"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Prometheus cannot scrape a Horus host"
+          description: "The host is down or its management port is unreachable."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusHostDown"
+      - alert: HorusConnectionPoolSaturated
+        expr: |
+          max by (instance) (hikaricp_connections_active / hikaricp_connections_max) > 0.9
+          or max by (instance) (hikaricp_connections_pending) > 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "The database connection pool is above 90% or has threads waiting"
+          description: "Raise spring.datasource.hikari.maximum-pool-size only after checking the database's connection limit."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusConnectionPoolSaturated"
+      - alert: HorusServerErrors
+        expr: |
+          sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(http_server_requests_seconds_count[5m])), 0.001) > 0.05
+          and sum(rate(http_server_requests_seconds_count[5m])) > 0.1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "More than 5% of HTTP requests answer 5xx"
+          description: "Look at the application log by traceId."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusServerErrors"
