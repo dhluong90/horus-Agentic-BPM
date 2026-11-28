@@ -1567,6 +1567,16 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Example:** `v2 effective_from 2026-12-01 -> 2026-11-25T11:00Z in the table => refused at 26 Nov, v1 serves`; `v1 sealed by k1, host now has k2 current and k1 previous => served; omar re-seals => hmac-sha256:k2:...`; `v1 approved, approval_seal set to NULL by an administrator => refused`
 - **Test IDs:** `RLE_223_request_and_approval_rows_record_the_date_and_hash_and_the_approval_writes_a_seal`, `RLE_223_a_date_moved_in_the_table_is_refused_with_one_audit_entry_and_the_other_version_still_serves`, `RLE_223_a_host_key_makes_the_seal_an_hmac_and_a_plain_seal_or_another_key_is_refused`, `RLE_223_rotating_the_key_keeps_approved_versions_served_and_a_second_person_reseals_them`, `RLE_223_a_version_changed_in_the_table_is_not_resealed`, `RLE_223_switching_a_key_on_after_versions_were_approved_needs_the_window_and_a_reseal`, `RLE_223_an_approved_version_with_a_null_seal_is_refused_in_plain_mode`, `RLE_223_the_pre_seal_marker_cannot_be_written_after_the_migration_and_a_keyed_host_refuses_it`
 
+### RLE-231 The pre-seal marker is accepted only on a version that existed before the seals, and the backfill is audited
+- **Traces to:** `TR-SEC-04`, RLE-223, #644, #658
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A 1.0.0 database holds approved `card-fee` v1 and v2 and a draft v3. Migration `V2` gives the approved versions the marker `legacy:pre-seal`.
+- **When:** Migration `V3` runs, and later someone writes the marker, or the stamp, on a version created after it.
+- **Then:** `V3` adds `rle_version.legacy_backfilled_at`, sets it to the migration time on each version that carries the marker, writes one `LEGACY_SEALED` history row per such version (actor `system:migration-v3`, append-only like every history row) and logs one line with the count and the ids. A check constraint requires the stamp wherever the marker is, and a trigger refuses an insert that carries the marker or the stamp and an update that sets or moves the stamp, with the code `LEGACY_SEAL_SCOPE`. The engine accepts the marker only on a version with the stamp, so an administrator who drops the constraint and the triggers and writes the marker on a newer version still has that version refused (`EVALUATION_ERROR` naming the failed integrity check). A version approved before the upgrade is still served on the marker in plain mode, and refused while a seal key is set and `acceptUnkeyedSeals` is off, as before. The keyring, `reseal`, the marker trigger of `V2` and the `NULL` guard are unchanged; a re-sealed version keeps its stamp and its audit row.
+- **Example:** `v1, v2 stamped 2026-11-28T09:00Z, two LEGACY_SEALED rows; insert of v9 with the marker => LEGACY_SEAL_SCOPE; v1 served`
+- **Test IDs:** `RLE_231_a_version_created_after_the_migration_cannot_carry_the_marker_or_its_scope`, `RLE_231_versions_approved_before_the_migration_still_verify_and_each_has_one_audit_entry`
+
 ### RLE-228 Each evaluation call is one span with the rule set, its version, the decision id and the outcome
 - **Traces to:** `TR-OBS-03`, `TR-SEC-05`
 - **Milestone:** M3
