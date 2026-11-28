@@ -57,6 +57,10 @@ function trail(route: Route, t: (key: MessageKey, params?: Record<string, string
         { label: route.key },
         { label: t('rules.version', { version: String(route.version) }) },
       ];
+    case 'calendars':
+      return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }];
+    case 'calendar':
+      return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }, { label: t('calendars.title'), href: formatRoute({ name: 'calendars' }) }];
     case 'calendar-changes':
       return [{ label: t('menu.processes'), href: formatRoute({ name: 'processes' }) }];
     case 'calendar-change':
