@@ -11,9 +11,9 @@ This page states the technical rules. Support hours, response times, service lev
 | What is the version? | One version for the whole project, `MAJOR.MINOR.PATCH`, one tag `vX.Y.Z` per release. Every module and `bpm-bom` carry it |
 | When can a change break me? | Only in a major release (2.0 is the next one) |
 | How long does a deprecated element stay? | At least one minor release and at least six months, and is removed only in a major release |
-| Which versions get fixes? | The latest minor release. Versions before 1.0.0 get none |
+| Which versions get fixes? | Not decided. No fix is promised for any version. Versions before 1.0.0 get none |
 | How do I report a vulnerability? | Privately, as [`SECURITY.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/SECURITY.md) says. Never in a public issue |
-| Is there a long-term support line? | No. Not decided: see [Not decided yet](#not-decided-yet) |
+| Is there a long-term support line? | None is offered today. Not decided: see [Not decided yet](#not-decided-yet) |
 
 ## Semantic versioning
 
@@ -73,10 +73,10 @@ Example: 1.2.0 deprecates a property on 1 March 2027. It is read in 1.3.0 and ev
 
 ## Supported versions
 
-- **Supported:** the latest minor release (for example 1.1.x once 1.1.0 is out) receives fixes as patch releases.
+- **Fixes for the latest minor release:** not decided. When a fix is made, it is published as a patch release, but this page does not promise one. See [Not decided yet](#not-decided-yet).
 - **Not supported:** every 0.x release.
 - **An older 1.x minor** is not named as supported. Whether it receives security fixes, and for how long, is to be decided by the maintainers.
-- **Long-term support (LTS):** there is no LTS line.
+- **Long-term support (LTS):** none is offered today. Not decided.
 
 A host upgrades by changing the version of `bpm-bom`. Run the checks in the [[Operations runbook|Operations-Runbook]], "Upgrade to a later release", on a copy of production data first.
 
@@ -108,7 +108,7 @@ A waiver lets the build pass although a scanner reports a finding that has no fi
 | Shipped artifacts | A waiver never covers an image or dependency that ships in a release |
 | After expiry | The check fails the build. Fix the finding, or write a new waiver with a new reason |
 
-The tools check that a dated entry has not expired and that a dependency exception ends with an expiry date. The 30-day limit and the quality of the reason are checked in review.
+The tools check that a dated entry has not expired and that a dependency exception ends with an expiry date. The tools do not check the 30-day limit or the quality of the reason. Both are checked by a reviewer only.
 
 ## Not decided yet
 
