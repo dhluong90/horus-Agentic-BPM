@@ -53,6 +53,8 @@
 /* Data objects and data stores (#499): the same quiet node fill, a thinner outline than a step, read only. */
 .dg-data path { fill: var(--node); stroke: var(--node-stroke); stroke-width: 1.25; }
 .dg-data .dg-data__fold { fill: none; }
+.dg-data .dg-data__arrow { fill: var(--node); stroke: var(--node-stroke); stroke-width: 1; }
+.dg-data .dg-data__arrow--out { fill: var(--node-stroke); }
 .dg-edge--association path:first-child { stroke-dasharray: 1.5 4; stroke-linecap: round; }
 /* Pools, lanes and message flows (#497): calm frames behind the steps, a dashed line for a message. */
 .dg-pool rect { fill: none; stroke: var(--node-stroke); stroke-width: 1.5; }

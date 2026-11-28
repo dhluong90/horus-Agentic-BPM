@@ -1,6 +1,7 @@
 import type { DefinitionLayout } from '../../../api/processes/schemas';
 import type { DiagramGraph } from './bpmnGraph';
 import { noteBox, type PlacedAnnotation, type PlacedGroup } from './notes';
+import { captionBox, placeCaptions } from './captions';
 import { labelSize, placeLabels, type Rect } from './edgeLabels';
 import { onOutline, SYMBOL_SIZE, type Layout, type PlacedEdge, type PlacedNode, type Point } from './layout';
 
@@ -111,7 +112,9 @@ export function applyStoredLayout(layout: Layout, stored: DefinitionLayout, grap
     const box = boxes.get(group.id);
     if (box?.width !== undefined && box.height !== undefined) groups.push({ id: group.id, label: group.label, x: box.x, y: box.y, width: box.width, height: box.height });
   }
-  return fitted({ ...layout, nodes, edges: placeLabels(nodes, edges, labelBounds(stored)), ...(items.length > 0 ? { annotations: { items, links: [] } } : {}), ...(groups.length > 0 ? { groups } : {}) });
+  // Names that a flow of the diagram runs through move to a clear side; the flow names are set around them.
+  const named = placeCaptions(nodes, edges);
+  return fitted({ ...layout, nodes: named, edges: placeLabels(named, edges, labelBounds(stored)), ...(items.length > 0 ? { annotations: { items, links: [] } } : {}), ...(groups.length > 0 ? { groups } : {}) });
 }
 
 /** The label bounds a diagram keeps for its flows, by `source->target`. */
@@ -128,6 +131,11 @@ function fitted(layout: Layout): Layout {
     const left = node.shape === 'task' ? node.x : node.x + node.width / 2 - widthOf(node) / 2;
     xs.push(left, left + widthOf(node));
     ys.push(node.y, node.y + node.height);
+    if (node.captionAt !== undefined) {
+      const name = captionBox(node);
+      xs.push(name.x, name.x + name.width);
+      ys.push(name.y, name.y + name.height);
+    }
   }
   for (const edge of layout.edges) {
     for (const p of edge.points) { xs.push(p.x); ys.push(p.y); }
