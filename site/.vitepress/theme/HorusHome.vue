@@ -18,7 +18,7 @@ const pillars = [
 
 // Real captures of the cockpit. w1 x h1 is the 1x size; w2 the 2x width.
 const shots = [
-  { id: 'process', h1: 377, w2: 1030, eyebrow: 'BPMN diagram', title: 'Every executable element, on the diagram.',
+  { id: 'process', h1: 377, w2: 1030, eyebrow: 'BPMN diagram', title: 'Every element the engine runs, on the diagram.',
     text: 'Boundary events and compensation, from the BPMN you import, laid out automatically.',
     alt: 'The Loan payout process drawn as a BPMN diagram in the cockpit, with service tasks, a boundary event and an undo path.' },
   { id: 'timeline', wide: true, h1: 622, w2: 1400, eyebrow: 'Instance timeline', title: 'See each step, and what was undone.',
@@ -70,9 +70,9 @@ onMounted(() => {
 });
 
 const features = [
-  ['i-flow', 'Every executable BPMN 2.0 element', 'Gateways, events, compensation and sub-processes, imported and run.'],
+  ['i-flow', 'Executable BPMN 2.0 elements', 'Gateways, events, compensation and sub-processes: the listed elements, imported and run.'],
   ['i-table', 'DMN decision tables', 'Import and export DMN 1.2 to 1.5 tables.'],
-  ['i-import', 'Import from your modeller', 'Import BPMN 2.0 files from standard modelers as they are.'],
+  ['i-import', 'Import from your modeller', 'Imports BPMN 2.0 files that use the listed elements; every refusal names its reason.'],
   ['i-users', 'Maker-checker', 'Requesters cannot approve their own changes. The engine refuses.'],
   ['i-log', 'Append-only audit', 'Decision log, tenant switches and approvals, with no edit path.'],
   ['i-agent', 'Guarded AI agents', 'Schema check, then your rules, then a human if needed.'],
