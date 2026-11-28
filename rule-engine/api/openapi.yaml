@@ -2981,11 +2981,10 @@ components:
           format: date-time
           description: The time of the log row, which places it in its monthly partition; equal to `evaluatedAt`
         durationMicros: { type: integer, format: int64 }
+        # Present when the decision failed with EVALUATION_BUDGET_EXCEEDED: the evaluation limit it reached, STEPS or
+        # TIME (RLE-229). Absent otherwise, and on decisions logged before it was recorded.
         limit:
           $ref: '#/components/schemas/EvaluationLimit'
-          description: |
-            Present when the decision failed with `EVALUATION_BUDGET_EXCEEDED`: the evaluation limit it reached,
-            `STEPS` or `TIME` (`RLE-229`). Absent otherwise, and on decisions logged before it was recorded.
     RuleSetPage:
       type: object
       required: [data, nextCursor, hasNext]
@@ -4299,11 +4298,10 @@ components:
             True when the caller named the version (`rules:pin`) instead of the engine selecting the
             version in force. Set by the engine on the decision row; never read from a request.
         durationMicros: { type: integer, format: int64 }
+        # Present when the decision failed with EVALUATION_BUDGET_EXCEEDED: the evaluation limit it reached, STEPS or
+        # TIME (RLE-229). Absent otherwise, and on decisions logged before it was recorded.
         limit:
           $ref: '#/components/schemas/EvaluationLimit'
-          description: |
-            Present when the decision failed with `EVALUATION_BUDGET_EXCEEDED`: the evaluation limit it reached,
-            `STEPS` or `TIME` (`RLE-229`). Absent otherwise, and on decisions logged before it was recorded.
     BatchRequest:
       type: object
       required: [items]
