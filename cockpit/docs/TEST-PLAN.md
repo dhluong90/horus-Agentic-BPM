@@ -80,6 +80,14 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-091 | `CKP_091_*` (`cockpit/web/src/features/processes/calendars/CalendarChanges.test.tsx`, `cockpit/web/src/features/approvals/kinds.test.ts`) | Vitest with the fake engine | M3 | `TR-SEC-04` | Done (#473) |
 | CKP-079 | `CKP_079_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with problem answers, Playwright for every state, axe-core | M2 | `TR-SEC-05`, `TR-UI-02`, `TR-UI-04` | Automated |
 
+## Visual regression baselines
+`cockpit/web/e2e/visual-regression.spec.ts` (`TR_UI_587_visual_*`) draws twelve cockpit screens at 1440x900, light theme, English, and compares each with a reviewed image in `cockpit/web/e2e/visual-baselines`: Home, the rule set list, a rule table, a rule change under review, the approvals queue, the decision log, the process list, a process diagram, a process change under review, a case, the task queue and the incident list. A drawing may differ from its image by at most 0.05 % of its pixels (about 650): a moved control, a changed colour or a different line of text fails, anti-aliasing does not.
+
+- **Deterministic.** The data is the demo data of the fake engines, the clock is fixed (`page.clock.setFixedTime`), motion is reduced and off, the caret is hidden and the page waits for the fonts.
+- **Where it runs.** The images are drawn on Linux in the Playwright image that the CI job "Cockpit visual regression" uses, because system fonts differ elsewhere. The spec is left out of `npm run e2e` and runs with `npm run e2e:visual`; on a machine that is not Linux the script starts the same image through Docker (Linux `node_modules` stay in a Docker volume).
+- **Compare.** `npm run e2e:visual` from `cockpit/web`. A failure writes the actual, expected and difference images to `cockpit/web/test-results/`; CI uploads them as `cockpit-visual-diff`.
+- **Update after a reviewed visual change.** `npm run e2e:visual:update`, then look at each changed image (`git diff --stat` lists them), commit them with the change that caused it, and say in the pull request which screens changed and why. A new screen is one entry in the `SCREENS` list followed by the same command. When the Playwright image is updated (tag and digest in `.github/workflows/ci.yml`), redraw every image in the same pull request.
+
 ## Known gaps
 | Gap | Plan |
 |---|---|

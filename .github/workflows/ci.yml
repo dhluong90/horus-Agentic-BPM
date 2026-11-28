@@ -686,7 +686,7 @@ jobs:
 
       - name: The Playwright image matches the lockfile
         run: |
-          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml)"
+          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml | head -1)"
           locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
           if [ -z "$image" ] || [ "$locked" != "$image" ]; then
             echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image in ci.yml is '${image}'. Update the image tag and digest in ci.yml."
@@ -715,6 +715,65 @@ jobs:
             cockpit/web/playwright-report/
             cockpit/web/e2e/screenshots/
             cockpit/web/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  cockpit-visual:
+    # Visual regression (#587): the main cockpit screens at 1440x900, light theme, English, compared with the reviewed
+    # images in cockpit/web/e2e/visual-baselines (at most 0.05 % of the pixels may differ). The images are drawn in this
+    # same Playwright image, so a failure is a change to the screen. To accept a reviewed change, run
+    # `npm run e2e:visual:update` in cockpit/web (it uses this image through Docker) and commit the images.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    name: Cockpit visual regression
+    runs-on: ubuntu-latest
+    # Twelve screens take under a minute; 15 leaves room for the image pull and the build without hiding a hung run.
+    timeout-minutes: 15
+    # Chromium and the system libraries it needs come with Playwright's own image, pinned by digest, so
+    # no apt download is on this job's critical path (an Ubuntu mirror outage failed every run). The tag
+    # is the @playwright/test version in cockpit/web/package-lock.json; the first step below reads the tag
+    # from this file and checks it. Update the tag and the digest together with the lockfile.
+    container:
+      image: mcr.microsoft.com/playwright:v1.65.1-noble@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579
+      options: --ipc=host
+    defaults:
+      run:
+        working-directory: cockpit/web
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: tools/release/node-version
+          cache: npm
+          cache-dependency-path: cockpit/web/package-lock.json
+
+      - name: The Playwright image matches the lockfile
+        run: |
+          image="$(sed -nE 's#^ +image: mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-.*#\1#p' ../../.github/workflows/ci.yml | head -1)"
+          locked="$(node -p "require('./package-lock.json').packages['node_modules/@playwright/test'].version")"
+          if [ -z "$image" ] || [ "$locked" != "$image" ]; then
+            echo "::error title=Playwright image out of date::package-lock.json has @playwright/test $locked, the job image in ci.yml is '${image}'. Update the image tag and digest in ci.yml."
+            exit 1
+          fi
+          echo "@playwright/test $locked, image $image, Node $(node --version): browsers come from the image."
+
+      - name: Install
+        run: npm ci
+
+      - name: Compare the screens with their images
+        env:
+          COCKPIT_VISUAL: "1"
+        run: npx playwright test --workers=100%
+
+      - name: Upload the actual, expected and difference images
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cockpit-visual-diff
+          path: cockpit/web/test-results/
           if-no-files-found: ignore
           retention-days: 14
 
