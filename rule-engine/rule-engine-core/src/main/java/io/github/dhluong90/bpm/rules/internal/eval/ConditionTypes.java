@@ -38,6 +38,70 @@ final class ConditionTypes {
     }
 
     /**
+     * The declared inputs and what is known of the tree being checked: the kind and the currency of each node, kept by
+     * identity and filled bottom-up on first use, so a node's type is worked out once however many operators above it
+     * ask, and the check costs time in proportion to the size of the cell (RLE-004, #359). One scope belongs to one
+     * cell and one thread.
+     */
+    static final class Scope {
+        private final List<InputClause> inputs;
+        private final java.util.IdentityHashMap<Expr, Kind> kinds = new java.util.IdentityHashMap<>();
+        private final java.util.IdentityHashMap<Expr, String> currencies = new java.util.IdentityHashMap<>();
+        private int kindEvaluations;
+
+        /**
+         * Creates the scope of one cell.
+         *
+         * @param inputs the declared inputs, by slot
+         */
+        Scope(List<InputClause> inputs) {
+            this.inputs = inputs;
+        }
+
+        InputClause get(int slot) {
+            return inputs.get(slot);
+        }
+
+        /**
+         * Counts the nodes whose kind was worked out, for the test of RLE-004 that the check is linear.
+         *
+         * @return the number of kind evaluations so far
+         */
+        int kindEvaluations() {
+            return kindEvaluations;
+        }
+    }
+
+    /**
+     * RLE-004: as {@link #operandProblem(Expr, Scope)} with a scope of its own.
+     *
+     * @param expr the tree
+     * @param inputs the declared inputs, by slot
+     * @return the first problem in reading order, or null
+     */
+    static TypeProblem operandProblem(Expr expr, List<InputClause> inputs) {
+        return operandProblem(expr, new Scope(inputs));
+    }
+
+    /**
+     * Checks that a condition produces true or false, with a scope of its own.
+     *
+     * @return the problem, or null
+     */
+    static String conditionProblem(Expr expr, List<InputClause> inputs) {
+        return conditionProblem(expr, new Scope(inputs));
+    }
+
+    /**
+     * Checks an output cell against the output's declared type, with a scope of its own.
+     *
+     * @return the problem, or null
+     */
+    static String outputProblem(Expr expr, OutputClause output, List<InputClause> inputs) {
+        return outputProblem(expr, output, new Scope(inputs));
+    }
+
+    /**
      * RLE-004: checks the operands of every operator, function and {@code matches} in the tree, innermost first,
      * so {@code balance + 100 > 0} with a money {@code balance} names the {@code +}. An operand whose type is not
      * known statically ({@code null}) passes; at run time it gives null, as in FEEL.
@@ -46,7 +110,7 @@ final class ConditionTypes {
      * @param inputs the declared inputs, by slot
      * @return the first problem in reading order, or null
      */
-    static TypeProblem operandProblem(Expr expr, List<InputClause> inputs) {
+    static TypeProblem operandProblem(Expr expr, Scope inputs) {
         for (Expr child : children(expr)) {
             TypeProblem problem = operandProblem(child, inputs);
             if (problem != null) {
@@ -86,7 +150,7 @@ final class ConditionTypes {
     }
 
     /** RLE-056: each argument of a host function call has the type of its parameter; an unknown type passes. */
-    private static String hostArgumentProblem(Expr.HostCall call, List<InputClause> inputs) {
+    private static String hostArgumentProblem(Expr.HostCall call, Scope inputs) {
         List<io.github.dhluong90.bpm.expr.spi.ValueType> parameters = call.function().parameterTypes();
         for (int i = 0; i < parameters.size(); i++) {
             Kind expected = kindOf(parameters.get(i));
@@ -112,7 +176,7 @@ final class ConditionTypes {
         };
     }
 
-    private static String binaryProblem(Expr.Binary binary, List<InputClause> inputs) {
+    private static String binaryProblem(Expr.Binary binary, Scope inputs) {
         Kind a = kindOf(binary.left(), inputs);
         Kind b = kindOf(binary.right(), inputs);
         return switch (binary.op()) {
@@ -124,7 +188,7 @@ final class ConditionTypes {
             case EQ, NE -> comparableProblem(binary.left(), binary.right(), inputs);
             case LT, LE, GT, GE -> orderedProblem(binary.left(), binary.right(), inputs);
             case ADD, SUB, MUL, DIV -> !known(a) || !known(b) || arithmeticKind(binary.op(), a, b) != null ? null
-                    : arithmeticMessage(binary, a, b);
+                    : arithmeticMessage(binary, a, b, inputs);
         };
     }
 
@@ -141,7 +205,7 @@ final class ConditionTypes {
         };
     }
 
-    private static String arithmeticMessage(Expr.Binary binary, Kind a, Kind b) {
+    private static String arithmeticMessage(Expr.Binary binary, Kind a, Kind b, Scope scope) {
         String symbol = switch (binary.op()) {
             case ADD -> "+";
             case SUB -> "-";
@@ -153,7 +217,7 @@ final class ConditionTypes {
         if (addOrSubtract && (a == Kind.MONEY && b == Kind.NUMBER || a == Kind.NUMBER && b == Kind.MONEY)) {
             Expr number = a == Kind.NUMBER ? binary.left() : binary.right();
             Expr money = a == Kind.MONEY ? binary.left() : binary.right();
-            String currency = currencyOf(money);
+            String currency = currencyOf(money, scope);
             return problem + ": write the number with a currency, for example " + example(number) + " "
                     + (currency == null ? "VND" : currency);
         }
@@ -167,7 +231,7 @@ final class ConditionTypes {
     }
 
     /** {@code <}, {@code >} and {@code between}: the same type, and one that has an order. */
-    private static String orderedProblem(Expr left, Expr right, List<InputClause> inputs) {
+    private static String orderedProblem(Expr left, Expr right, Scope inputs) {
         String problem = comparableProblem(left, right, inputs);
         if (problem != null) {
             return problem;
@@ -186,12 +250,12 @@ final class ConditionTypes {
      *
      * @return the problem, or null
      */
-    static String conditionProblem(Expr expr, List<InputClause> inputs) {
-        String problem = firstOf(argumentProblem(expr, inputs), currencyProblem(expr));
+    static String conditionProblem(Expr expr, Scope inputs) {
+        String problem = firstOf(argumentProblem(expr, inputs), currencyProblem(expr, inputs));
         return problem != null ? problem : booleanProblem(expr, inputs);
     }
 
-    private static String booleanProblem(Expr expr, List<InputClause> inputs) {
+    private static String booleanProblem(Expr expr, Scope inputs) {
         return switch (expr) {
             case Expr.Literal literal -> literal.value() instanceof Boolean ? null : NOT_BOOLEAN;
             case Expr.Var var -> kindOf(var, inputs) == Kind.BOOLEAN ? null : NOT_BOOLEAN;
@@ -227,7 +291,7 @@ final class ConditionTypes {
      * Checks the argument types of every function call in the tree: {@code round} takes numbers and
      * {@code daysBetween} dates. An argument whose type is not known statically passes.
      */
-    private static String argumentProblem(Expr expr, List<InputClause> inputs) {
+    private static String argumentProblem(Expr expr, Scope inputs) {
         String own = switch (expr) {
             case Expr.Call call -> {
                 Kind expected = call.function() == Expr.Function.ROUND ? Kind.NUMBER : Kind.DATE;
@@ -251,7 +315,7 @@ final class ConditionTypes {
         return null;
     }
 
-    private static String argumentKindProblem(String function, Expr arg, Kind expected, List<InputClause> inputs) {
+    private static String argumentKindProblem(String function, Expr arg, Kind expected, Scope inputs) {
         Kind actual = kindOf(arg, inputs);
         if (actual == expected || actual == Kind.UNKNOWN || actual == Kind.NULL) {
             return null;
@@ -263,32 +327,34 @@ final class ConditionTypes {
      * RLE-005: two money operands of a comparison, {@code +} or {@code -} whose currencies are both known statically
      * (from literals) must have the same currency; at run time a mismatch is {@code EVALUATION_ERROR} anyway.
      */
-    private static String currencyProblem(Expr expr) {
+    private static String currencyProblem(Expr expr, Scope scope) {
         String own = switch (expr) {
             case Expr.Binary binary -> switch (binary.op()) {
-                case EQ, NE, LT, LE, GT, GE, ADD, SUB -> mismatch(currencyOf(binary.left()), currencyOf(binary.right()));
+                case EQ, NE, LT, LE, GT, GE, ADD, SUB ->
+                        mismatch(currencyOf(binary.left(), scope), currencyOf(binary.right(), scope));
                 default -> null;
             };
             case Expr.InList inList -> {
-                String known = currencyOf(inList.target());
+                String known = currencyOf(inList.target(), scope);
                 String problem = null;
                 for (Expr element : inList.elements()) {
-                    String currency = currencyOf(element);
+                    String currency = currencyOf(element, scope);
                     problem = firstOf(problem, mismatch(known, currency));
                     known = known != null ? known : currency;
                 }
                 yield problem;
             }
-            case Expr.Between between -> firstOf(mismatch(currencyOf(between.target()), currencyOf(between.low())),
-                    firstOf(mismatch(currencyOf(between.target()), currencyOf(between.high())),
-                            mismatch(currencyOf(between.low()), currencyOf(between.high()))));
+            case Expr.Between between -> firstOf(
+                    mismatch(currencyOf(between.target(), scope), currencyOf(between.low(), scope)),
+                    firstOf(mismatch(currencyOf(between.target(), scope), currencyOf(between.high(), scope)),
+                            mismatch(currencyOf(between.low(), scope), currencyOf(between.high(), scope))));
             default -> null;
         };
         if (own != null) {
             return own;
         }
         for (Expr child : children(expr)) {
-            String problem = currencyProblem(child);
+            String problem = currencyProblem(child, scope);
             if (problem != null) {
                 return problem;
             }
@@ -301,14 +367,23 @@ final class ConditionTypes {
     }
 
     /** The currency of a money expression when a literal fixes it, else null. */
-    private static String currencyOf(Expr expr) {
+    private static String currencyOf(Expr expr, Scope scope) {
+        if (scope.currencies.containsKey(expr)) {
+            return scope.currencies.get(expr);
+        }
+        String currency = computeCurrency(expr, scope);
+        scope.currencies.put(expr, currency);
+        return currency;
+    }
+
+    private static String computeCurrency(Expr expr, Scope scope) {
         return switch (expr) {
             case Expr.Literal literal -> literal.value() instanceof Money money ? money.currency() : null;
-            case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NEGATE ? currencyOf(unary.operand()) : null;
+            case Expr.Unary unary -> unary.op() == Expr.UnaryOp.NEGATE ? currencyOf(unary.operand(), scope) : null;
             case Expr.Binary binary -> switch (binary.op()) {
                 case ADD, SUB, MUL, DIV -> {
-                    String left = currencyOf(binary.left());
-                    yield left != null ? left : currencyOf(binary.right());
+                    String left = currencyOf(binary.left(), scope);
+                    yield left != null ? left : currencyOf(binary.right(), scope);
                 }
                 default -> null;
             };
@@ -348,8 +423,8 @@ final class ConditionTypes {
      *
      * @return the problem, or null
      */
-    static String outputProblem(Expr expr, OutputClause output, List<InputClause> inputs) {
-        String problem = firstOf(argumentProblem(expr, inputs), currencyProblem(expr));
+    static String outputProblem(Expr expr, OutputClause output, Scope inputs) {
+        String problem = firstOf(argumentProblem(expr, inputs), currencyProblem(expr, inputs));
         if (problem != null) {
             return "output " + output.name() + " " + problem;
         }
@@ -377,7 +452,7 @@ final class ConditionTypes {
         return null;
     }
 
-    private static String comparableProblem(Expr left, Expr right, List<InputClause> inputs) {
+    private static String comparableProblem(Expr left, Expr right, Scope inputs) {
         Kind a = kindOf(left, inputs);
         Kind b = kindOf(right, inputs);
         if (a == Kind.UNKNOWN || b == Kind.UNKNOWN || a == Kind.NULL || b == Kind.NULL || a == b) {
@@ -386,7 +461,19 @@ final class ConditionTypes {
         return "compares a " + name(a) + " with a " + name(b);
     }
 
-    private static Kind kindOf(Expr expr, List<InputClause> inputs) {
+    /** The kind of a node, worked out once per node of the tree being checked (RLE-004, #359). */
+    private static Kind kindOf(Expr expr, Scope inputs) {
+        Kind known = inputs.kinds.get(expr);
+        if (known != null) {
+            return known;
+        }
+        Kind computed = computeKind(expr, inputs);
+        inputs.kinds.put(expr, computed);
+        inputs.kindEvaluations++;
+        return computed;
+    }
+
+    private static Kind computeKind(Expr expr, Scope inputs) {
         return switch (expr) {
             case Expr.Literal literal -> switch (literal.value()) {
                 case null -> Kind.NULL;
