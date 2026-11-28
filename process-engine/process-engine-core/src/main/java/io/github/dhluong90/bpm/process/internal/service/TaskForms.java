@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.spi.FormRegistry;
+import io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import java.net.URI;
@@ -258,6 +259,60 @@ public final class TaskForms {
             List<Object> out = new java.util.ArrayList<>();
             for (Object item : items) {
                 out.add(maskValue(itemSchema, item, depth + 1));
+            }
+            return out;
+        }
+        return value;
+    }
+
+    /** Most unrecorded field paths named in one entry, and the longest one. */
+    private static final int MAX_UNRECORDED = 50;
+    private static final int MAX_UNRECORDED_PATH = 120;
+
+    /**
+     * What history keeps of a validated submission (#663): the fields the schema declares, every part it marks
+     * {@code "mask": true} replaced by {@link RecordedSubmission#MASKED}, at any depth; a field the schema does not
+     * declare is not stored, only its path is named.
+     *
+     * @param schema the form schema
+     * @param submission the validated values
+     * @return the values to store and the paths of the fields left out
+     */
+    @SuppressWarnings("unchecked")
+    static RecordedSubmission record(Map<String, Object> schema, Map<String, Object> submission) {
+        List<String> dropped = new ArrayList<>();
+        Object values = recordValue(schema, submission, "", 0, dropped);
+        return new RecordedSubmission((Map<String, Object>) values,
+                dropped.size() > MAX_UNRECORDED ? dropped.subList(0, MAX_UNRECORDED) : dropped);
+    }
+
+    private static Object recordValue(Object schema, Object value, String path, int depth, List<String> dropped) {
+        if (value == null) {
+            return null;
+        }
+        if (!(schema instanceof Map<?, ?> node)) {
+            return value;
+        }
+        if (Boolean.TRUE.equals(node.get("mask")) || depth > MASK_MAX_DEPTH) {
+            return RecordedSubmission.MASKED;
+        }
+        if (value instanceof Map<?, ?> map && node.get("properties") instanceof Map<?, ?> properties) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                String at = path.isEmpty() ? name : path + "." + name;
+                if (!properties.containsKey(entry.getKey())) {
+                    dropped.add(at.length() > MAX_UNRECORDED_PATH ? at.substring(0, MAX_UNRECORDED_PATH) : at);
+                    continue;
+                }
+                out.put(name, recordValue(properties.get(entry.getKey()), entry.getValue(), at, depth + 1, dropped));
+            }
+            return out;
+        }
+        if (value instanceof java.util.Collection<?> items && node.get("items") instanceof Map<?, ?> itemSchema) {
+            List<Object> out = new ArrayList<>();
+            for (Object item : items) {
+                out.add(recordValue(itemSchema, item, path + "[]", depth + 1, dropped));
             }
             return out;
         }

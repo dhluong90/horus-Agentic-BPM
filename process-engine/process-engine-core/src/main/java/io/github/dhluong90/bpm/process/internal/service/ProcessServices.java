@@ -4686,8 +4686,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
     }
 
-    /** PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen. */
-    private void checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
+    /**
+     * PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen.
+     *
+     * @return PRE-390: the validated submission as history keeps it: masked fields as a marker, undeclared fields named
+     *     but not stored; null when the task has no form to validate against
+     */
+    @SuppressWarnings("unchecked")
+    private io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
         java.util.Optional<TaskForms.Resolved> resolved;
         try {
             resolved = resolveForm(tenant, row, task);
@@ -4702,7 +4708,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new io.github.dhluong90.bpm.process.api.FormValidationException(
                         "The result does not meet the task's form", violations);
             }
+            return TaskForms.record(form.schema(), result);
         }
+        return null;
     }
 
     @Override
@@ -4985,8 +4993,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + " task of it cannot complete this four-eyes task");
             }
             java.util.Optional<JobRow> reviewed = checkReviewResult(tenant, row, taskId, values);
+            io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission submission = null;
             if (reviewed.isEmpty()) {
-                checkForm(tenant, row, task, values);
+                submission = checkForm(tenant, row, task, values);
             }
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
@@ -4997,7 +5006,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
                     InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
                     participants, row.sequence());
-            run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller), RunAs.REQUEST);
+            run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller, submission), RunAs.REQUEST);
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
     }
