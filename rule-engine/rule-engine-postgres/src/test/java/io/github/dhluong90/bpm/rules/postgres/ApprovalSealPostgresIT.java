@@ -335,15 +335,100 @@ class ApprovalSealPostgresIT {
                 INSERT INTO rle_version SELECT (jsonb_populate_record(NULL::rle_version, to_jsonb(s)
                   || '{"id":"X0000000000000000000000000","version_num":9,"approval_seal":"legacy:pre-seal"}'::jsonb)).*
                 FROM rle_version s WHERE s.version_num = 1""").update())
+                .hasMessageContaining("LEGACY_SEAL_SCOPE");
+        // and the marker guard of V2 refuses it on its own when the scope guard is off
+        jdbc.sql("ALTER TABLE rle_version DISABLE TRIGGER rle_version_legacy_scope_guard").update();
+        assertThatThrownBy(() -> jdbc.sql("""
+                INSERT INTO rle_version SELECT (jsonb_populate_record(NULL::rle_version, to_jsonb(s)
+                  || '{"id":"X0000000000000000000000000","version_num":9,"approval_seal":"legacy:pre-seal"}'::jsonb)).*
+                FROM rle_version s WHERE s.version_num = 1""").update())
                 .hasMessageContaining("rle_version_legacy_seal_guard");
+        jdbc.sql("ALTER TABLE rle_version ENABLE TRIGGER rle_version_legacy_scope_guard").update();
 
         // A version the migration marked (simulated by switching the guard off) is served in plain mode, as before
         jdbc.sql("ALTER TABLE rle_version DISABLE TRIGGER rle_version_legacy_seal_guard").update();
-        jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal' WHERE version_num = 1").update();
+        jdbc.sql("ALTER TABLE rle_version DISABLE TRIGGER rle_version_legacy_scope_guard").update();
+        jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal', legacy_backfilled_at = now()"
+                + " WHERE version_num = 1").update();
         assertThat(evaluate(engines(ApprovalSealKey.none()), NOV_20).outcome())
                 .isNotInstanceOf(DecisionResult.Failed.class);
         // a keyed host refuses it until the window opens and a second person re-seals it
         assertThat(evaluate(engines(ApprovalSealKey.of(K1)), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
+    }
+
+    @Test
+    void RLE_231_a_version_created_after_the_migration_cannot_carry_the_marker_or_its_scope() {
+        publish(engines(ApprovalSealKey.none()), "50000 VND", null);
+        String copy = """
+                INSERT INTO rle_version SELECT (jsonb_populate_record(NULL::rle_version, to_jsonb(s)
+                  || ('{"id":"X0000000000000000000000000","version_num":9,"approval_seal":%s,"legacy_backfilled_at":%s}')::jsonb)).*
+                FROM rle_version s WHERE s.version_num = 1""";
+
+        // a new row with the marker, or with the stamp, is refused with the code LEGACY_SEAL_SCOPE
+        assertThatThrownBy(() -> jdbc.sql(copy.formatted("\"legacy:pre-seal\"", "null")).update())
+                .hasMessageContaining("LEGACY_SEAL_SCOPE");
+        assertThatThrownBy(() -> jdbc.sql(copy.formatted("\"legacy:pre-seal\"", "\"2026-01-01T00:00:00Z\"")).update())
+                .hasMessageContaining("LEGACY_SEAL_SCOPE");
+        // an existing version cannot be stamped afterwards, so the marker cannot be moved onto it either
+        assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET legacy_backfilled_at = now() WHERE version_num = 1")
+                .update()).hasMessageContaining("LEGACY_SEAL_SCOPE");
+        // the marker without the stamp is also refused by a constraint, should the guards be gone
+        jdbc.sql("ALTER TABLE rle_version DISABLE TRIGGER rle_version_legacy_seal_guard").update();
+        assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal'"
+                + " WHERE version_num = 1").update()).hasMessageContaining("rle_version_legacy_seal_scope_check");
+
+        // and when an administrator removes every guard, the engine still refuses the marker on an unstamped row
+        jdbc.sql("ALTER TABLE rle_version DROP CONSTRAINT rle_version_legacy_seal_scope_check").update();
+        jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal' WHERE version_num = 1").update();
+        assertThat(evaluate(engines(ApprovalSealKey.none()), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
+    }
+
+    @Test
+    void RLE_231_versions_approved_before_the_migration_still_verify_and_each_has_one_audit_entry() {
+        // Given a 1.0.0 database (V1 only) holding an approved v1, an approved v2 and a draft v3, copied from an engine
+        RuleEngines source = engines(ApprovalSealKey.none());
+        publish(source, "50000 VND", null);
+        clock.set(Instant.parse("2026-11-25T10:00:00Z"));
+        publish(source, "30000 VND", DEC_01);
+        caller.as("bank-a", "lan", AUTHOR);
+        source.versionService().importVersion("card-fee", ImportRequest.yaml(cardFee("20000 VND")));
+        List<String> rows = jdbc.sql("SELECT to_jsonb(v)::text FROM rle_version v ORDER BY version_num")
+                .query(String.class).list();
+        String ruleSet = jdbc.sql("SELECT to_jsonb(r)::text FROM rle_rule_set r").query(String.class).single();
+
+        String name = "legacy_" + System.nanoTime();
+        jdbc.sql("CREATE DATABASE " + name).update();
+        DataSource old = dataSource(name);
+        org.flywaydb.core.Flyway.configure().dataSource(old).table("rle_schema_history")
+                .locations(RuleEngineSchemaMigrator.MIGRATION_LOCATION).target("1").load().migrate();
+        JdbcClient oldJdbc = JdbcClient.create(old);
+        oldJdbc.sql("INSERT INTO rle_rule_set SELECT (jsonb_populate_record(NULL::rle_rule_set, CAST(:j AS jsonb))).*")
+                .param("j", ruleSet).update();
+        for (String row : rows) {
+            oldJdbc.sql("INSERT INTO rle_version SELECT (jsonb_populate_record(NULL::rle_version, CAST(:j AS jsonb))).*")
+                    .param("j", row).update();
+        }
+
+        // When the candidate migrations run
+        new RuleEngineSchemaMigrator(old).migrate();
+
+        // Then the two approved versions carry the marker and the stamp, the draft carries neither
+        assertThat(oldJdbc.sql("""
+                SELECT version_num || ':' || coalesce(approval_seal, '-') || ':' || (legacy_backfilled_at IS NOT NULL)
+                FROM rle_version ORDER BY version_num""").query(String.class).list())
+                .containsExactly("1:legacy:pre-seal:true", "2:legacy:pre-seal:true", "3:-:false");
+        // and one immutable LEGACY_SEALED history row names each of them
+        assertThat(oldJdbc.sql("""
+                SELECT v.version_num FROM rle_version_history h JOIN rle_version v ON v.id = h.version_id
+                WHERE h.action = 'LEGACY_SEALED' AND h.actor = 'system:migration-v3' ORDER BY v.version_num""")
+                .query(Integer.class).list()).containsExactly(1, 2);
+        assertThatThrownBy(() -> oldJdbc.sql("DELETE FROM rle_version_history WHERE action = 'LEGACY_SEALED'").update())
+                .hasMessageContaining("append-only");
+        // and the engine still serves the pre-seal version in force
+        db = old;
+        jdbc = oldJdbc;
+        assertThat(evaluate(engines(ApprovalSealKey.none()), NOV_20).outcome())
+                .isNotInstanceOf(DecisionResult.Failed.class);
     }
 
     String seal(int version) {

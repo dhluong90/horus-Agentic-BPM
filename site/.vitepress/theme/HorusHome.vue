@@ -52,7 +52,7 @@ const heroAlt = 'Part of a loan origination process in the cockpit: an applicati
 
 // Two short screen recordings, cropped to the used area. The width and height attributes reserve the box before any byte loads.
 const videos = {
-  loan: { id: 'loan-flow', w: 1280, h: 740, eyebrow: 'Process', title: 'A loan application, end to end',
+  loan: { id: 'loan-flow', w: 1280, h: 674, eyebrow: 'Process', title: 'A loan application, end to end',
     text: 'An AI agent screens the application, a person reviews it in the cockpit, and it is routed by risk. In this demo the proposal and approval steps are sent through the API.',
     label: 'Screen recording of a loan application in the cockpit: an AI agent screens it, a person reviews the agent answer, and the case follows the diagram. The proposal and approval steps are sent through the API in this demo.' },
   rule: { id: 'rule-flow-v2', w: 1440, h: 854, eyebrow: 'Maker-checker', title: 'Change a rule, simulate, approve',
@@ -256,7 +256,7 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
                 </g>
                 <text class="tx2" x="350" y="206" font-size="14">Libraries, not a server. No cluster, no broker.</text>
                 <rect class="nd" x="690" y="80" width="190" height="130" rx="16" />
-                <text class="tx" x="785" y="134" font-size="16" font-weight="650">Your PostgreSQL</text><text class="tx2" x="785" y="162" font-size="14">rle_ and pre_ tables</text>
+                <text class="tx" x="785" y="134" font-size="16" font-weight="650">Your PostgreSQL</text><text class="tx2" x="785" y="162" font-size="14">business and engine tables</text>
                 <path d="M550 145H688" style="stroke:var(--primary-fill)" stroke-width="2.5" fill="none" marker-start="url(#a2)" marker-end="url(#a2)" />
                 <text class="comptx" x="620" y="132" font-size="14" font-weight="600">your transaction</text>
                 <path class="ed" d="M350 322V262" marker-end="url(#a2)" />
@@ -280,7 +280,7 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
                 <path d="M170 306V354" style="stroke:var(--primary-fill)" stroke-width="2.5" fill="none" marker-start="url(#a3)" marker-end="url(#a3)" />
                 <text class="comptx" x="186" y="335" text-anchor="start" font-weight="600">your transaction</text>
                 <rect class="nd" x="10" y="356" width="320" height="70" rx="14" />
-                <text class="tx" x="170" y="386" font-weight="650">Your PostgreSQL</text><text class="tx2" x="170" y="408">rle_ and pre_ tables</text>
+                <text class="tx" x="170" y="386" font-weight="650">Your PostgreSQL</text><text class="tx2" x="170" y="408">business and engine tables</text>
                 <path class="ed" d="M170 426V468" stroke-dasharray="5 4" marker-end="url(#a3)" />
                 <text class="tx3" x="186" y="452" text-anchor="start">after commit</text>
                 <rect class="nd" x="10" y="470" width="320" height="60" rx="12" />

@@ -174,8 +174,11 @@
 }
 .review-changes { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font: var(--type-label); }
 .review-changes__field { color: var(--muted); margin-right: 6px; }
-.review-changes__from { color: var(--ink-2); text-decoration: line-through; }
-.review-changes__to { color: var(--ink); font-weight: 600; background: var(--indigo-soft); padding: 0 4px; border-radius: var(--radius-xs); }
+/* A changed value is text colour and a sign, never a fill: the old value is struck with a minus, the new one carries a plus. */
+.review-changes__from { color: var(--bad); text-decoration: line-through; }
+.review-changes__from::before { content: '\2212\00a0'; text-decoration: none; display: inline-block; }
+.review-changes__to { color: var(--ok); font-weight: 600; }
+.review-changes__to::before { content: '+\00a0'; }
 .review-changes__none { margin: 0; font: var(--type-label); }
 
 /* ---------- Process approval with the graph diff (CKP-024) ----------
@@ -233,8 +236,10 @@
 .pdiff__values > div { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .pdiff__values dt { color: var(--muted); }
 .pdiff__values dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
-.pdiff__from { color: var(--ink-2); text-decoration: line-through; }
-.pdiff__to { font-weight: 600; background: var(--diff-mod); padding: 0 4px; border-radius: var(--radius-xs); }
+.pdiff__from { color: var(--bad); text-decoration: line-through; }
+.pdiff__from::before { content: '\2212\00a0'; text-decoration: none; display: inline-block; }
+.pdiff__to { font-weight: 600; color: var(--ok); }
+.pdiff__to::before { content: '+\00a0'; }
 
 .diff-mark { display: inline-flex; align-items: center; gap: 4px; font: var(--type-caption); font-weight: 600; white-space: nowrap; }
 .diff-mark--added { color: var(--ok); }
@@ -386,6 +391,47 @@
 /* On a phone the action card follows the fields instead of floating over them, so it never covers a field. */
 @media (max-width: 640px) { .taskform .review-dock { position: static; } }
 
+/* ---------- Business calendar editor ---------- */
+
+.calendar-edit__note { margin: 0 0 var(--space-3); color: var(--ink-2); }
+.calendar-edit__fields { border: 0; margin: 0; padding: var(--space-3) 0 0; min-width: 0; }
+.calendar-hours__zone { display: flex; flex-direction: column; gap: var(--space-1); max-width: 360px; margin-bottom: var(--space-3); }
+.calendar-hours__days, .calendar-holidays__list { list-style: none; margin: 0; padding: 0; }
+.calendar-hours__day { display: grid; grid-template-columns: 64px minmax(0, 1fr); align-items: center; gap: var(--space-3); padding: 6px 0; border-bottom: 1px solid var(--line); }
+.calendar-hours__day:last-child { border-bottom: 0; }
+.calendar-hours__name { font-weight: 600; color: var(--ink); }
+.calendar-hours__ranges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-4); min-width: 0; }
+.calendar-hours__range { display: inline-flex; align-items: center; gap: var(--space-2); }
+.calendar-hours__range .field__input--compact { min-height: 36px; padding: 6px 8px; width: 84px; text-align: center; }
+.calendar-holidays__item { display: grid; grid-template-columns: 168px minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); padding: 6px 0; }
+.calendar-holidays__item .field__input--compact { min-height: 36px; padding: 6px 8px; }
+.calendar-holidays > .link-action { margin-top: var(--space-2); }
+.calendar-edit .field__input[aria-invalid="true"] { border-color: var(--bad-fill); }
+.calendar-new, .calendar-edit__dock { margin-top: var(--gap); }
+.calendar-edit__dock { position: sticky; bottom: var(--space-3); display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: var(--space-4); box-shadow: var(--sh-dock); }
+.calendar-edit__reason { display: flex; flex-direction: column; gap: var(--space-1); }
+.calendar-edit__reason p { margin: 0; }
+.calendar-edit__dock > .field__error, .calendar-edit__dock > p { grid-column: 1 / -1; margin: 0; }
+.calendar-new__row { display: flex; gap: var(--space-3); margin-top: var(--space-2); max-width: 520px; }
+.calendar-new__row .field__input { flex: 1 1 auto; }
+.calendar-new .muted { margin: var(--space-2) 0 0; }
+.calendars__table .num { text-align: right; }
+.card--pad { padding: var(--card-pad); }
+
+/* A change's state: words with a small dot, and who and when beneath; nothing boxed. */
+.change-state { display: inline-flex; flex-direction: column; gap: 2px; }
+.change-state__head { display: inline-flex; align-items: center; gap: var(--space-2); font: var(--type-label); font-weight: 600; color: var(--ink); }
+.change-state__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.change-state__head--pending .change-state__dot { background: var(--warn-fill); }
+.change-state__head--approved .change-state__dot { background: var(--ok); }
+.change-state__head--rejected .change-state__dot { background: var(--bad); }
+.change-state__who { font: var(--type-caption); color: var(--muted); }
+.calendar-review__state { margin: 0 0 var(--space-3); }
+.calendar-edit__note { display: flex; align-items: center; gap: var(--space-3); }
+.calendar-hours__zone-name { color: var(--ink); }
+.calendar-holidays__item--read { grid-template-columns: 168px minmax(0, 1fr); }
+.calendar-icon-action { min-width: 32px; padding: 0 8px; font-size: 18px; line-height: 1; }
+.calendar-sent { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); grid-column: 1 / -1; }
 /* ---------- Step timing: plain numbers and a thin bar, nothing boxed ---------- */
 
 .timing__period { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) 0 var(--space-2); }
@@ -435,3 +481,7 @@
 .dg-node--heat-3 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); stroke: var(--warn-fill); }
 .dg-node--heat-4 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); stroke: var(--warn-fill); stroke-width: 2.25; }
 .dg-node .dg-node__heat { fill: var(--ink); font: var(--type-caption); font-weight: 600; stroke: var(--canvas); stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; }
+
+/* A figure with no room is kept back and shown while its step is hovered or focused (#688). */
+.dg-node .dg-node__heat--crowded { opacity: 0; pointer-events: none; }
+.dg-node:hover .dg-node__heat--crowded, .dg-node:focus .dg-node__heat--crowded, .dg-node:focus-within .dg-node__heat--crowded { opacity: 1; }
