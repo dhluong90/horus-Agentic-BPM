@@ -207,7 +207,7 @@ class HistorySimulationIT {
 
     /** Reads a resource as the same caller; an approval reads the version first to name the content it decides on. */
     private Reply get(String bearer, String path) throws Exception {
-        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", bearer).GET().build(), HttpResponse.BodyHandlers.ofString());
         return new Reply(response.statusCode(), response.headers().firstValue("Content-Type").orElse(""),
@@ -226,7 +226,7 @@ class HistorySimulationIT {
             }
             body = bound;
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", bearer)
                 .POST(body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));

@@ -301,7 +301,7 @@ class LoanOriginationIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, Map<String, String> headers)
             throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Basic " + Base64.getEncoder()
                         .encodeToString((user + ":it-pass").getBytes(StandardCharsets.UTF_8)))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
