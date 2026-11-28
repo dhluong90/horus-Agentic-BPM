@@ -36,7 +36,7 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("4");
+        assertThat(result.currentVersion()).isEqualTo("5");
         assertThat(result.migrationsExecuted()).isEqualTo(4);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
@@ -59,7 +59,7 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
-    void RLE_229_V3_adds_nullable_columns_and_its_documented_rollback_step_removes_them() {
+    void RLE_229_V4_adds_nullable_columns_and_its_documented_rollback_step_removes_them() {
         DataSource db = migratedDatabase();
         JdbcClient jdbc = JdbcClient.create(db);
         String columns = "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE "
@@ -76,7 +76,7 @@ class RuleEngineSchemaMigratorIT {
         assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE is_nullable = 'NO' AND "
                 + "column_name IN ('source_file_name', 'budget_limit', 'step_budget', 'timeout_ms')").query(Long.class).single()).isZero();
 
-        // The rollback step written at the top of V3, run by hand
+        // The rollback step written at the top of V5, run by hand
         jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN source_file_name").update();
         jdbc.sql("ALTER TABLE rle_version DROP COLUMN source_file_name").update();
         jdbc.sql("ALTER TABLE rle_decision DROP COLUMN timeout_ms").update();
@@ -87,13 +87,13 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
-    void RLE_230_V4_adds_the_decision_queue_and_its_documented_rollback_step_drops_it() {
+    void RLE_230_V5_adds_the_decision_queue_and_its_documented_rollback_step_drops_it() {
         DataSource db = migratedDatabase();
         JdbcClient jdbc = JdbcClient.create(db);
         assertThat(jdbc.sql("SELECT to_regclass('rle_decision_queue') IS NOT NULL").query(Boolean.class).single()).isTrue();
         assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_queue").query(Long.class).single()).isZero();
 
-        // The rollback step written at the top of V4, run by hand on an empty queue
+        // The rollback step written at the top of V5, run by hand on an empty queue
         jdbc.sql("DROP TABLE rle_decision_queue_event").update();
         jdbc.sql("DROP TABLE rle_decision_queue").update();
         jdbc.sql("DROP FUNCTION rle_decision_queue_guard()").update();
@@ -234,10 +234,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("4");
+        assertThat(result.currentVersion()).isEqualTo("5");
         assertThat(result.migrationsExecuted()).isEqualTo(4);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2", "3", "4");
+                .containsExactly("0", "1", "2", "4", "5");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -250,10 +250,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("4");
-        assertThat(second.currentVersion()).isEqualTo("4");
+        assertThat(second.initialVersion()).isEqualTo("5");
+        assertThat(second.currentVersion()).isEqualTo("5");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("4");
+        assertThat(migrator.currentVersion()).contains("5");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
                 .isEqualTo(4L);
     }
@@ -268,7 +268,7 @@ class RuleEngineSchemaMigratorIT {
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("4", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("5", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 
