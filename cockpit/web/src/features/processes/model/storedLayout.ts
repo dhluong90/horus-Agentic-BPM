@@ -1,4 +1,6 @@
 import type { DefinitionLayout } from '../../../api/processes/schemas';
+import type { DiagramGraph } from './bpmnGraph';
+import { noteBox, type PlacedAnnotation, type PlacedGroup } from './notes';
 import { labelSize, placeLabels, type Rect } from './edgeLabels';
 import { onOutline, SYMBOL_SIZE, type Layout, type PlacedEdge, type PlacedNode, type Point } from './layout';
 
@@ -45,7 +47,7 @@ function onShape(centre: Point, toward: Point, node: PlacedNode): Point {
   return Number.isFinite(scale) ? { x: centre.x + dx * scale, y: centre.y + dy * scale } : centre;
 }
 
-export function applyStoredLayout(layout: Layout, stored: DefinitionLayout): Layout {
+export function applyStoredLayout(layout: Layout, stored: DefinitionLayout, graph?: Pick<DiagramGraph, 'annotations' | 'groups'>): Layout {
   const boxes = new Map(Object.entries(stored.nodes));
   const before = new Map(layout.nodes.map((node) => [node.id, { x: node.x, y: node.y }]));
   const moved = new Set<string>();
@@ -96,7 +98,20 @@ export function applyStoredLayout(layout: Layout, stored: DefinitionLayout): Lay
     }
     return edge;
   });
-  return fitted({ ...layout, nodes, edges: placeLabels(nodes, edges, labelBounds(stored)) });
+  // Notes and groups the diagram gives bounds for are drawn there; a note it leaves out is placed by `placeNotes`.
+  const items: PlacedAnnotation[] = [];
+  for (const note of graph?.annotations ?? []) {
+    const box = boxes.get(note.id);
+    if (box === undefined) continue;
+    const size = noteBox(note.text, box.width ?? 150, box.height ?? 0);
+    items.push({ id: note.id, lines: size.lines, x: box.x, y: box.y, width: size.width, height: size.height });
+  }
+  const groups: PlacedGroup[] = [];
+  for (const group of graph?.groups ?? []) {
+    const box = boxes.get(group.id);
+    if (box?.width !== undefined && box.height !== undefined) groups.push({ id: group.id, label: group.label, x: box.x, y: box.y, width: box.width, height: box.height });
+  }
+  return fitted({ ...layout, nodes, edges: placeLabels(nodes, edges, labelBounds(stored)), ...(items.length > 0 ? { annotations: { items, links: [] } } : {}), ...(groups.length > 0 ? { groups } : {}) });
 }
 
 /** The label bounds a diagram keeps for its flows, by `source->target`. */
@@ -122,6 +137,8 @@ function fitted(layout: Layout): Layout {
       ys.push(edge.labelAt.y - size.height / 2, edge.labelAt.y + size.height / 2);
     }
   }
+  for (const item of layout.annotations?.items ?? []) { xs.push(item.x, item.x + item.width); ys.push(item.y, item.y + item.height); }
+  for (const group of layout.groups ?? []) { xs.push(group.x, group.x + group.width); ys.push(group.y, group.y + group.height); }
   const minX = Math.min(...xs);
   const minY = Math.min(...ys);
   const dx = MARGIN - minX;
@@ -132,5 +149,7 @@ function fitted(layout: Layout): Layout {
     points: edge.points.map((p) => ({ x: p.x + dx, y: p.y + dy })),
     labelAt: edge.labelAt === undefined ? undefined : { x: edge.labelAt.x + dx, y: edge.labelAt.y + dy },
   }));
-  return { ...layout, width: Math.ceil(Math.max(...xs) + dx + MARGIN), height: Math.ceil(Math.max(...ys) + dy + MARGIN), nodes, edges };
+  const annotations = layout.annotations === undefined ? {} : { annotations: { ...layout.annotations, items: layout.annotations.items.map((item) => ({ ...item, x: item.x + dx, y: item.y + dy })) } };
+  const groups = layout.groups === undefined ? {} : { groups: layout.groups.map((group) => ({ ...group, x: group.x + dx, y: group.y + dy })) };
+  return { ...layout, ...annotations, ...groups, width: Math.ceil(Math.max(...xs) + dx + MARGIN), height: Math.ceil(Math.max(...ys) + dy + MARGIN), nodes, edges };
 }
