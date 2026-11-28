@@ -147,10 +147,10 @@ public final class AsyncDecisionLog implements DecisionLog, DecisionQueueAdmin {
         jdbc.sql("""
                 INSERT INTO rle_decision_queue (tenant_id, created_at, id, rule_set_name, version_num, hit_policy,
                   outcome, error_code, masked_inputs, outputs, matched_rule_ids, caller_id, correlation_id, eval_clock,
-                  duration_micros, pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms)
+                  duration_micros, pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms, error_mode)
                 VALUES (:tenant, :createdAt, :id, :ruleSet, :version, :hitPolicy, :outcome, :errorCode,
                   CAST(:inputs AS jsonb), CAST(:outputs AS jsonb), CAST(:matched AS jsonb), :caller, :correlation,
-                  :clock, :micros, :pinned, :onBehalfOf, :functionVersions, :budgetLimit, :stepBudget, :timeoutMs)
+                  :clock, :micros, :pinned, :onBehalfOf, :functionVersions, :budgetLimit, :stepBudget, :timeoutMs, :errorMode)
                 """)
                 .param("tenant", r.tenantId()).param("createdAt", Timestamp.from(r.createdAt())).param("id", r.id())
                 .param("ruleSet", r.ruleSet()).param("version", r.version()).param("hitPolicy", r.hitPolicy())
@@ -161,7 +161,7 @@ public final class AsyncDecisionLog implements DecisionLog, DecisionQueueAdmin {
                 .param("micros", r.durationMicros()).param("pinned", r.pinned())
                 .param("onBehalfOf", r.onBehalfOf()).param("functionVersions", r.functionVersions())
                 .param("budgetLimit", r.budgetLimit()).param("stepBudget", r.stepBudget())
-                .param("timeoutMs", r.timeoutMillis())
+                .param("timeoutMs", r.timeoutMillis()).param("errorMode", r.errorMode())
                 .update();
         if (appended.incrementAndGet() % DEPTH_CHECK_EVERY == 0) {
             refreshDepth();
@@ -243,10 +243,10 @@ public final class AsyncDecisionLog implements DecisionLog, DecisionQueueAdmin {
     private static final String INSERT_INTO_LOG = """
             INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome,
               error_code, masked_inputs, outputs, matched_rule_ids, caller_id, correlation_id, eval_clock,
-              duration_micros, log_mode, pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms)
+              duration_micros, log_mode, pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms, error_mode)
             SELECT tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome, error_code,
               masked_inputs, outputs, matched_rule_ids, caller_id, correlation_id, eval_clock, duration_micros,
-              'ASYNC', pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms
+              'ASYNC', pinned, on_behalf_of, function_versions, budget_limit, step_budget, timeout_ms, error_mode
             FROM rle_decision_queue WHERE queue_seq IN (:seqs)
             """;
 
