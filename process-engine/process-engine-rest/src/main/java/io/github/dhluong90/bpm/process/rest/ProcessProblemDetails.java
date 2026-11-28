@@ -35,6 +35,7 @@ public class ProcessProblemDetails {
     static final Map<String, HttpStatus> STATUS = Map.ofEntries(
             Map.entry("INPUT_INVALID", HttpStatus.BAD_REQUEST),
             Map.entry("QUERY_INVALID", HttpStatus.BAD_REQUEST),
+            Map.entry("QUERY_TIMEOUT", HttpStatus.SERVICE_UNAVAILABLE),
             Map.entry("ROLE_FAN_OUT_EXCEEDED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_HASH_REQUIRED", HttpStatus.BAD_REQUEST),
             Map.entry("CONTENT_CHANGED", HttpStatus.CONFLICT),

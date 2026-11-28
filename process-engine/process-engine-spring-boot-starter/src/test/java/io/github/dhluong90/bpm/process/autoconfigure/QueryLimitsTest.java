@@ -15,20 +15,22 @@ class QueryLimitsTest {
 
     @Test
     void query_limits_may_be_lowered_but_never_raised() {
-        assertThat(new ProcessEngineProperties.Query(50, Duration.ofDays(7), 100, Duration.ofHours(1)).maxPageSize()).isEqualTo(50);
+        assertThat(new ProcessEngineProperties.Query(50, Duration.ofDays(7), 100, Duration.ofHours(1), Duration.ofSeconds(2)).maxPageSize()).isEqualTo(50);
 
-        assertThatThrownBy(() -> new ProcessEngineProperties.Query(201, Duration.ofDays(31), 100, Duration.ofHours(1)))
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(201, Duration.ofDays(31), 100, Duration.ofHours(1), Duration.ofSeconds(2)))
                 .hasMessageContaining("horus.bpm.processes.query.max-page-size");
-        assertThatThrownBy(() -> new ProcessEngineProperties.Query(0, Duration.ofDays(31), 100, Duration.ofHours(1)))
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(0, Duration.ofDays(31), 100, Duration.ofHours(1), Duration.ofSeconds(2)))
                 .hasMessageContaining("max-page-size");
-        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(32), 100, Duration.ofHours(1)))
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(32), 100, Duration.ofHours(1), Duration.ofSeconds(2)))
                 .hasMessageContaining("horus.bpm.processes.query.max-range");
-        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ZERO, 100, Duration.ofHours(1)))
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ZERO, 100, Duration.ofHours(1), Duration.ofSeconds(2)))
                 .hasMessageContaining("max-range");
-        assertThat(new ProcessEngineProperties.Query(200, Duration.ofDays(31), 1_000, Duration.ofHours(1)).maxRoles()).isEqualTo(1_000);
-        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(31), 0, Duration.ofHours(1)))
+        assertThat(new ProcessEngineProperties.Query(200, Duration.ofDays(31), 1_000, Duration.ofHours(1), Duration.ofSeconds(2)).maxRoles()).isEqualTo(1_000);
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(31), 0, Duration.ofHours(1), Duration.ofSeconds(2)))
                 .hasMessageContaining("horus.bpm.processes.query.max-roles");
-        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(31), 1_001, Duration.ofHours(1)))
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(31), 100, Duration.ofHours(1), Duration.ZERO))
+                .hasMessageContaining("horus.bpm.processes.query.statement-timeout");
+        assertThatThrownBy(() -> new ProcessEngineProperties.Query(200, Duration.ofDays(31), 1_001, Duration.ofHours(1), Duration.ofSeconds(2)))
                 .hasMessageContaining("max-roles");
     }
 

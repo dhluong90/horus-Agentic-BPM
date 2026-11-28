@@ -578,6 +578,16 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Example:** `options.decision.APPROVE.label.vi -> "Phê duyệt"; amount 250000000 + currency VND -> shown "250.000.000 ₫" in vi`.
 - **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named`, `PRE_393_a_currency_must_be_a_real_iso_4217_code`, `PRE_393_currency_from_must_name_another_field_that_is_not_masked` (`TaskFormsTest`)
 
+### PRE-394 A list read that runs longer than the statement timeout is stopped with `QUERY_TIMEOUT`, and returns no partial page
+- **Traces to:** `TR-PERF-07`, ADR-0015, #254
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** Tenant `bank-a` with `query.statement-timeout` of 500 ms (2 s by default); another connection holds an exclusive lock on `pre_definition`, then on `pre_instance`, so a list read waits; a host `@Transactional` method has inserted one row of its own and then calls the list.
+- **When:** `GET /definitions` and `GET /instances` are read while the lock is held; then the lock is released and `GET /definitions` is read again.
+- **Then:** Each read is stopped by the database after the limit and answered `503 QUERY_TIMEOUT` with a correlation id and no items; the host transaction is untouched and commits its row, because the read runs in a read-only transaction of its own that never joins it; once the lock is gone the list answers, and `SHOW statement_timeout` on a pooled connection is back to the server value, because the limit is transaction-local. A page that does answer is complete: it carries `nextCursor` when more items follow and none on the last page.
+- **Example:** `GET /instances with pre_instance locked -> 503 QUERY_TIMEOUT after 0.5 s`.
+- **Test ID:** `PRE_394_a_definition_list_slower_than_the_limit_is_stopped_with_a_named_code`, `PRE_394_an_instance_list_slower_than_the_limit_is_stopped_with_a_named_code`, `PRE_394_a_host_write_transaction_around_the_timed_out_read_is_untouched`, `PRE_394_the_list_answers_once_the_lock_is_gone_and_the_limit_does_not_stay_on_the_connection` (`ReadTimeoutPostgresIT`), `TR_SEC_08_every_code_of_the_error_matrix_is_a_problem_with_code_correlation_id_and_type`
+
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
 - **Milestone:** M2

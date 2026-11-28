@@ -89,6 +89,10 @@ jobs:
       - name: axe on the built site
         working-directory: cockpit/web
         run: node scripts/axe-site.mjs
+      - name: The built site at phone and tablet width (375, 390, 768)
+        # No sideways scroll, a link to a heading stops below the fixed bar, the zoom control sits below the picture (#629).
+        working-directory: cockpit/web
+        run: node scripts/site-mobile.mjs
 
   guide:
     # CKP-045: the commands of wiki/Getting-Started.md run in order from a fresh checkout; the last one

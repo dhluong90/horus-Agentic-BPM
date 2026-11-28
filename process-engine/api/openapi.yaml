@@ -185,7 +185,8 @@ paths:
       summary: List the definition keys of the tenant
       description: |
         One item per key, ordered by key: the latest version and its status, the version a start uses now, and the
-        time of the last change. Permission `processes:read`.
+        time of the last change. Stopped after `query.statement-timeout` (two seconds) as `503 QUERY_TIMEOUT`, with no
+        partial page. Permission `processes:read`.
       parameters:
         - $ref: '#/components/parameters/Limit'
         - $ref: '#/components/parameters/Cursor'
@@ -199,6 +200,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /definitions/{key}/versions/{version}:
     get:
       tags: [definitions]
@@ -845,6 +847,9 @@ paths:
         range `startedFrom` (inclusive) to `startedTo` (exclusive) of at most `query.max-range` (31 days). With only
         one bound the other is that range away; with neither the list is not limited in time. Ordered by `startedAt`
         then `id`, both descending. Items carry no variables, tokens or tasks; read one instance for those.
+        The read runs in its own read-only transaction and is stopped after `query.statement-timeout` (two seconds),
+        answered `503 QUERY_TIMEOUT` with no partial page; narrow the filter or try again. A page with `nextCursor` has
+        more items; a page without it is complete.
         Permission `processes:read`.
       parameters:
         - name: status
@@ -875,6 +880,7 @@ paths:
         '401': { $ref: '#/components/responses/Problem' }
         '403': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
     post:
       tags: [instances]
       operationId: startInstance
@@ -2721,7 +2727,7 @@ components:
         `NO_EFFECTIVE_VERSION`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND` or `DEFINITION_NOT_FOUND`. `409` is
         `VERSION_CONFLICT`, `CONTENT_CHANGED`, `CHANGE_SET_TRUNCATED`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `ASSIGNEE_NOT_ALLOWED` (the person a task would be handed to may not work it) or `IDEMPOTENCY_IN_FLIGHT`. `413` is `PAYLOAD_TOO_LARGE`. `429` is `START_ARRIVALS_FULL`, with a `Retry-After` header. `422` is
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
-        `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `500` is `INTERNAL`,
+        `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `503` is `QUERY_TIMEOUT` (a list read stopped by `query.statement-timeout`, `PRE-394`). `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED` or `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled
         back), with a correlation id only.
       headers:
@@ -4103,7 +4109,7 @@ components:
         status: { type: integer }
         code:
           type: string
-          enum: [INPUT_INVALID, QUERY_INVALID, ROLE_FAN_OUT_EXCEEDED, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
+          enum: [INPUT_INVALID, QUERY_INVALID, QUERY_TIMEOUT, ROLE_FAN_OUT_EXCEEDED, UNAUTHENTICATED, PERMISSION_DENIED, TASK_NOT_ASSIGNED,
             SELF_APPROVAL_FORBIDDEN, TENANT_NOT_ALLOWED, NO_EFFECTIVE_VERSION, DEFINITION_NOT_FOUND, INSTANCE_NOT_FOUND, ASYNC_STEP_NOT_FOUND,
             TASK_NOT_FOUND, FORM_NOT_DECLARED, INVALID_STATE, VERSION_CONFLICT, VERSION_SUPERSEDED, LAST_VERSION_IN_EFFECT,
             IDEMPOTENCY_IN_FLIGHT, PAYLOAD_TOO_LARGE, START_ARRIVALS_FULL, VALIDATION_FAILED, GUARDRAIL_CONTRACT_INVALID, BPMN_UNSUPPORTED_ELEMENT,

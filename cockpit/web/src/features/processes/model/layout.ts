@@ -182,7 +182,8 @@ function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
     const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW + (marked ? MARKER_ROW : 0);
     return { width: TASK_WIDTH, height: Math.max(TASK_MIN_HEIGHT, content), lines, typeLines };
   }
-  const lines = wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);
+  // An event or gateway the model leaves unnamed has no caption: its id is a code, not a name.
+  const lines = node.name === undefined || node.name.trim() === '' ? [] : wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);
   return { width: SYMBOL_SIZE, height: SYMBOL_SIZE + CAPTION_GAP + lines.length * CAPTION_LINE, lines, typeLines: [] };
 }
 
