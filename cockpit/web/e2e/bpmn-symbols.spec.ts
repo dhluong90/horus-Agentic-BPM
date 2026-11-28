@@ -55,6 +55,13 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1440, height: 1200 }]
     await expect(svg.locator('[data-node="b-timer"]')).toHaveAttribute('data-interrupting', 'false');
     await expect(svg.locator('[data-node="e-none"] circle')).toHaveCount(1);
     await expect(svg.locator('[data-node="t-none"] circle')).toHaveCount(2);
+    // A throw or end glyph is solid, a catch glyph an outline, and an end event has the thick ring.
+    await expect(svg.locator('[data-node="e-multiple"] .icon--filled')).toHaveCount(1);
+    await expect(svg.locator('[data-node="e-signal"] .icon--filled')).toHaveCount(1);
+    await expect(svg.locator('[data-node="e-terminate"] .icon--filled')).toHaveCount(1);
+    await expect(svg.locator('[data-node="t-multiple"] .icon--filled')).toHaveCount(1);
+    await expect(svg.locator('[data-node="c-multiple"] .icon--filled')).toHaveCount(0);
+    await expect(svg.locator('[data-node="e-message"] > circle').first()).toHaveCSS('stroke-width', '3.5px');
     const name = `${SHOTS}/symbols-${String(size.width)}x${String(size.height)}`;
     await page.screenshot({ path: `${name}.png` });
     // At 100 % the symbols are drawn at full size: the frame is read in three bands.

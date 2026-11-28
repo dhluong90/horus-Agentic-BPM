@@ -46,7 +46,7 @@
 .dg-node g path, .dg-node g circle, .dg-node g rect { fill: none; stroke: currentColor; filter: none; }
 .dg-node g .icon--filled { fill: currentColor; }
 .dg-node g .icon--knockout { stroke: var(--node); }
-.dg-node--endEvent circle { stroke-width: 3.5; }
+.dg-node--endEvent circle, .dg-node[data-type^="endEvent"] > circle { stroke-width: 3.5; }
 /* A boundary event that does not interrupt is drawn with a dashed ring, and a link is a dashed line (#489, #493). */
 .dg-node--soft circle { stroke-dasharray: 4 3; }
 .dg-edge--link path:first-child { stroke-dasharray: 5 4; }

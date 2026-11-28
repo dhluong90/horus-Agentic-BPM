@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { SYMBOL_GALLERY_BPMN, SYMBOL_GALLERY_LAYOUT } from '../../../mocks/symbolGallery';
 import { isKnownNodeType, readBpmnGraph } from './bpmnGraph';
-import { layoutGraph, overlaps } from './layout';
+import { footprint, labelSize } from './edgeLabels';
+import { layoutGraph, overlaps, wrapWords } from './layout';
 import { nodeTypeLabel } from './nodeLabels';
 
 const graph = readBpmnGraph(SYMBOL_GALLERY_BPMN);
@@ -47,6 +48,36 @@ describe('BPMN symbols (#209)', () => {
     const solid = layout.nodes.filter((node) => node.attachedTo === undefined);
     for (const [index, a] of solid.entries()) {
       for (const b of solid.slice(index + 1)) expect(overlaps(a, b), `${a.id} overlaps ${b.id}`).toBe(false);
+    }
+  });
+
+  it('CKP_209_a_type_label_breaks_only_at_spaces_and_hyphens', () => {
+    const words: Record<string, string> = { transaction: 'Transaction', subProcess: 'Sub-process', 'subProcess:event': 'Event sub-process' };
+    const layout = layoutGraph(graph, (type) => words[type] ?? type);
+    expect(layout.nodes.find((n) => n.id === 'p-transaction')?.typeLines).toEqual(['Transaction']);
+    expect(layout.nodes.find((n) => n.id === 'p-embedded')?.typeLines).toEqual(['Sub-', 'process']);
+    expect(layout.nodes.find((n) => n.id === 'p-event-soft')?.lines).toEqual(['Event non-', 'interrupting']);
+    expect(wrapWords('Event sub-process', 74, 6.8)).toEqual(['Event sub-', 'process']);
+  });
+
+  it('CKP_209_a_name_wider_than_its_box_is_cut_with_an_ellipsis_not_in_the_middle_of_a_word', () => {
+    const long = { name: 'x', nodes: [{ id: 'a', name: 'Supercalifragilisticexpialidocious', type: 'task' }], edges: [] };
+    const lines = layoutGraph(long).nodes[0]?.lines ?? [];
+    expect(lines.join(' ')).toMatch(/^Supercalifr.*…$/);
+  });
+
+  it('CKP_209_the_name_of_a_flow_between_close_boxes_clears_both', () => {
+    const layout = layoutGraph({ ...graph, stored: SYMBOL_GALLERY_LAYOUT });
+    const edge = layout.edges.find((e) => e.id === 'flow-if');
+    const size = labelSize(edge?.label ?? '');
+    const at = edge?.labelAt ?? { x: 0, y: 0 };
+    const rect = { x: at.x - size.width / 2, y: at.y - size.height / 2, ...size };
+    for (const id of ['k-task', 'k-user']) {
+      const node = layout.nodes.find((n) => n.id === id);
+      if (node === undefined) throw new Error(`${id} is not drawn`);
+      const box = footprint(node);
+      const hit = rect.x < box.x + box.width && box.x < rect.x + rect.width && rect.y < box.y + box.height && box.y < rect.y + rect.height;
+      expect(hit, id).toBe(false);
     }
   });
 });

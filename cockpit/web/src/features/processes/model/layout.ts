@@ -124,6 +124,33 @@ export function wrapText(text: string, maxWidth: number, charWidth: number): str
   return lines.length > 0 ? lines : [''];
 }
 
+/**
+ * Wrap for a type label (#609): a line breaks only at a space or just after a hyphen, never inside a word. A word that is
+ * wider than the line stays whole on its own line rather than being cut in two.
+ */
+export function wrapWords(text: string, maxWidth: number, charWidth: number): string[] {
+  const perLine = Math.max(4, Math.floor(maxWidth / charWidth));
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/).filter((part) => part !== '')) {
+    const parts = word.match(/[^-]+-?|-/g) ?? [word];
+    parts.forEach((part, index) => {
+      const joined = index === 0 ? (line === '' ? part : `${line} ${part}`) : line + part;
+      if (line === '' || joined.length <= perLine) line = joined;
+      else { lines.push(line); line = part; }
+    });
+  }
+  if (line !== '') lines.push(line);
+  return lines.length > 0 ? lines : [''];
+}
+
+/** A line wider than its room is cut with an ellipsis; the step's own title carries the whole text. */
+function fitted(lines: string[], maxWidth: number, charWidth: number): string[] {
+  // Wrapping estimates generously; the cut is made at the width the text really draws at (about 0.9 of the estimate).
+  const perLine = Math.max(4, Math.floor(maxWidth / (charWidth * 0.9)));
+  return lines.map((line) => (line.length > perLine ? `${line.slice(0, perLine - 1)}…` : line));
+}
+
 /** Events and gateways get their symbol; every other node, and any type this cockpit does not know, a box. */
 export function shapeOf(type: string): Shape {
   if (!isKnownNodeType(type)) return 'task';
@@ -143,8 +170,8 @@ interface Size { width: number; height: number; lines: string[]; typeLines: stri
 function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
   const name = node.name ?? node.id;
   if (shape === 'task') {
-    const lines = wrapText(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
-    const typeLines = wrapText(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
+    const lines = fitted(wrapWords(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR), TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
+    const typeLines = fitted(wrapWords(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR), TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
     // A step that repeats or undoes another carries a marker at its foot (#496): the box keeps a row for it, clear of the text.
     const marked = node.loop !== undefined || (node.compensation === true && node.type !== 'serviceTask:compensation');
     const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW + (marked ? MARKER_ROW : 0);
