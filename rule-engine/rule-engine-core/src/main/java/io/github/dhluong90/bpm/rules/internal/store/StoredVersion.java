@@ -295,6 +295,10 @@ public record StoredVersion(
      * @return the new state with the lock version incremented
      */
     public StoredVersion requested(String requester, Instant at, Instant requestedEffectiveFrom) {
+        // PostgreSQL rounds a finer instant; the seal is computed over what is stored, so the date is cut here.
+        at = at.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
+        requestedEffectiveFrom = requestedEffectiveFrom == null ? null
+                : requestedEffectiveFrom.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PENDING_APPROVAL, hitPolicy,
                 requestedEffectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
                 requester, at, null, null, null, createdBy, createdAt, null, copiedFrom);
@@ -312,7 +316,8 @@ public record StoredVersion(
         // PostgreSQL stores microseconds and rounds a finer instant, so the seal is computed over the stored value.
         at = at.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PUBLISHED, hitPolicy,
-                effectiveFrom == null ? at : effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument,
+                effectiveFrom == null ? at
+                        : effectiveFrom.truncatedTo(java.time.temporal.ChronoUnit.MICROS), canonicalJson, canonicalHash, sourceFormat, sourceDocument,
                 sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt, null,
                 copiedFrom);
     }
