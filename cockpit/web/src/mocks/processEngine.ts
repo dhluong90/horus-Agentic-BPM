@@ -102,6 +102,8 @@ export interface ProcessSeed {
   definitions?: readonly DemoDefinition[];
   /** The change list of the pending onboarding version is cut off at the engine's limit. */
   truncatedDiff?: boolean;
+  /** Stored layouts (the diagram of an imported BPMN file) by `<key>:<version>`; a version not listed has none (204). */
+  layouts?: Readonly<Record<string, unknown>>;
   startedBy?: string;
   reportedBy?: string;
   /** The tenant's language of the demo data: names, reasons and answer words. */
@@ -590,6 +592,13 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     }
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject|:withdraw)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
+    const layoutRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/layout$/.exec(path);
+    if (layoutRoute && request.method === 'GET') {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      const stored = seed.layouts?.[`${layoutRoute[1] ?? ''}:${layoutRoute[2] ?? ''}`];
+      if (stored === undefined) return { status: 204, headers: { ETag: '"0"' }, body: '' };
+      return json(200, { revision: 1, layoutHash: '0'.repeat(64), definitionHash: '0'.repeat(64), source: 'BPMN', createdBy: 'import', createdAt: '2026-11-19T09:00:00Z', layout: stored }, { ETag: '"1"' });
+    }
     const version = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/export)?$/.exec(path);
     if (request.method === 'GET' && version) {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');

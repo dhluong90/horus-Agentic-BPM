@@ -1774,8 +1774,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions.add(timer);
                     if (timer.timeCycle() != null) {
                         addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                BpmnStages.S1));
+                                "is not supported on a catch or boundary event; use timeDuration or timeDate", "timeCycle",
+                                safe(id), line, BpmnStages.NOT_PLANNED));
                     } else {
                         TimerSchedule.problem(timer).ifPresent(problem ->
                                 invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
@@ -2010,8 +2010,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     defs.add(timer);
                     if (timer.timeCycle() != null) {
                         addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                BpmnStages.S1));
+                                "is not supported on a catch or boundary event; use timeDuration or timeDate", "timeCycle",
+                                safe(id), line, BpmnStages.NOT_PLANNED));
                     } else {
                         TimerSchedule.problem(timer).ifPresent(problem ->
                                 invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));

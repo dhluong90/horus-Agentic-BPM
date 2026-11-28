@@ -123,7 +123,7 @@ class MaskedInputsHostIT {
             // value of the tenant's subkey, computed here independently; never the key.
             for (String[] tenant : new String[][] {{"bank-a", auditor}, {"tenant-b", otherTenantAuditor}}) {
                 HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(
-                                URI.create("http://localhost:" + port + "/api/bpm/meta"))
+                                URI.create("http://127.0.0.1:" + port + "/api/bpm/meta"))
                         .header("Authorization", tenant[1]).GET().build(), HttpResponse.BodyHandlers.ofString());
                 bodies.add(meta.body());
                 JsonNode settings = JSON.readTree(meta.body()).path("modules").get(0).path("settings");
@@ -163,7 +163,7 @@ class MaskedInputsHostIT {
                         .status()).isEqualTo(200);
             }
             HttpResponse<String> limited = HTTP.send(HttpRequest.newBuilder(
-                            URI.create("http://localhost:" + port + "/api/bpm/rules/v1/decisions:find-by-masked-input"))
+                            URI.create("http://127.0.0.1:" + port + "/api/bpm/rules/v1/decisions:find-by-masked-input"))
                     .header("Authorization", auditor).header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(search)).build(), HttpResponse.BodyHandlers.ofString());
             bodies.add(limited.body());
@@ -320,7 +320,7 @@ class MaskedInputsHostIT {
     private static Reply send(int port, String bearer, String method, String path, String body, String contentType)
             throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(
-                        URI.create("http://localhost:" + port + "/api/bpm/rules/v1" + path))
+                        URI.create("http://127.0.0.1:" + port + "/api/bpm/rules/v1" + path))
                 .header("Authorization", bearer)
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));

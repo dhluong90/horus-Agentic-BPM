@@ -2789,6 +2789,19 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
 - **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)
 
+### PRE-377 Each undo step that finishes raises an event naming the handler, the step it undid and the outcome
+- **Traces to:** `TR-COMP-01`, `PRE-073`, `PRE-085`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The fund transfer of `PRE-073`: `hold-funds` (undone by `release-hold`), `debit-source` (undone by `credit-back`) and `credit-target`, which fails with `ACCOUNT_CLOSED`. `25,000,000 VND` is moved from `0011-223344`.
+- **When:** Both undo steps complete.
+- **Then:**
+  - `processes.compensation.step-completed.v1` is published twice, newest first: first `nodeId` `debit-source` with `handler` `credit-back`, then `nodeId` `hold-funds` with `handler` `release-hold`; each has `outcome` `COMPLETED`, the instance id, the saga `scopeId` and the undo `attemptId`.
+  - Each event is published in the transaction that writes the matching `COMPENSATION_STEP_COMPLETED` history entry, and carries no variable or output. An undo an approver marks done by hand has `outcome` `COMPLETED_MANUALLY` and no `attemptId`.
+  - A failed undo step publishes no such event.
+- **Example:** `credit-back undoes debit-source -> step-completed(nodeId=debit-source, handler=credit-back, COMPLETED)`.
+- **Test ID:** `PRE_377_each_finished_undo_step_raises_an_event_newest_first` (`SagaCompensationTest`)
+
 ### PRE-378 A duplicate of a request that is still running waits at most the lock timeout, is then refused as IDEMPOTENCY_IN_FLIGHT, and never runs the work twice
 - **Traces to:** `TR-IDEM-01`, ADR-0006, #172
 - **Milestone:** M3

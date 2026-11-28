@@ -6,7 +6,8 @@ Usage:   python3 tools/rescan-test-images.py OUT_DIR [IMAGE ...]
          PgBouncer images, the Testcontainers reaper and the Playwright image of CI.
 Why:     a digest never picks up base-image fixes, so a pinned image only gets older. Test images never
          ship, so a finding here is a reason to move the pin to a fixed digest on purpose, not a failed
-         release: the weekly Deploy run opens an issue per image instead of failing.
+         release: the weekly Deploy run opens an issue per image instead of failing. An image with an
+         unexpired entry in tools/test-image-waivers.json is scanned and listed, and opens no issue.
 What:    Grype scans each image from its registry (linux/amd64, the platform CI runs the tests on) with
          the repository's .grype.yaml. For each image with a high or critical finding, OUT_DIR gets
          <slug>.title (the issue title) and <slug>.md (the issue body: the findings and how to move the pin).
@@ -19,6 +20,7 @@ Exit:    0 every image was scanned (with or without findings), 2 a scan could no
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import json
 import os
@@ -34,6 +36,20 @@ SEVERITIES = ("Critical", "High")
 TITLE_PREFIX = "Platform: Update Pinned Test Image "
 # GitHub limits an issue body to 65536 characters; the full list is in the Grype JSON report.
 MAX_ROWS = 150
+
+
+WAIVERS = ROOT / "tools/test-image-waivers.json"
+
+
+def active_waiver(image: str, today: datetime.date, waivers: list[dict] | None = None) -> dict | None:
+    """The unexpired waiver for an image (test-only, never shipped), or None. A waived image is still
+    scanned and listed in the summary, but opens no issue until its waiver expires."""
+    if waivers is None:
+        waivers = json.loads(WAIVERS.read_text(encoding="utf-8")) if WAIVERS.is_file() else []
+    for waiver in waivers:
+        if waiver["image"] == image and today <= datetime.date.fromisoformat(waiver["expires"]):
+            return waiver
+    return None
 
 
 def pinned_images() -> list[str]:
@@ -157,8 +173,12 @@ def main(argv: list[str]) -> int:
             print(f"rescan-test-images: Grype could not scan {image} (exit {status}).", file=sys.stderr)
             return 2
         rows = findings(json.loads((out_dir / report).read_text(encoding="utf-8")))
-        summary.append(f"| `{image}` | {len(rows) or 'none'} |")
-        if rows:
+        waiver = active_waiver(image, datetime.date.today()) if rows else None
+        summary.append(f"| `{image}` | {len(rows) or 'none'}"
+                       + (f", waived until {waiver['expires']} (#{waiver['issue']})" if waiver else "") + " |")
+        if waiver:
+            print(f"WAIVED  {len(rows)} high or critical in {image} until {waiver['expires']} (#{waiver['issue']})")
+        elif rows:
             (out_dir / f"{slug(image)}.title").write_text(issue_title(image) + "\n", encoding="utf-8")
             (out_dir / f"{slug(image)}.md").write_text(issue_body(image, rows, run_url), encoding="utf-8")
             print(f"FINDING  {len(rows)} high or critical in {image}: {issue_title(image)}")

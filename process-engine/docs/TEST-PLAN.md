@@ -250,6 +250,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-374 | `PRE_374_*` in `ActivityDefaultFlowAndTerminateTest` and `BoundaryEventsPostgresIT` | A terminate reached from an error boundary ends the instance with every other branch | M3 | `TR-STD-04` | Done |
 | PRE-375 | `PRE_375_*` in `ActivityDefaultFlowAndTerminateTest` | A flow condition reads a field of a rule task result | M3 | `TR-STD-04` | Done |
 | PRE-376 | `PRE_376_*` in `ActivityDefaultFlowAndTerminateTest` | Two boundary paths share one end event | M3 | `TR-STD-04` | Done |
+| PRE-377 | `PRE_377_*` in `SagaCompensationTest` | Each finished undo step raises `processes.compensation.step-completed.v1` | M3 | `TR-COMP-01` | Done |
 | PRE-378 | `PRE_378_*` in `IdempotencyWaitPostgresIT` | A running duplicate is refused within the lock timeout; a later retry replays | M3 | `TR-IDEM-01` | Done |
 | PRE-379 | `PRE_379_*` in `IdempotencyWaitPostgresIT` | A duplicate that waits within the timeout returns the first result | M3 | `TR-IDEM-01` | Done |
 | PRE-380 | `PRE_380_*` in `IdempotencyWaitPostgresIT` | Rewritten source and hashes are refused against the approval record | M3 | `TR-SEC-04` | Done |
