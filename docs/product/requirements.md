@@ -120,7 +120,7 @@ Reference list of the numbered, testable requirements that gate a release. "Must
 ## Observability and audit
 | ID | Requirement | Verification |
 |---|---|---|
-| TR-OBS-01 | Append-only decision log and process history; the engine exposes no update or delete operations on them. Named exceptions: dropping whole monthly partitions under `decision-log.retention` and `history.retention`, and the four-eyes tenant purge of `TR-TEN-03` (PD-051). Must. | Code review rule; integration tests |
+| TR-OBS-01 | Append-only decision log and process history; the engine exposes no update or delete operations on them. Named exceptions: dropping whole monthly partitions under `decision-log.retention` (and under `history.retention` once it is built; it is not in the code on main), and the four-eyes tenant purge of `TR-TEN-03` (PD-051). Must. | Code review rule; integration tests |
 | TR-OBS-02 | Micrometer metrics for evaluations, errors, durations, active instances, incidents, timer lag. Must. | Metrics test |
 | TR-OBS-03 | OpenTelemetry spans for evaluation and step execution when a tracer is present. Should. | Integration test with an in-memory exporter |
 | TR-OBS-04 | Events for rule set version publish requested, published, rejected and retired; process definition publish requested, approved, rejected and retired (from M2, ADR-0012); instance started, completed, cancelled and failed; incident raised and resolved. Must. | Unit tests on publisher (`PRE-037`) |

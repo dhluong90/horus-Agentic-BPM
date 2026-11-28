@@ -29,7 +29,8 @@ Guides: [Rule Engine Decision Log and Audit](../wiki/Rule-Engine-Decision-Log-an
 | Decision log | `horus.bpm.rules.decision-log.retention` | `keep-forever`, or an ISO 8601 period in whole months, such as `P12M`, `P84M`, `P120M` | Required from 1.0. Unset stops start-up outside the `dev` profile |
 | Shortest retention accepted | `horus.bpm.rules.decision-log.retention-floor` | `P12M` or longer, in whole months | `P12M` |
 | Partitions created ahead | `horus.bpm.rules.decision-log.partitions-ahead` | `PT0S` to `P366D` | `P7D` |
-| Process history (`pre_history`) | none | The engine drops nothing. Any removal policy is to be decided by the maintainers | Kept without limit |
+| Process history (`pre_history`) | none on main | The engine drops nothing. A `history.retention` setting is planned in the design but not built; the policy is to be decided by the maintainers (D2) | Kept without limit |
+| Hourly statistics (`pre_node_stats_hourly`, not audit) | `horus.bpm.processes.stats.rollup-retention` | ISO 8601 period of at least `P31D` | `P13M` |
 | Idempotency keys | `idempotency.retention`, `horus.bpm.processes.idempotency-retention` | `PT1M` to `P30D` (Rule Engine) | `PT24H` |
 
 Details of each key: [Rule Engine Configuration](../wiki/Rule-Engine-Configuration.md).

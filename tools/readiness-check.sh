@@ -115,10 +115,34 @@ MISSING=""; S=$(prs_state "704")
 if ! have_files examples/rule-and-process/src/test/java/io/github/dhluong90/bpm/examples/ruleandprocess/TwoRoleDatabaseIT.java deploy/postgres/app-role-grants.sql; then row R11 pending "DB app role does not own the tables (#700, PR 704)" "missing:$MISSING"
 else row R11 "$([ "$S" = "PRs merged" ] && echo pass || echo pending)" "DB app role does not own the tables (#700, PR 704)" "$S; TwoRoleDatabaseIT and app-role-grants.sql exist"; fi
 
-# R12 Secrets and key rotation: one page that links the runbook sections
-if have_files docs/SECRETS-AND-KEY-ROTATION.md wiki/Operations-Runbook.md && grep -q "Variable-encryption keyring" docs/SECRETS-AND-KEY-ROTATION.md; then
-  row R12 pass "Secrets and key rotation" "docs/SECRETS-AND-KEY-ROTATION.md: seal and variable keyrings, database credentials, OTLP"
-else row R12 pending "Secrets and key rotation" "missing:$MISSING docs/SECRETS-AND-KEY-ROTATION.md"; fi
+# R12 Secrets and key rotation: the page exists, its PRs are merged, and every link it makes to a file or anchor resolves
+R12D=docs/SECRETS-AND-KEY-ROTATION.md; R12P="644 692 703 704"; MISSING=""
+if ! have_files "$R12D" wiki/Operations-Runbook.md; then row R12 pending "Secrets and key rotation" "missing:$MISSING"
+else
+  BAD=$(python3 - <<'PY'
+import re, os
+doc = open("docs/SECRETS-AND-KEY-ROTATION.md").read()
+bad = []
+def slugs(path):
+    out = set()
+    for l in open(path, encoding="utf8"):
+        m = re.match(r"#{1,6}\s+(.*)", l)
+        if m:
+            out.add(re.sub(r"[^\w\- ]", "", m.group(1).strip().lower()).replace(" ", "-"))
+    return out
+for target, anchor in re.findall(r"\]\(([^)#\s]+)(?:#([^)\s]*))?\)", doc):
+    if target.startswith("http"): continue
+    path = os.path.normpath(os.path.join("docs", target))
+    if not os.path.exists(path): bad.append(target); continue
+    if anchor and anchor not in slugs(path): bad.append(target + "#" + anchor)
+print(" ".join(bad))
+PY
+)
+  S=$(prs_state "$R12P")
+  if [ -n "$BAD" ]; then row R12 pending "Secrets and key rotation" "broken links in $R12D: $BAD"
+  elif [ "$S" != "PRs merged" ]; then row R12 pending "Secrets and key rotation" "$S"
+  else row R12 pass "Secrets and key rotation" "$R12D; PRs $R12P merged; every link and anchor resolves"; fi
+fi
 
 # R13 and R14 pilot-scope gaps: pending until the owner or architect marks each covered elsewhere or out of scope
 row R13 pending "Rollback of a bad release" "beyond the 1.0.0 upgrade test; no evidence"
