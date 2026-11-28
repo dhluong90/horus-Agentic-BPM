@@ -158,7 +158,8 @@ ENV PORT=8080 \
 EXPOSE 8080
 
 # Health is public on every example host; busybox wget is kept in the runtime image for this check.
+# With MANAGEMENT_SERVER_PORT set (the observability profile) the actuator answers on that port instead.
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
-  CMD wget -q -T 2 -O /dev/null "http://127.0.0.1:${PORT}/actuator/health" || exit 1
+  CMD wget -q -T 2 -O /dev/null "http://127.0.0.1:${MANAGEMENT_SERVER_PORT:-${PORT}}/actuator/health" || exit 1
 
 ENTRYPOINT ["java", "org.springframework.boot.loader.launch.JarLauncher"]

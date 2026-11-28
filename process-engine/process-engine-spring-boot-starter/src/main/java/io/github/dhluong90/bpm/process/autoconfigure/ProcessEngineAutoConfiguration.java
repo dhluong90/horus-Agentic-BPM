@@ -139,11 +139,12 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    ProcessEngineTransactions processEngineTransactions(ObjectProvider<PlatformTransactionManager> transactionManager) {
+    ProcessEngineTransactions processEngineTransactions(ObjectProvider<PlatformTransactionManager> transactionManager,
+            DataSource dataSource) {
         return new ProcessEngineTransactions(transactionManager.getIfUnique(() -> {
             throw new IllegalStateException("The Process Engine needs exactly one PlatformTransactionManager from the "
                     + "host. Add spring-boot-starter-jdbc, or mark one transaction manager @Primary.");
-        }));
+        }), org.springframework.jdbc.core.simple.JdbcClient.create(dataSource));
     }
 
     @Bean
@@ -384,6 +385,8 @@ public class ProcessEngineAutoConfiguration {
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
         // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
         services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        // PRE-394: instance and definition lists run in a read-only transaction with a statement timeout.
+        services.useReadTimeout(properties.query().statementTimeout());
         // AUD-10: held start arrivals expire and one definition holds a bounded number.
         services.useStartArrivalSettings(properties.parallelStart().toSettings());
         // #491: the host's outbox port for the messages a process sends; none when the host sends no messages.
