@@ -32,12 +32,48 @@ import java.util.List;
  * @param copiedFrom on the {@code CREATED} row of a restore, the earlier version it copied (RLE-062); otherwise null
  * @param retireRequestedBy on a {@code RETIRED} row in {@code four-eyes} mode, who requested the retirement the actor
  *     confirmed (RLE-038, column {@code retire_requested_by}); otherwise null
+ * @param effectiveFrom on {@code REQUESTED} and {@code APPROVED} rows, the effective date the transition names, so a
+ *     date changed later in {@code rle_version} can be compared with what was requested and approved (RLE-215);
+ *     otherwise null
  */
 public record HistoryRow(String tenantId, String id, String versionId, LifecycleAction action,
         VersionStatus fromStatus, VersionStatus toStatus, String actor, String reason, long lockVersion,
         Instant occurredAt, Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
         String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings, List<String> maskedByDefaultInputs,
-        Integer copiedFrom, String retireRequestedBy) {
+        Integer copiedFrom, String retireRequestedBy, Instant effectiveFrom) {
+
+    /**
+     * Creates a row that names no effective date.
+     *
+     * @param tenantId see the record
+     * @param id see the record
+     * @param versionId see the record
+     * @param action see the record
+     * @param fromStatus see the record
+     * @param toStatus see the record
+     * @param actor see the record
+     * @param reason see the record
+     * @param lockVersion see the record
+     * @param occurredAt see the record
+     * @param supersededBy see the record
+     * @param approvalMode see the record
+     * @param noVersionInEffect see the record
+     * @param canonicalHash see the record
+     * @param previousCanonicalHash see the record
+     * @param acknowledgedWarnings see the record
+     * @param maskedByDefaultInputs see the record
+     * @param copiedFrom see the record
+     * @param retireRequestedBy see the record
+     */
+    public HistoryRow(String tenantId, String id, String versionId, LifecycleAction action, VersionStatus fromStatus,
+            VersionStatus toStatus, String actor, String reason, long lockVersion, Instant occurredAt,
+            Integer supersededBy, String approvalMode, Boolean noVersionInEffect, String canonicalHash,
+            String previousCanonicalHash, List<AcknowledgedWarning> acknowledgedWarnings,
+            List<String> maskedByDefaultInputs, Integer copiedFrom, String retireRequestedBy) {
+        this(tenantId, id, versionId, action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
+                supersededBy, approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash,
+                acknowledgedWarnings, maskedByDefaultInputs, copiedFrom, retireRequestedBy, null);
+    }
 
     /**
      * Creates the {@code CREATED} row of a restore, which names no retirement requester.
@@ -239,8 +275,12 @@ public record HistoryRow(String tenantId, String id, String versionId, Lifecycle
      * @return the entry
      */
     public VersionHistoryEntry toEntry() {
+        // The hash and date of a request or approval are the audit record in the table (RLE-215); the entry keeps its
+        // documented meaning: a hash only on DRAFT_UPDATED.
+        boolean draftUpdate = action == LifecycleAction.DRAFT_UPDATED;
         return new VersionHistoryEntry(action, fromStatus, toStatus, actor, reason, lockVersion, occurredAt,
-                supersededBy, approvalMode, noVersionInEffect, canonicalHash, previousCanonicalHash, acknowledgedWarnings,
+                supersededBy, approvalMode, noVersionInEffect, draftUpdate ? canonicalHash : null,
+                draftUpdate ? previousCanonicalHash : null, acknowledgedWarnings,
                 maskedByDefaultInputs, copiedFrom, retireRequestedBy);
     }
 }

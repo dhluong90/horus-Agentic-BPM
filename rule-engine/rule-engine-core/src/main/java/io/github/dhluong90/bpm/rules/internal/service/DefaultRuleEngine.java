@@ -1055,6 +1055,13 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
+        // RLE-223: the date and approver are outside the content hash, so the seal written at approval is checked on
+        // every load, before the cache: a date moved in the table is refused, not served.
+        if (!new ApprovalSeal(context.sealKey()).matches(version)) {
+            throw new IntegrityFailure("Integrity check failed: the approval seal of " + version.ruleSet() + " v"
+                    + version.version() + " does not match its effective date, hash and approver; the version is not"
+                    + " served");
+        }
         String key = version.tenantId() + "/" + version.id() + "/" + version.canonicalHash();
         CompiledRuleSet cached = compiled.get(key);
         if (cached != null) {

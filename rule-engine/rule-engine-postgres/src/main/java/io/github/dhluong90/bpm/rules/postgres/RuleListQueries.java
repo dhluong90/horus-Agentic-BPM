@@ -19,7 +19,7 @@ final class RuleListQueries {
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
             v.approval_comment, v.created_by, v.created_at, v.retired_at, v.copied_from, v.retire_requested_by,
-            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version
+            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version, v.approval_seal
             """;
 
     /**
@@ -108,7 +108,8 @@ final class RuleListQueries {
                     SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
                       approval_mode, no_version_in_effect, lock_version, occurred_at, canonical_hash,
                       previous_canonical_hash, acknowledged_warnings::text AS acknowledged,
-                      masked_by_default_inputs::text AS masked_by_default, copied_from, retire_requested_by
+                      masked_by_default_inputs::text AS masked_by_default, copied_from, retire_requested_by,
+                      effective_from
                     FROM rle_version_history
                     WHERE tenant_id = :tenant AND version_id = :versionId
                     ORDER BY occurred_at, id
@@ -143,7 +144,8 @@ final class RuleListQueries {
             """
                     SELECT tenant_id, id, version_id, action, from_status, to_status, actor, reason, superseded_by,
                       approval_mode, no_version_in_effect, lock_version, occurred_at, canonical_hash,
-                      previous_canonical_hash, acknowledged, masked_by_default, copied_from, retire_requested_by
+                      previous_canonical_hash, acknowledged, masked_by_default, copied_from, retire_requested_by,
+                      effective_from
                     FROM (
                       SELECT h.*, h.acknowledged_warnings::text AS acknowledged,
                         h.masked_by_default_inputs::text AS masked_by_default,

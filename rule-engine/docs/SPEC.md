@@ -1444,3 +1444,12 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Example:** `customer-7 -> 403; minh -> {users: {lan: "Tran Thi Lan"}}`
 - **Test IDs:** `RLE_222_a_signed_in_account_with_no_engine_permission_cannot_look_up_names`
 
+### RLE-223 The approved effective date is sealed at approval and a changed date is refused
+- **Traces to:** `TR-SEC-04`, RLE-210, #237
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `card-fee` v1 in force at once and v2 requested at 25 Nov 2026 for 1 Dec 2026 and approved by `minh`; no seal key is set.
+- **When:** Someone with database write access moves v2's `effective_from` to 25 Nov 11:00, and a replica without v2 in its cache evaluates `card-fee` at 26 Nov.
+- **Then:** The `REQUESTED` and `APPROVED` history rows of v2 record `effective_from` (1 Dec) and the canonical hash. The version row holds an approval seal `sha256:<hex>` over tenant, rule set, version, canonical hash, effective date, approver and approval time. Before a version is compiled or served the seal is checked next to the canonical hash; the changed date fails it, so v2 is refused (`EVALUATION_ERROR` naming the failed integrity check, alert, one decision row as the audit entry) and v1 still serves other requests. A version approved before the seal existed has none and is served. A host that needs protection against a database administrator supplies an `ApprovalSealKey` (at least 32 bytes, held outside the database); the seal is then `hmac-sha256:<hex>`, and a plain seal is refused. The history entry returned by the API keeps showing a hash only on `DRAFT_UPDATED`.
+- **Example:** `v2 effective_from 2026-12-01 -> 2026-11-25T11:00Z in the table => refused at 26 Nov, v1 serves`
+- **Test IDs:** `RLE_223_request_and_approval_rows_record_the_date_and_hash_and_the_approval_writes_a_seal`, `RLE_223_a_date_moved_in_the_table_is_refused_with_one_audit_entry_and_the_other_version_still_serves`, `RLE_223_a_host_key_makes_the_seal_an_hmac_and_a_plain_seal_or_another_key_is_refused`

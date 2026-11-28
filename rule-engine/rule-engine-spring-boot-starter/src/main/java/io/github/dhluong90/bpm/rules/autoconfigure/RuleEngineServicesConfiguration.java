@@ -32,6 +32,7 @@ import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.ApprovalController;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
 import io.github.dhluong90.bpm.rules.rest.SimulationController;
+import io.github.dhluong90.bpm.rules.spi.ApprovalSealKey;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -98,7 +99,7 @@ class RuleEngineServicesConfiguration {
     RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking, Environment environment, DecisionExplainer explainer,
-            RuleFunctionRegistry functions) {
+            RuleFunctionRegistry functions, ObjectProvider<ApprovalSealKey> sealKey) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         requireDevProfileForUnboundApprovals(settings, environment);
@@ -107,7 +108,9 @@ class RuleEngineServicesConfiguration {
             return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                     RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
                     properties.toQuerySettings(), explainer, functions.functions(),
-                    HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange())));
+                    HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange()),
+                    // RLE-223: a host bean supplies the key from outside the database; without one, plain seals.
+                    sealKey.getIfAvailable(ApprovalSealKey::none)));
         } catch (IllegalArgumentException e) {
             // A function registered twice, with a built-in name or an invalid name (RLE-058): nothing is served.
             throw new IllegalStateException("The Rule Engine does not start: " + e.getMessage(), e);
