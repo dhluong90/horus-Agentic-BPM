@@ -20,7 +20,7 @@ public interface DefinitionReader extends Function<byte[], Process> {
      * @param warnings what was kept in the stored source but not read, such as {@code FOREIGN_EXTENSION_IGNORED}
      * @param openBindings what a step still needs before the definition can be published: a handler, an assignee, a
      *     result variable, a correlation key. A definition with open bindings is stored as a draft that can be viewed
-     *     and exported, and publish refuses it until every binding is filled (PRE-390)
+     *     and exported, and publish refuses it until every binding is filled (PRE-391)
      */
     record Result(Process process, List<Process> processes, List<DefinitionProblem> warnings,
             List<DefinitionProblem> openBindings) {

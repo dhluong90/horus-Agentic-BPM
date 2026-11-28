@@ -656,7 +656,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             DefinitionReader.Result read = withWarnings.readWithWarnings(bytes);
             processes = read.processes();
             openBindings = read.openBindings();
-            // PRE-390: what is still open is told to the importer with the other warnings.
+            // PRE-391: what is still open is told to the importer with the other warnings.
             warnings = new java.util.ArrayList<>(read.warnings());
             warnings.addAll(openBindings);
         } else {
@@ -668,7 +668,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 boolean draftOnly) { }
         List<Prepared> prepared = new java.util.ArrayList<>();
         for (Process process : processes) {
-            // PRE-390, PRE-391: a process with a binding still open, or one that says it is not executable, is stored as
+            // PRE-391, PRE-392: a process with a binding still open, or one that says it is not executable, is stored as
             // a draft to view and export; it never becomes active on import, whatever the auto-approve setting.
             java.util.Set<String> ownIds = process.allFlowElements().stream().map(FlowElement::id)
                     .collect(java.util.stream.Collectors.toSet());
@@ -1743,7 +1743,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
      * and approval, before anything is written; one problem per step, naming {@code step -> name}.
      */
     private void checkServiceRegistrations(String tenant, StoredDefinition current, Process process) {
-        // PRE-390, PRE-391: a draft with a binding still open, or one that is not executable, is never requested or
+        // PRE-391, PRE-392: a draft with a binding still open, or one that is not executable, is never requested or
         // approved; the refusal names every open binding. Checked first, before the registrations are read.
         List<DefinitionProblem> open = new ArrayList<>();
         if (!process.isExecutable()) {

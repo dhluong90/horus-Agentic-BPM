@@ -12,7 +12,7 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * PRE-390 and PRE-391: the reader that serves an import lists a binding that is missing, and a process that says it is
+ * PRE-391 and PRE-392: the reader that serves an import lists a binding that is missing, and a process that says it is
  * not executable, instead of refusing the file; the strict read still refuses both.
  */
 class OpenBindingsReaderTest {
@@ -34,7 +34,7 @@ class OpenBindingsReaderTest {
     }
 
     @Test
-    void PRE_390_a_missing_assignee_result_variable_and_handler_are_listed_not_refused() {
+    void PRE_391_a_missing_assignee_result_variable_and_handler_are_listed_not_refused() {
         byte[] xml = file("isExecutable=\"true\"",
                 "<bpmn:serviceTask id=\"post\" implementation=\"##WebService\"/><bpmn:userTask id=\"approve\"/>",
                 "<bpmn:sequenceFlow id=\"f1\" sourceRef=\"post\" targetRef=\"approve\"/>"
@@ -53,7 +53,7 @@ class OpenBindingsReaderTest {
     }
 
     @Test
-    void PRE_390_a_message_wait_without_a_correlation_key_is_listed_and_a_wrong_value_is_still_refused() {
+    void PRE_391_a_message_wait_without_a_correlation_key_is_listed_and_a_wrong_value_is_still_refused() {
         byte[] open = file("isExecutable=\"true\"",
                 "<bpmn:receiveTask id=\"wait\" messageRef=\"m\"/>",
                 "<bpmn:sequenceFlow id=\"f1\" sourceRef=\"wait\" targetRef=\"e\"/>", "wait");
@@ -70,7 +70,7 @@ class OpenBindingsReaderTest {
     }
 
     @Test
-    void PRE_391_a_process_that_says_it_is_not_executable_is_read_for_viewing_only() {
+    void PRE_392_a_process_that_says_it_is_not_executable_is_read_for_viewing_only() {
         byte[] xml = file("isExecutable=\"false\"", "", "", "e");
 
         DefinitionReader.Result result = reader.readWithWarnings(xml);

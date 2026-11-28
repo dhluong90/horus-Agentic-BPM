@@ -256,7 +256,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /**
      * @param lenient true when a binding gap (a handler, assignee, result variable or correlation key that is missing,
      *     or an implementation that names no handler) and a process that says {@code isExecutable="false"} are read and
-     *     listed instead of refused (PRE-390, PRE-391); false for the strict read that refuses them
+     *     listed instead of refused (PRE-391, PRE-392); false for the strict read that refuses them
      */
     private Result readPass(byte[] source, boolean lenient) {
         if (source.length > limits.maxBytes()) {
@@ -292,7 +292,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private final List<DefinitionProblem> unsupported = new ArrayList<>();
         private boolean unsupportedTruncated;
         private final List<DefinitionProblem> warnings = new ArrayList<>();
-        /** Lenient: binding gaps and non-executable processes are read and listed, not refused (PRE-390, PRE-391). */
+        /** Lenient: binding gaps and non-executable processes are read and listed, not refused (PRE-391, PRE-392). */
         private final boolean lenient;
         private final List<DefinitionProblem> openBindings = new ArrayList<>();
         private final List<DefinitionProblem> invalid = new ArrayList<>();
@@ -528,7 +528,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
             }
             if (out.isEmpty() && lenient) {
-                // PRE-391: a file whose pools are all marked not executable is kept for viewing, one draft per process.
+                // PRE-392: a file whose pools are all marked not executable is kept for viewing, one draft per process.
                 for (Read read : processes) {
                     checkKey(read);
                     out.add(read.process());

@@ -308,7 +308,7 @@ public final class CanonicalProcessWriter {
                 case UserTask t -> {
                     step.put("type", "userTask");
                     t.extensions().first(TaskAssignment.class).ifPresent(a -> {
-                        // No assignee only in a draft with an open binding (PRE-390); publish refuses it.
+                        // No assignee only in a draft with an open binding (PRE-391); publish refuses it.
                         if (a.assignee() != null) {
                             int colon = a.assignee().indexOf(':');
                             step.putObject("assignee").put(a.assignee().substring(0, colon),

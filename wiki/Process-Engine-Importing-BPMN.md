@@ -426,6 +426,8 @@ A draft with open bindings can be viewed and exported. It is a draft even in the
 | `KEY_INVALID` | Make the `process` id kebab-case, for example `card-fee-review` |
 | `NOT_EXECUTABLE` | The process says `isExecutable="false"`. It imports as a view-only draft with the warning `NOT_EXECUTABLE_VIEW_ONLY`; publish is refused with this code until the attribute is removed or set to `true` |
 | `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask`. A file without it imports as a draft with open bindings (see below); publish names it |
+| `IMPLEMENTATION_UNBOUND` | The step has an `implementation` that names no handler (a web service, for example). Set `horus:handler`, or `implementation="urn:horus-bpm:handler:<name>"` on a service task. The file imports as a draft with this warning; publish names the step |
+| `CORRELATION_KEY_REQUIRED` | Add `horus:correlationKey` to the catch event or receive task, naming the variable whose value the message must carry. Without it the file imports as a draft; publish names the step |
 | `SCRIPT_MISSING`, `SCRIPT_INVALID` | Give the `scriptTask` a `<bpmn:script>` with one valid expression of at most 1,000 characters; the message names the position |
 | `RESULT_VARIABLE_INVALID` | Name the `scriptTask`'s `horus:resultVariable` with letters, digits and `_` |
 | `MODE_INVALID` | Set `horus:mode` to `local` or `remote`, or leave it out for a local step |
