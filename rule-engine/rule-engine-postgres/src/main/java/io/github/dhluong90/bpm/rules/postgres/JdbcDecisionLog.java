@@ -223,7 +223,7 @@ public final class JdbcDecisionLog implements DecisionLog {
         return RuleListQueries.byInput(afterPosition).sql();
     }
 
-    private static DecisionRecord record(ResultSet rs, int row) throws SQLException {
+    static DecisionRecord record(ResultSet rs, int row) throws SQLException {
         return new DecisionRecord(rs.getString("tenant_id"), rs.getString("id"),
                 rs.getTimestamp("created_at").toInstant(), rs.getString("rule_set_name"), rs.getInt("version_num"),
                 rs.getString("hit_policy"), rs.getString("outcome"), rs.getString("error_code"),

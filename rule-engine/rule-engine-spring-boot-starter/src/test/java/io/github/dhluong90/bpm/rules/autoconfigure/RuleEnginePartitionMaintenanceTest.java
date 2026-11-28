@@ -99,19 +99,19 @@ class RuleEnginePartitionMaintenanceTest {
     @Test
     void RLE_017_unset_retention_warns_every_start_up_and_keep_forever_is_explicit(CapturedOutput output) {
         RuleEngineProperties.DecisionLog unset = new RuleEngineProperties.DecisionLog(
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
         assertThat(DecisionLogRetention.resolve(unset)).isNull();
         assertThat(DecisionLogRetention.resolve(unset)).isNull();
         assertThat(output.getAll().split("WARN", -1)).hasSize(3);
         assertThat(output).contains("horus.bpm.rules.decision-log.retention", "every decision is kept", "KB");
 
         RuleEngineProperties.DecisionLog explicit = new RuleEngineProperties.DecisionLog(
-                null, null, null, null, null, "keep-forever", null);
+                null, null, null, null, null, "keep-forever", null, null, null);
         assertThat(DecisionLogRetention.resolve(explicit)).isNull();
         assertThat(output.getAll().split("WARN", -1)).hasSize(3);
 
         RuleEngineProperties.DecisionLog months = new RuleEngineProperties.DecisionLog(
-                null, null, null, null, null, "P120M", null);
+                null, null, null, null, null, "P120M", null, null, null);
         assertThat(DecisionLogRetention.resolve(months)).isEqualTo(Period.ofMonths(120));
     }
 
@@ -119,7 +119,7 @@ class RuleEnginePartitionMaintenanceTest {
     void RLE_100_from_1_0_an_unset_retention_refuses_start_up_outside_dev_and_until_then_it_warns(
             CapturedOutput output) {
         RuleEngineProperties.DecisionLog unset = new RuleEngineProperties.DecisionLog(
-                null, null, null, null, null, null, null);
+                null, null, null, null, null, null, null, null, null);
         org.springframework.mock.env.MockEnvironment prod = new org.springframework.mock.env.MockEnvironment();
         prod.setActiveProfiles("prod");
 
@@ -151,9 +151,9 @@ class RuleEnginePartitionMaintenanceTest {
 
         // and from 1.0 a bank that chose either answer starts normally
         RuleEngineProperties.DecisionLog forever = new RuleEngineProperties.DecisionLog(
-                null, null, null, null, null, "keep-forever", null);
+                null, null, null, null, null, "keep-forever", null, null, null);
         RuleEngineProperties.DecisionLog months = new RuleEngineProperties.DecisionLog(
-                null, null, null, null, null, "P12M", null);
+                null, null, null, null, null, "P12M", null, null, null);
         assertThat(DecisionLogRetention.resolve(forever, prod, "1.0.0")).isNull();
         assertThat(DecisionLogRetention.resolve(months, prod, "1.0.0")).isEqualTo(Period.ofMonths(12));
     }

@@ -303,6 +303,9 @@ class ErrorMatrixWebMvcTest {
                                 "Rule set 'card-fee' v1 matched 2 rules (R2, R4); expected exactly 1", List.of("R2", "R4"))),
                 new Case("INTERNAL_ERROR", 500, get("/api/bpm/rules/v1/rule-sets/card-fee"),
                         s -> s.thrown = injectedSqlFailure()),
+                new Case("DECISION_LOG_BACKLOG", 503,
+                        post("/api/bpm/rules/v1/decisions/card-fee:evaluate").contentType("application/json").content(gold),
+                        s -> s.thrown = new io.github.dhluong90.bpm.rules.api.DecisionLogBacklogException(100_001, 100_000)),
                 new Case("SCHEMA_NOT_READY", 503, get("/api/bpm/rules/v1/rule-sets"),
                         s -> s.thrown = new SchemaNotReadyException("Schema at V4, V5 pending; migrate-on-start is false")));
     }
@@ -327,7 +330,7 @@ class ErrorMatrixWebMvcTest {
         assertThat(problem.path("detail").asString()).isNotBlank();
         assertThat(problem.path("correlationId").asString()).isNotBlank();
         String retryAfter = switch (row.code()) {
-            case "IDEMPOTENCY_IN_FLIGHT" -> "1";
+            case "IDEMPOTENCY_IN_FLIGHT", "DECISION_LOG_BACKLOG" -> "1";
             case "RATE_LIMITED" -> "30";
             default -> null;
         };

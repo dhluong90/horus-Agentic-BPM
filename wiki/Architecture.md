@@ -139,7 +139,7 @@ See [[Rule Engine Decision API]] for the REST reference.
 
 | Choice | Option A | Option B | Default and why |
 |---|---|---|---|
-| Decision log write | `transactional`: one `INSERT` in the caller's transaction, zero orphans | `async`: insert into `rle_decision_outbox`, relayed by a `SKIP LOCKED` poller; lower latency on read paths, log can lag | `transactional`; switch per host for read-heavy paths above about 2 000 decisions/s per replica |
+| Decision log write | `transactional`: one `INSERT` in the caller's transaction, zero orphans | `async` (1.1, opt-in): insert into `rle_decision_queue` in the same transaction, relayed by a `SKIP LOCKED` poller; lower latency on read paths, log can lag by about a second, and an evaluation is refused (`503 DECISION_LOG_BACKLOG`) rather than a decision dropped when the queue is full | `transactional`; switch per host for read-heavy paths above about 2 000 decisions/s per replica |
 | Cache coherence transport | `LISTEN/NOTIFY`: sub-second, needs one session-mode connection per replica | Epoch poll only: works behind transaction-mode poolers; staleness up to the poll interval | Both: NOTIFY when available, epoch poll every 5 s as the bound (ADR-0009) |
 | Remote step execution | Async Wait-State with lease (TX1, call, TX2) | Call inside the step transaction: simpler, but one slow call per connection saturates the pool | Async Wait-State for every network call (ADR-0008) |
 | Compiled cache implementation | Bounded LRU map in `*-core`, no dependency | Caffeine in the starter (Apache 2.0, weight-based eviction, metrics) | Caffeine in the starter behind a `CompiledCache` port; `*-core` ships a small default |

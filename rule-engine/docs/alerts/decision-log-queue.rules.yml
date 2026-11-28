@@ -1,0 +1,31 @@
+# Prometheus alert rules for the asynchronous decision log (decision-log.mode: async, RLE-234 and RLE-235).
+# Load the file in the host's Prometheus; the metric names are the ones the starter registers with Micrometer.
+groups:
+  - name: horus-rule-engine-decision-log-queue
+    rules:
+      - alert: RuleEngineDecisionLogDeadLetter
+        # A decision the relay gave up on is waiting for an operator. It blocks nothing, but it is not in the decision
+        # log yet. Retry or resolve it with GET /decision-log/dead-letters and the :request and :approve commands.
+        expr: max(horus_rle_decision_log_queue_dead) > 0
+        for: 5m
+        labels:
+          severity: page
+        annotations:
+          summary: "Rule Engine has dead-lettered decisions"
+          description: "{{ $value }} decision(s) could not be written to the decision log after their attempts. See GET /decision-log/dead-letters; a retry or resolve needs two people."
+      - alert: RuleEngineDecisionLogQueueGrowing
+        expr: max(horus_rle_decision_log_queue_oldest_age_seconds) > 300
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Rule Engine decision log queue is not draining"
+          description: "The oldest queued decision is {{ $value }} s old; the relay may be down or the log refusing rows."
+      - alert: RuleEngineDecisionLogQueueNearLimit
+        expr: max(horus_rle_decision_log_queue_depth) > 0.8 * 100000
+        for: 5m
+        labels:
+          severity: warn
+        annotations:
+          summary: "Rule Engine decision log queue is near its limit"
+          description: "Evaluations are refused with 503 DECISION_LOG_BACKLOG above decision-log.async.max-backlog; change 100000 here to the configured value."

@@ -76,6 +76,8 @@ class RuleEngineSchemaMigratorIT {
                 "rle_decision",
                 "rle_decision_log_drop",
                 "rle_decision_outbox",
+                "rle_decision_queue",
+                "rle_decision_queue_event",
                 "rle_idempotency",
                 "rle_version_function",
                 "rle_simulation_report",
@@ -108,6 +110,22 @@ class RuleEngineSchemaMigratorIT {
         jdbc.sql("ALTER TABLE rle_decision DROP COLUMN budget_limit").update();
 
         assertThat(jdbc.sql(columns).query(String.class).list()).isEmpty();
+    }
+
+    @Test
+    void RLE_234_V5_adds_the_decision_queue_and_its_documented_rollback_step_drops_it() {
+        DataSource db = migratedDatabase();
+        JdbcClient jdbc = JdbcClient.create(db);
+        assertThat(jdbc.sql("SELECT to_regclass('rle_decision_queue') IS NOT NULL").query(Boolean.class).single()).isTrue();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision_queue").query(Long.class).single()).isZero();
+
+        // The rollback step written at the top of V5, run by hand on an empty queue
+        jdbc.sql("DROP TABLE rle_decision_queue_event").update();
+        jdbc.sql("DROP TABLE rle_decision_queue").update();
+        jdbc.sql("DROP FUNCTION rle_decision_queue_guard()").update();
+        jdbc.sql("DROP FUNCTION rle_decision_queue_event_guard()").update();
+
+        assertThat(jdbc.sql("SELECT to_regclass('rle_decision_queue') IS NULL").query(Boolean.class).single()).isTrue();
     }
 
     @Test

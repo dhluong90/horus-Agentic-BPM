@@ -22,13 +22,13 @@ sequenceDiagram
   rect rgba(224,242,241,0.8)
     Note over H,DB: decision-log.mode = async, TX1 (host transaction)
     H->>RE: evaluate("card-fee", input)
-    RE->>DB: INSERT rle_decision_outbox (same transaction, small row)
+    RE->>DB: INSERT rle_decision_queue (same transaction, one narrow row, durable at COMMIT)
     RE-->>H: DecisionResult
     H->>DB: COMMIT
   end
   rect rgba(236,239,241,0.9)
     Note over SCH,DB: async, TX2 (scheduler transaction, later)
-    SCH->>DB: SELECT ... FROM rle_decision_outbox FOR UPDATE SKIP LOCKED LIMIT 100
-    SCH->>DB: INSERT rle_decision (log_mode=ASYNC), mark outbox SENT, COMMIT
-    Note over SCH,DB: log lags by the poll interval, visible as log_mode=ASYNC
+    SCH->>DB: move up to 100 oldest queue rows (FOR UPDATE SKIP LOCKED)
+    SCH->>DB: DELETE queue rows and INSERT rle_decision (log_mode=ASYNC) in one statement, COMMIT
+    Note over SCH,DB: log lags by the poll interval, visible as log_mode=ASYNC, and over max-backlog evaluate is refused with 503 DECISION_LOG_BACKLOG
   end

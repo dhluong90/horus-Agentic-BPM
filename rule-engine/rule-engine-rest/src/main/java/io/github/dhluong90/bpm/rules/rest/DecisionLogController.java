@@ -239,6 +239,110 @@ public class DecisionLogController {
                 EngineValues::decisionLogEntry));
     }
 
+    /**
+     * {@code GET /decision-log/dead-letters}: decisions the asynchronous decision log could not write after its
+     * attempts, with the state of any request an operator made on them (RLE-235). Needs {@code rules:log:read}.
+     */
+    @GetMapping("/decision-log/dead-letters")
+    public ResponseEntity<byte[]> deadLetters(@RequestParam(value = "limit", defaultValue = "100") int limit) {
+        RestSupport.require(callers, "rules:log:read");
+        ObjectNode json = EngineJson.NODES.objectNode();
+        ArrayNode data = json.putArray("data");
+        decisions.deadLetters(limit).forEach(row -> data.add(deadLetter(row)));
+        return RestSupport.json(HttpStatus.OK, json);
+    }
+
+    /**
+     * {@code POST /decisions/{id}/dead-letter:request}: an operator asks to retry or resolve a dead-lettered decision.
+     * Body {@code {action: RETRY|RESOLVE, comment}}. Nothing changes until a second person approves. Needs
+     * {@code rules:log:operate}.
+     */
+    @PostMapping("/decisions/{id}/dead-letter:request")
+    public ResponseEntity<byte[]> requestDeadLetterAction(@PathVariable("id") String id, InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        RestSupport.require(callers, "rules:log:operate");
+        JsonNode request = commandBody(requestBody, contentLength, Set.of("action", "comment"));
+        io.github.dhluong90.bpm.rules.api.DeadLetterAction action;
+        try {
+            action = io.github.dhluong90.bpm.rules.api.DeadLetterAction.valueOf(text(request, "action"));
+        } catch (IllegalArgumentException e) {
+            throw new InputInvalidException("action must be RETRY or RESOLVE");
+        }
+        return RestSupport.json(HttpStatus.OK,
+                deadLetter(decisions.requestDeadLetterAction(id, action, comment(request), idempotencyKey)));
+    }
+
+    /**
+     * {@code POST /decisions/{id}/dead-letter:approve}: a second person approves the request. An approved retry puts
+     * the decision back in the relay's queue; an approved resolve closes it. Neither deletes it. Needs
+     * {@code rules:log:approve}; the requester gets {@code 403 SELF_APPROVAL_FORBIDDEN}.
+     */
+    @PostMapping("/decisions/{id}/dead-letter:approve")
+    public ResponseEntity<byte[]> approveDeadLetterRequest(@PathVariable("id") String id, InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        RestSupport.require(callers, "rules:log:approve");
+        JsonNode request = commandBody(requestBody, contentLength, Set.of("comment"));
+        return decided(id, decisions.decideDeadLetterRequest(id, true, comment(request), idempotencyKey));
+    }
+
+    /**
+     * {@code POST /decisions/{id}/dead-letter:reject}: a second person refuses the request; the decision stays a dead
+     * letter. Body {@code {comment}}, required. Needs {@code rules:log:approve}.
+     */
+    @PostMapping("/decisions/{id}/dead-letter:reject")
+    public ResponseEntity<byte[]> rejectDeadLetterRequest(@PathVariable("id") String id, InputStream requestBody,
+            @RequestHeader(value = HttpHeaders.CONTENT_LENGTH, required = false) Long contentLength,
+            @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) throws IOException {
+        RestSupport.require(callers, "rules:log:approve");
+        JsonNode request = commandBody(requestBody, contentLength, Set.of("comment"));
+        return decided(id, decisions.decideDeadLetterRequest(id, false, comment(request), idempotencyKey));
+    }
+
+    private static ResponseEntity<byte[]> decided(String id, String event) {
+        ObjectNode json = EngineJson.NODES.objectNode();
+        json.put("decisionId", id);
+        json.put("event", event);
+        return RestSupport.json(HttpStatus.OK, json);
+    }
+
+    private static JsonNode commandBody(InputStream body, Long contentLength, Set<String> members) throws IOException {
+        JsonNode request = EngineValues.readRequest(
+                RestSupport.boundedBody(body, contentLength, EngineDefaults.COMMAND_BODY_MAX_BYTES));
+        if (!request.isObject()) {
+            throw new InputInvalidException("Request body must be a JSON object");
+        }
+        for (String key : request.propertyNames()) {
+            if (!members.contains(key)) {
+                throw new InputInvalidException("Unknown member " + key + "; expected " + String.join(", ", members));
+            }
+        }
+        return request;
+    }
+
+    private static String comment(JsonNode request) {
+        JsonNode node = request.get("comment");
+        return node == null || node.isNull() ? null : node.asString();
+    }
+
+    private static ObjectNode deadLetter(io.github.dhluong90.bpm.rules.api.DeadLetter row) {
+        ObjectNode json = EngineJson.NODES.objectNode();
+        json.put("decisionId", row.decisionId());
+        json.put("ruleSet", row.ruleSet());
+        json.put("version", row.version());
+        json.put("queuedAt", row.queuedAt().toString());
+        json.put("attempts", row.attempts());
+        json.put("lastError", row.lastError());
+        json.put("state", row.state().name());
+        if (row.requestedBy() != null) {
+            json.put("requestedBy", row.requestedBy());
+            json.put("requestComment", row.requestComment());
+            json.put("requestedAt", row.requestedAt().toString());
+        }
+        return json;
+    }
+
     private static String text(JsonNode request, String key) {
         JsonNode node = request.get(key);
         if (node == null || !node.isString() || node.stringValue().isBlank()) {

@@ -106,6 +106,32 @@ public class RuleEngineAutoConfiguration {
                 DecisionLogRetention.resolve(properties.decisionLog(), environment));
     }
 
+    /**
+     * The asynchronous decision log (#45, RLE-234), only when {@code decision-log.mode} is {@code async}: decisions
+     * are queued in the caller's transaction and relayed into the log. A host bean of this type replaces it.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnProperty(prefix = "horus.bpm.rules.decision-log",
+            name = "mode", havingValue = "async")
+    io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog ruleEngineAsyncDecisionLog(DataSource dataSource,
+            RuleEngineTransactions transactions, RuleEngineProperties properties, ObjectProvider<Clock> clock) {
+        RuleEngineProperties.DecisionLog.Async async = properties.decisionLog().asyncOrDefault();
+        return new io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog(dataSource, transactions, engineClock(clock),
+                async.batchSize(), async.maxBacklog(), async.maxAttempts(), async.retryBackoff(),
+                async.maxRetryBackoff());
+    }
+
+    /** Moves queued decisions into the log while the host runs in {@code async} mode (RLE-234). */
+    @Bean
+    @ConditionalOnMissingBean
+    @org.springframework.boot.autoconfigure.condition.ConditionalOnBean(
+            io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog.class)
+    RuleEngineDecisionLogRelay ruleEngineDecisionLogRelay(io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog log,
+            RuleEngineProperties properties) {
+        return new RuleEngineDecisionLogRelay(log, properties.decisionLog().asyncOrDefault().pollInterval());
+    }
+
     @Bean
     @ConditionalOnMissingBean
     RuleEngineSchemaInitializer ruleEngineSchemaInitializer(
@@ -150,8 +176,9 @@ public class RuleEngineAutoConfiguration {
 
         @Bean
         @ConditionalOnMissingBean(name = "ruleEngineMetrics")
-        RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions) {
-            return new RuleEngineMetrics(partitions);
+        RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions,
+                ObjectProvider<io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog> asyncLog) {
+            return new RuleEngineMetrics(partitions, asyncLog.getIfAvailable());
         }
     }
 

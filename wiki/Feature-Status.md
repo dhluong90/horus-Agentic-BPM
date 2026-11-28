@@ -42,6 +42,6 @@ Dates are targets, not commitments. The [[Roadmap]] owns them.
 | Connectors to outside systems, and client libraries (SDKs) beyond Java | Not started |
 | Graphical process modeller in the cockpit | Not built. Import models from a standard modeller; the cockpit draws them read only |
 | Live counts and a duration heatmap on the process diagram | Not built |
-| Asynchronous decision log (`decision-log.mode: async`) | Not built; the log is written in your transaction |
+| Asynchronous decision log (`decision-log.mode: async`) | Built in 1.1, off by default; the log is written in your transaction unless you turn it on |
 | Built-in shadow mode for agent steps | Planned for 1.1; [[Agent Shadow Mode|Agent-Shadow-Mode]] shows the pattern to use now |
 | DMN conformance levels 2 and 3 | After 1.0. Measured daily against the DMN TCK; [[how to read the numbers|Standards-Conformance]] |
