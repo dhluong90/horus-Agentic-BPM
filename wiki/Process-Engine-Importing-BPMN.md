@@ -401,6 +401,22 @@ The list is `unsupportedElements`, the same field and item shape the Rule Engine
 
 A file whose root element is in a CMMN namespace, such as `http://www.omg.org/spec/CMMN/20151109/MODEL`, is refused as `422 CMMN_UNSUPPORTED` with the detail "CMMN is not supported; model the case as a BPMN process", the `namespace` and the `line`. The reader stops at the root element, so no other part of the file is checked. A root in any other unknown namespace, such as XPDL or BPEL, is `422 VALIDATION_FAILED` with the problem code `NOT_BPMN`.
 
+### A draft with open bindings
+
+A file from another modeller often leaves out what only this engine needs. The import does not refuse it for these gaps; it stores a draft and lists each one in `warnings`:
+
+| Warning code | What is open |
+|---|---|
+| `HANDLER_MISSING` | A `serviceTask` has no `horus:handler` |
+| `IMPLEMENTATION_UNBOUND` | A task has an `implementation` (for example a web service) that names no handler; it is not run |
+| `ASSIGNEE_INVALID` | A `userTask` has no `horus:assignee` and no named lane to take the group from |
+| `RESULT_VARIABLE_REQUIRED` | A `userTask` has no `horus:resultVariable` |
+| `CORRELATION_KEY_REQUIRED` | A step that waits for a message has no `horus:correlationKey` |
+| `NOT_EXECUTABLE_VIEW_ONLY` | The process says `isExecutable="false"`; it is kept to be viewed and exported |
+| `EXECUTABLE_ASSUMED` | The process does not say `isExecutable`; it is read as executable |
+
+A draft with open bindings can be viewed and exported. It is a draft even in the `dev` profile that approves an import at once, so no instance can start from it. A request for publish is refused with `422 VALIDATION_FAILED` and one problem for each open binding, naming the step; so is the approval step. Fill the bindings in the file and import it again as a new version. A value that is present but wrong, such as `horus:assignee="nobody"`, is refused at import as before. Publishing keeps its two people: the requester never approves.
+
 ### A missing attribute or a broken document
 
 `422 VALIDATION_FAILED` carries a `problems` list. Each problem names its code, element, id and line:
@@ -408,8 +424,8 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | Problem code | Fix |
 |---|---|
 | `KEY_INVALID` | Make the `process` id kebab-case, for example `card-fee-review` |
-| `NOT_EXECUTABLE` | The process says `isExecutable="false"`. Remove the attribute or set it to `true` (a process that does not say it is executable) |
-| `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask` |
+| `NOT_EXECUTABLE` | The process says `isExecutable="false"`. It imports as a view-only draft with the warning `NOT_EXECUTABLE_VIEW_ONLY`; publish is refused with this code until the attribute is removed or set to `true` |
+| `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask`. A file without it imports as a draft with open bindings (see below); publish names it |
 | `SCRIPT_MISSING`, `SCRIPT_INVALID` | Give the `scriptTask` a `<bpmn:script>` with one valid expression of at most 1,000 characters; the message names the position |
 | `RESULT_VARIABLE_INVALID` | Name the `scriptTask`'s `horus:resultVariable` with letters, digits and `_` |
 | `MODE_INVALID` | Set `horus:mode` to `local` or `remote`, or leave it out for a local step |

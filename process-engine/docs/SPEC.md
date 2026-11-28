@@ -2832,7 +2832,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 ### PRE-386 A file may declare an encoding other than UTF-8: ISO-8859-n, windows-125n or US-ASCII
 - **Traces to:** `TR-STD-04`
 - **Milestone:** M3
-- **Kind:** contract
+- **Kind:** semantics
 - **Given:** A process file whose declaration says `encoding="ISO-8859-1"` and whose task is named `Kiém tra ho so`, written in those bytes; the same with `windows-1252` and a euro sign; UTF-8 bytes under `US-ASCII`; a `UTF-16` declaration.
 - **When:** Each is imported.
 - **Then:** The bytes are decoded once, strictly, in the declared encoding and the parser reads that text, so the stored source and the parsed document never differ: the task name is `Kiém tra ho so`, and the export is UTF-8 with its own declaration. Bytes that are not valid in the declared encoding, an encoding the JVM does not know, UTF-16 and UTF-32 (which hide the markup from the declaration check), and a byte order mark with a non-UTF-8 declaration are refused with `BPMN_UNSAFE_XML`. A file with no declaration is UTF-8 as before.
@@ -2842,7 +2842,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 ### PRE-387 A process id that is not a key, a message with no name and a lane set with no id are read; the export restores the process id
 - **Traces to:** `TR-STD-04`
 - **Milestone:** M3
-- **Kind:** contract
+- **Kind:** semantics
 - **Given:** A process `_3d1ef204-2d4c-4643-8fc5-c319cc032ec0` and a process `Loan_Review`; two processes `Loan_Review` and `loan-review` in one collaboration; messages `Message_1404332496319` and `_9f` with no name; a message `m1` named `Message_9` beside an unnamed `Message_9`; a `laneSet` with no id.
 - **When:** They are imported, and the first is exported.
 - **Then:** The definition key is the id in lower case with every run of other characters as one hyphen, `p-` in front when it would not start with a letter, at most 100 characters: `p-3d1ef204-2d4c-4643-8fc5-c319cc032ec0`, `loan-review`. The same id always gives the same key; a key that is already kebab-case is never changed. The reader keeps the original id with the process, the export writes it back (the process, its participant `processRef`, the diagram plane), and it is not in the canonical form, so the hash is the same. Two ids that map to one key are `422 VALIDATION_FAILED`, `PROCESS_ID_COLLISION`. A message with no `name` takes its id as the name, with other characters as `_` and `m` in front when it would not start with a letter; if another message has that name the file is refused with `MESSAGE_NAME_COLLISION`. The export writes the name it took; message ids are not restored, because the engine writes a message by its name. A lane set or lane with no id gets `laneSet_line<n>` or `lane_line<n>`.
@@ -2852,7 +2852,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 ### PRE-388 A process that does not say isExecutable is executable
 - **Traces to:** `TR-STD-04`
 - **Milestone:** M3
-- **Kind:** contract
+- **Kind:** semantics
 - **Given:** A process with no `isExecutable` attribute, and one with `isExecutable="false"`.
 - **When:** Each is imported.
 - **Then:** BPMN leaves the attribute open when it is absent, and a modeller that never writes it is not saying "do not run": the first imports, and `warnings` lists `EXECUTABLE_ASSUMED` so the approver sees that the attribute was assumed. `isExecutable="false"` is the author's word and stays `NOT_EXECUTABLE`; in a collaboration it is a pool kept for display. `horus:resultVariable` on a user task and `horus:correlationKey` on a message wait stay required: a result with no variable would merge into every process variable, and a message with no key could reach any instance.
@@ -2862,9 +2862,29 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 ### PRE-389 An import and an item definition are ignored with a warning
 - **Traces to:** `TR-STD-04`
 - **Milestone:** M3
-- **Kind:** contract
+- **Kind:** semantics
 - **Given:** A file with `<import importType="http://www.w3.org/2001/XMLSchema" location="types.xsd"/>` and `<itemDefinition id="i1" structureRef="string"/>`.
 - **When:** It is imported.
 - **Then:** The file imports and `warnings` lists `BPMN_IMPORT_IGNORED` and `ITEM_DEFINITION_IGNORED`: the engine's variables are typed by their values and it fetches no other file. The stored source keeps both. `startQuantity` and `completionQuantity` of 1 (the default) were already accepted; any other value stays refused (a token carries no quantity).
 - **Example:** `import` -> warning `BPMN_IMPORT_IGNORED`, `201`.
 - **Test ID:** `PRE_389_an_import_and_an_item_definition_are_ignored_with_a_warning_and_not_refused` (`ModellerFileReadingTest`)
+
+### PRE-390 A step with an open binding is stored as a draft that cannot be published
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A file whose `serviceTask` has no `horus:handler` or an `implementation` that names no handler, whose `userTask` has no `horus:assignee` or `horus:resultVariable`, or whose message wait has no `horus:correlationKey`.
+- **When:** It is imported, then publish is requested or approved.
+- **Then:** The import stores a draft, answers `201` and lists each open binding in `warnings` (`HANDLER_MISSING`, `IMPLEMENTATION_UNBOUND`, `ASSIGNEE_INVALID`, `RESULT_VARIABLE_REQUIRED`, `CORRELATION_KEY_REQUIRED`) with the step id. The draft can be read and exported. It stays a draft under `definitions.auto-approve`. `requestApproval` and `approve` refuse it as `422 VALIDATION_FAILED` with one problem for each binding still open, found by reading the stored source again, before any registration is checked and before anything is written. A wrong value (`horus:assignee="nobody"`) is still refused at import. The strict `SubsetBpmnReader.read` refuses all of these as before. Request, second-person approval, content hash and replay are unchanged.
+- **Example:** A user task with no assignee imports as `DRAFT` with `ASSIGNEE_INVALID` on `approve`; `requestApproval` answers `422` with `ASSIGNEE_INVALID` on `approve`.
+- **Test ID:** `PRE_390_a_step_with_open_bindings_is_stored_as_a_draft_and_publish_names_each_one`, `PRE_390_open_bindings_keep_a_draft_a_draft_under_auto_approve_and_it_cannot_start`, `PRE_390_a_complete_definition_still_needs_a_request_and_a_second_person_to_approve` (`OpenBindingsTest`); `PRE_390_a_missing_assignee_result_variable_and_handler_are_listed_not_refused`, `PRE_390_a_message_wait_without_a_correlation_key_is_listed_and_a_wrong_value_is_still_refused` (`OpenBindingsReaderTest`)
+
+### PRE-391 A process that is not executable is a view-only draft
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A file whose only process says `isExecutable="false"`, or a collaboration in which no pool is executable.
+- **When:** It is imported, then publish is requested.
+- **Then:** The import stores a draft (one for each process of such a collaboration) with the warning `NOT_EXECUTABLE_VIEW_ONLY`, in the `dev` profile too. `requestApproval` and `approve` refuse it with `NOT_EXECUTABLE`. In a collaboration with an executable pool the non-executable pools stay display-only as before. The strict read still answers `NOT_EXECUTABLE`.
+- **Example:** `<process id="wfp-6" isExecutable="false">` -> `DRAFT`, `NOT_EXECUTABLE_VIEW_ONLY`; request for publish -> `422 NOT_EXECUTABLE`.
+- **Test ID:** `PRE_391_a_process_marked_not_executable_is_a_view_only_draft_and_publish_refuses_it` (`OpenBindingsTest`); `PRE_391_a_process_that_says_it_is_not_executable_is_read_for_viewing_only` (`OpenBindingsReaderTest`)
