@@ -26,8 +26,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <p>The scope is the one the policy declares the key under: the tenant for a key declared as the tenant's own, the
  * host ({@value MaskingPolicy#HOST_SCOPE}) for a host key whose tenant subkey it is. A key the policy does not declare is
  * recorded under the tenant it is used for; when its id is already recorded for the host, it must be that host key as
- * returned, and is compared with the host's check value. Messages name the key id and both check values, never a
- * key.
+ * returned, and is compared with the host's check value. The caller learns only that the key does not match; the check values are never put in a message.
  */
 final class MaskingKeyFirstUse {
 
@@ -51,9 +50,11 @@ final class MaskingKeyFirstUse {
      *
      * @param tenant the tenant
      * @param key the key {@link MaskingPolicy#hmacKey(String)} returned
-     * @return null when the key is the one first seen under its id, otherwise the refusal text
+     * @return null when the key is the one first seen under its id, otherwise the id of the key that does not match;
+     *     the check values stay inside this class, because they are confirmation values derived from the key and must
+     *     reach neither a log nor a caller
      */
-    String refusal(String tenant, MaskingKey key) {
+    String mismatchedKeyId(String tenant, MaskingKey key) {
         if (lastByTenant.get(tenant) == key) {
             return null;
         }
@@ -66,10 +67,7 @@ final class MaskingKeyFirstUse {
         Scoped scoped = scopeOf(tenant, key);
         String mismatch = transactions.inIndependentTransaction(() -> recordOrCompare(tenant, key, scoped));
         if (mismatch != null) {
-            return "Masking key id " + key.keyId() + " was first recorded with check value " + mismatch
-                    + ", but the key in use for tenant " + tenant + " has check value " + scoped.check()
-                    + ". A key id names one key for good: restore the key that id was first used with, or give the new"
-                    + " key an id of its own";
+            return key.keyId();
         }
         accepted.add(seen);
         lastByTenant.put(tenant, key);

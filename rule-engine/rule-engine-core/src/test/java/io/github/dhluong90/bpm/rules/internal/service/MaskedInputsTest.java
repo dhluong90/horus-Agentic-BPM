@@ -804,11 +804,13 @@ class MaskedInputsTest {
         // When the first decision of minor-review with nationalId 079090001234 is evaluated
         DecisionResult result = evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
 
-        // Then it is refused, naming k2 and both check values and never a key, and no row holds the plain value
+        // Then it is refused with a code and the rule set only: no key, no check value, and no row holds the plain value
         assertThat(result.outcome()).isInstanceOf(DecisionResult.Failed.class);
         String detail = ((DecisionResult.Failed) result.outcome()).detail();
-        assertThat(detail).contains("k2").contains(recorded.checkValue()).contains(restored.checkValue())
-                .doesNotContain(HexFormat.of().formatHex(KEY_B)).doesNotContain(NATIONAL_ID);
+        assertThat(detail).startsWith("MASKING_KEY_MISMATCH").contains("minor-review")
+                .doesNotContain(recorded.checkValue()).doesNotContain(restored.checkValue())
+                .doesNotContain(HexFormat.of().formatHex(KEY_B)).doesNotContain(HexFormat.of().formatHex(KEY_A))
+                .doesNotContain(NATIONAL_ID);
         assertThat(stores.decisions).hasSize(1);
         assertThat(stores.decisions.getFirst().errorCode()).isEqualTo("MASKING_KEY_MISMATCH");
         assertThat(stores.decisions.getFirst().maskedInputsJson()).isEqualTo("{}");
@@ -816,6 +818,27 @@ class MaskedInputsTest {
         assertThat(evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16)).outcome())
                 .isInstanceOf(DecisionResult.Failed.class);
         assertThat(stores.maskingKeyChecks).containsEntry("*\u0000k2", recorded.checkValue());
+    }
+
+    @Test
+    void TR_SEC_10_the_refusal_an_api_caller_sees_is_a_code_and_the_rule_set_and_no_check_value() {
+        // Given k2 recorded with the check value of KEY_A and a restored k2 with KEY_B
+        MaskingKey recorded = MaskingKey.of("k2", KEY_A);
+        MaskingKey restored = MaskingKey.of("k2", KEY_B);
+        stores.maskingKeyChecks.put("*\u0000k2", recorded.checkValue());
+        RuleEngines engines = engines(undeclared(() -> restored));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+
+        // When the decision is refused, the detail is the text of the problem body the REST module returns as 422
+        DecisionResult.Failed failed = (DecisionResult.Failed) evaluate(engines, "bank-a", "minor-review",
+                Map.of("nationalId", NATIONAL_ID, "age", 16)).outcome();
+
+        // Then it is one fixed sentence: no key id, tenant, check value (the full value or its first 8 digits)
+        assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(failed.detail()).isEqualTo("MASKING_KEY_MISMATCH: the masking key in use does not match the key"
+                + " first recorded for it, so the inputs of minor-review cannot be logged");
+        assertThat(failed.detail()).doesNotContain("k2", "bank-a", recorded.checkValue().substring(0, 8),
+                restored.checkValue().substring(0, 8));
     }
 
     @Test
