@@ -7,7 +7,7 @@ import java.util.function.BooleanSupplier;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
 /**
- * The wait of a second request on an idempotency claim (#172, PRE-377). The claim insert blocks on the primary key
+ * The wait of a second request on an idempotency claim (#172, PRE-378). The claim insert blocks on the primary key
  * until the first request commits and a pool connection is held meanwhile, so the wait is capped with
  * {@code lock_timeout}, set for the claim statement only: the work after the claim keeps the session's own timeout.
  * A request that waits the whole time gets {@code IDEMPOTENCY_IN_FLIGHT}; the client retries after one second.

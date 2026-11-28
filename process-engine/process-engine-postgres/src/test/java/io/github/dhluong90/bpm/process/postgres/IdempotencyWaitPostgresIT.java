@@ -97,7 +97,7 @@ class IdempotencyWaitPostgresIT {
     }
 
     @Test
-    void PRE_377_a_duplicate_of_a_request_still_running_is_refused_within_the_lock_timeout_and_a_later_retry_replays() throws Exception {
+    void PRE_378_a_duplicate_of_a_request_still_running_is_refused_within_the_lock_timeout_and_a_later_retry_replays() throws Exception {
         // Given a payment screening that holds its transaction open, started with Idempotency-Key PAY-2027-0412
         engine(Duration.ofMillis(300));
         CompletableFuture<ProcessInstance> first = CompletableFuture.supplyAsync(() -> start("PAY-2027-0412",
@@ -123,7 +123,7 @@ class IdempotencyWaitPostgresIT {
     }
 
     @Test
-    void PRE_378_a_duplicate_that_waits_for_the_first_within_the_timeout_returns_the_same_result_and_runs_nothing() throws Exception {
+    void PRE_379_a_duplicate_that_waits_for_the_first_within_the_timeout_returns_the_same_result_and_runs_nothing() throws Exception {
         // Given a first request that finishes after 400 ms and a lock timeout of 2 seconds
         engine(Duration.ofSeconds(2));
         CompletableFuture<ProcessInstance> first = CompletableFuture.supplyAsync(() -> start("PAY-2027-0413",
@@ -145,7 +145,7 @@ class IdempotencyWaitPostgresIT {
     }
 
     @Test
-    void PRE_379_a_version_whose_source_and_both_hashes_were_rewritten_is_refused_because_the_approval_record_disagrees() {
+    void PRE_380_a_version_whose_source_and_both_hashes_were_rewritten_is_refused_because_the_approval_record_disagrees() {
         // Given a version approved on its imported source, and a writer of pre_definition who swaps the screening
         // step and rewrites the source hash and the definition hash of the row to match: the values are taken from
         // a clean import of the swapped source under another tenant, so the row is consistent in itself
@@ -167,7 +167,7 @@ class IdempotencyWaitPostgresIT {
     }
 
     @Test
-    void PRE_380_the_approval_record_is_written_with_the_approval_and_cannot_be_changed() {
+    void PRE_381_the_approval_record_is_written_with_the_approval_and_cannot_be_changed() {
         engine(Duration.ofSeconds(1));
         release.countDown();
 
