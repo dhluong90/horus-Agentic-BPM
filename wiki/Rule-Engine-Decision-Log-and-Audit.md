@@ -13,6 +13,7 @@ Find, explain and protect the record of every decision. The decision log is the 
 |---|---|
 | `decisionId` | ULID, returned to the caller of the evaluate call |
 | `tenant`, `ruleSet`, `version`, `hitPolicy` | Which rules decided |
+| `errorMode` | How an error in an expression was treated: `strict` in this release (the REST row of a decision and of a version carry it, additive) |
 | `inputs` | As received after type validation; masked inputs appear as keyed hashes |
 | `matchedRuleIds`, `outputs` | The explanation |
 | `outcome` | `ok` or an error code such as `UNIQUE_HIT_VIOLATION` |
