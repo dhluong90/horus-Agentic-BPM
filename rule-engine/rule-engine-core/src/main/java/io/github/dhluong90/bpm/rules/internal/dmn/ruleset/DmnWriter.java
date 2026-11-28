@@ -155,9 +155,19 @@ public final class DmnWriter {
             throw unsupported("Rule " + id + " uses " + (when.has("any") ? "any" : "all")
                     + ", which has no decision table form; split it into rows, then export");
         }
+        String description = rule.has("description") ? rule.get("description").stringValue() : null;
+        // a rule id mapped at import (RLE-224) goes back out as the id of the file
+        if (description != null) {
+            var marker = java.util.regex.Pattern.compile("(?:^|\\s)\\(DMN id ([A-Za-z0-9_.-]{1,200})\\)$").matcher(description);
+            if (marker.find() && DmnReader.mapRuleId(marker.group(1)).filter(rule.get("id").stringValue()::equals).isPresent()) {
+                id = marker.group(1);
+                description = description.substring(0, marker.start()).strip();
+                description = description.isEmpty() ? null : description;
+            }
+        }
         out.line(3, "<rule id=\"" + Xml.escape(id) + "\">");
-        if (rule.has("description")) {
-            out.element(4, "description", rule.get("description").stringValue());
+        if (description != null) {
+            out.element(4, "description", description);
         }
         writeExplain(out, 4, "explain", rule.path("explain"));
         for (JsonNode input : inputs) {

@@ -141,19 +141,19 @@ The signature is keyless. Sigstore issues a short-lived certificate to this work
 
 ### Verify a download
 
-With the [GitHub CLI](https://cli.github.com/), in the folder of the downloaded files. The example is the cockpit starter of `v0.2.0`:
+With the [GitHub CLI](https://cli.github.com/), in the folder of the downloaded files. The example is the cockpit starter of `v1.0.0`:
 
 ```bash
 R=dhluong90/horus-Agentic-BPM
-gh release download v0.2.0 --repo $R --pattern 'cockpit-spring-boot-starter-0.2.0.jar' --pattern SHA256SUMS
-gh attestation verify cockpit-spring-boot-starter-0.2.0.jar --repo $R \
-  --signer-workflow $R/.github/workflows/release.yml --source-ref refs/tags/v0.2.0
+gh release download v1.0.0 --repo $R --pattern 'cockpit-spring-boot-starter-1.0.0.jar' --pattern SHA256SUMS
+gh attestation verify cockpit-spring-boot-starter-1.0.0.jar --repo $R \
+  --signer-workflow $R/.github/workflows/release.yml --source-ref refs/tags/v1.0.0
 ```
 
 `--signer-workflow` accepts only statements signed by the release workflow, and `--source-ref` only those of that tag. The output has this form:
 
 ```
-Loaded digest sha256:<sha256 of the jar> for file://cockpit-spring-boot-starter-0.2.0.jar
+Loaded digest sha256:<sha256 of the jar> for file://cockpit-spring-boot-starter-1.0.0.jar
 Loaded 1 attestation from GitHub API
 
 The following policy criteria will be enforced:
@@ -169,24 +169,24 @@ The following 1 attestation matched the policy criteria
 
 - Attestation #1
   - Build repo:..... dhluong90/horus-Agentic-BPM
-  - Build workflow:. .github/workflows/release.yml@refs/tags/v0.2.0
+  - Build workflow:. .github/workflows/release.yml@refs/tags/v1.0.0
   - Signer repo:.... dhluong90/horus-Agentic-BPM
-  - Signer workflow: .github/workflows/release.yml@refs/tags/v0.2.0
+  - Signer workflow: .github/workflows/release.yml@refs/tags/v1.0.0
 ```
 
 The command exits `0`. A file that differs by one byte has another digest, so no statement matches it:
 
 ```
-Error: no attestations found
+Error: HTTP 404: Not Found (https://api.github.com/repos/dhluong90/horus-Agentic-BPM/attestations/sha256:<sha256 of the changed file>?per_page=30&predicate_type=https%3A%2F%2Fslsa.dev%2Fprovenance%2Fv1)
 ```
 
-and the command exits `1`. Off a terminal the CLI prints nothing on success; check the exit status, or add `--format json`.
+and the command exits non-zero (recorded on `v1.0.0`, #258). Off a terminal the CLI prints nothing on success; check the exit status, or add `--format json`.
 
 The SBOM statement: the same command with `--predicate-type https://cyclonedx.org/bom`. Its subjects are every staged jar, and their digests are the ones in `SHA256SUMS`; this prints nothing when they match:
 
 ```bash
-gh attestation verify cockpit-spring-boot-starter-0.2.0.jar --repo $R \
-  --signer-workflow $R/.github/workflows/release.yml --source-ref refs/tags/v0.2.0 \
+gh attestation verify cockpit-spring-boot-starter-1.0.0.jar --repo $R \
+  --signer-workflow $R/.github/workflows/release.yml --source-ref refs/tags/v1.0.0 \
   --predicate-type https://cyclonedx.org/bom --format json \
   --jq '.[0].verificationResult.statement.subject[] | "\(.digest.sha256)  \(.name)"' | sort > sbom-subjects.txt
 grep '\.jar$' SHA256SUMS | sed -E 's#  .*/#  #' | sort | diff - sbom-subjects.txt

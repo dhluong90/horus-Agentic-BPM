@@ -204,7 +204,9 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
   // A disabled Approve says why; while the current diff loads it is only busy for a moment.
   const unavailable = canApprove || needsAcceptance || stale || (mayApprove && reviewNow === 'checking') ? undefined : self ?? (mayApprove ? 'decision.changed' : 'dock.approveUnavailable');
   const busy = approve.isPending || reject.isPending;
-  const tip: MessageKey | undefined = unavailable === 'dock.selfRequested' ? 'dock.tip.selfRequested' : unavailable === 'dock.selfAuthored' ? 'dock.tip.selfAuthored' : unavailable === 'dock.approveUnavailable' ? 'dock.tip.unavailable' : undefined;
+  // Who may not approve is said in plain sight beside the button (#609); other reasons stay a short tooltip.
+  const selfNote: MessageKey | undefined = unavailable === 'dock.selfRequested' ? 'dock.tip.selfRequested' : unavailable === 'dock.selfAuthored' ? 'dock.tip.selfAuthored' : undefined;
+  const tip: MessageKey | undefined = unavailable === 'dock.approveUnavailable' ? 'dock.tip.unavailable' : undefined;
   return (
     <section className={docked ? 'card decision decision--dock' : 'card decision'} aria-labelledby="decision-title">
       <h2 id="decision-title" className="rules-card-title">{t('decision.title')}</h2>
@@ -248,6 +250,7 @@ export function DecisionCard({ version, approve, reject, onReload, docked = fals
                 </button>
               ) : null}
             </div>
+            {selfNote !== undefined ? <p className="dock__self" aria-hidden="true">{t(selfNote)}</p> : null}
             {/* The placeholder already says Reject needs a reason; the hint stays as Reject's spoken description. */}
             {canReject ? <p id={hintId} className="sr-only">{t('dock.reasonHint')}</p> : null}
             {mayApprove ? <TakesEffect effectiveFrom={version.effectiveFrom} /> : null}

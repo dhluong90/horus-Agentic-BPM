@@ -1,0 +1,6 @@
+[
+  {"inputs": {"hasSalaryAccount": true, "openedOn": "2024-03-01", "branch": "HCM-01"}, "rules": ["DecisionRule_10uqk3w"], "outputs": {"limit": 30000000, "reviewer": "branch-manager"}},
+  {"inputs": {"hasSalaryAccount": true, "openedOn": "2026-03-01", "branch": "HCM-01"}, "rules": ["DecisionRule_1qw8n5c"], "outputs": {"limit": 5000000, "reviewer": "credit-officer"}},
+  {"inputs": {"hasSalaryAccount": true, "openedOn": "2024-03-01", "branch": "HQ-PREMIER"}, "rules": ["DecisionRule_1qw8n5c"], "outputs": {"limit": 5000000, "reviewer": "credit-officer"}},
+  {"inputs": {"hasSalaryAccount": false, "openedOn": "2020-01-01", "branch": "HN-02"}, "rules": ["DecisionRule_0m5v2xe"], "outputs": {"limit": 0, "reviewer": "none"}}
+]

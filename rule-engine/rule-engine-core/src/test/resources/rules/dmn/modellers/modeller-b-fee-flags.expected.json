@@ -1,0 +1,6 @@
+[
+  {"inputs": {"txType": "ATM", "amount": 6000000}, "rules": ["r_r1", "r_r2"], "outputs": {"flag": ["LARGE_CASH", "CARD_PRESENT"]}},
+  {"inputs": {"txType": "TRANSFER", "amount": 25000000}, "rules": ["r_r3"], "outputs": {"flag": ["REPORT_TO_AML"]}},
+  {"inputs": {"txType": "POS", "amount": 20000000}, "rules": ["r_r1", "r_r2", "r_r3"], "outputs": {"flag": ["LARGE_CASH", "CARD_PRESENT", "REPORT_TO_AML"]}},
+  {"inputs": {"txType": "TRANSFER", "amount": 100}, "rules": [], "outputs": null}
+]

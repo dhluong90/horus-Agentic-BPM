@@ -326,7 +326,8 @@
 
 .timeline { margin-top: 8px; max-height: calc(100vh - var(--topbar-h) - 250px); overflow: auto; }
 .timeline__what { color: var(--ink); }
-.timeline__step--nested { border-left: 2px solid var(--line); }
+.timeline__cell { min-width: 0; overflow-wrap: break-word; }
+.timeline__cell--nested { border-left: 2px solid var(--line); }
 .timeline__trail { overflow-wrap: anywhere; }
 .timeline__what--bad { color: var(--bad); }
 .timeline__note { margin-left: 10px; color: var(--muted); font: var(--type-label); white-space: nowrap; }

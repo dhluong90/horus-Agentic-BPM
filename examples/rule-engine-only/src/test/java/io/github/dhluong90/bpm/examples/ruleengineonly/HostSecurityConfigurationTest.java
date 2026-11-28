@@ -116,6 +116,25 @@ class HostSecurityConfigurationTest {
         assertThat(remembered(background)).isFalse();
     }
 
+    @Test
+    void CKP_001_sign_in_never_replays_a_form_post_and_never_returns_to_a_json_call() {
+        MockHttpServletRequest post = new MockHttpServletRequest("POST", "/bpm/cockpit/");
+        post.setRequestURI("/bpm/cockpit/");
+        post.setParameter("amount", "1000000");
+        assertThat(remembered(post)).isFalse();
+
+        MockHttpServletRequest json = get("/bpm/cockpit/");
+        json.addHeader("Accept", "application/json");
+        assertThat(remembered(json)).isFalse();
+        MockHttpServletRequest mixed = get("/bpm/cockpit/");
+        mixed.addHeader("Accept", "text/html, application/json;q=0.9");
+        assertThat(remembered(mixed)).isFalse();
+
+        MockHttpServletRequest browser = get("/bpm/cockpit/");
+        browser.addHeader("Accept", "text/html,application/xhtml+xml,*/*;q=0.8");
+        assertThat(remembered(browser)).isTrue();
+    }
+
     private static MockHttpServletRequest get(String path) {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", path);
         request.setRequestURI(path);

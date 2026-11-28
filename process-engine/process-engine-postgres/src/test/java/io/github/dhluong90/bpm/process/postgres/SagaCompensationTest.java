@@ -345,6 +345,111 @@ class SagaCompensationTest {
     }
 
     @Test
+    void PRE_377_each_finished_undo_step_raises_an_event_newest_first() {
+        // Given the transfer of 25,000,000 VND whose credit-target fails with ACCOUNT_CLOSED
+        TestEngine engine = engine();
+        deploy(engine, "fund-transfer");
+        ProcessInstance started = transfer(engine, "fund-transfer", "TRF-2026-0377");
+        step(engine);
+        step(engine);
+
+        // When both undo steps run
+        step(engine);
+        step(engine);
+
+        // Then one event per undo step, newest first, naming the undone step and the handler
+        String transferScope = scopeToken(started.id(), "transfer");
+        assertThat(events(engine, "processes.compensation.step-completed.v1")).hasSize(2).satisfies(list -> {
+            assertThat(list.get(0).payload()).containsEntry("instanceId", started.id())
+                    .containsEntry("scopeId", transferScope).containsEntry("nodeId", "debit-source")
+                    .containsEntry("handler", "credit-back").containsEntry("outcome", "COMPLETED")
+                    .containsKey("attemptId");
+            assertThat(list.get(1).payload()).containsEntry("nodeId", "hold-funds")
+                    .containsEntry("handler", "release-hold").containsEntry("outcome", "COMPLETED");
+            assertThat(list.get(0).payload()).doesNotContainKeys("variables", "output");
+        });
+    }
+
+    private static List<String> undone(TestEngine engine, String instanceId) {
+        return events(engine, "processes.compensation.step-completed.v1").stream()
+                .filter(e -> instanceId.equals(e.payload().get("instanceId")))
+                .map(e -> e.payload().get("nodeId") + ":" + e.payload().get("outcome")).toList();
+    }
+
+    @Test
+    void PRE_377_a_failed_undo_step_emits_nothing_and_its_retry_emits_once_then_the_walk_goes_on() {
+        // Given the failed transfer where credit-back answers ACCOUNT_FROZEN
+        TestEngine engine = engine();
+        creditBack.add(new AdapterResult.BusinessError("ACCOUNT_FROZEN", "account 0011-223344 is frozen"));
+        String id = failedTransfer(engine, "fund-transfer", "TRF-2026-0377F");
+
+        // When the undo of debit-source fails for good
+        step(engine);
+
+        // Then no step-completed event is published, and the walk is held
+        assertThat(stack(id)).containsExactly("debit-source:FAILED", "hold-funds:PENDING");
+        assertThat(undone(engine, id)).isEmpty();
+
+        // When ops.lan retries and core banking answers
+        creditBack.clear();
+        Incident open = incident(engine, id);
+        engine.services.retry(open.id(), open.lockVersion(), "Account unfrozen by operations", "retry-377");
+        step(engine);
+        drain(engine);
+
+        // Then each undone step has exactly one event: the retried one once, then release-hold
+        assertThat(undone(engine, id)).containsExactly("debit-source:COMPLETED", "hold-funds:COMPLETED");
+    }
+
+    @Test
+    void PRE_377_an_undo_attempt_that_fails_and_is_retried_by_the_engine_emits_one_event_for_the_attempt_that_succeeds() {
+        // Given the failed transfer where credit-back times out once, then answers
+        TestEngine engine = engine();
+        creditBack.add(new AdapterResult.Failed("ADAPTER_TIMEOUT", "no answer in 30s", true));
+        String id = failedTransfer(engine, "fund-transfer", "TRF-2026-0377R");
+
+        // When the first attempt fails and is scheduled again
+        step(engine);
+        assertThat(undone(engine, id)).as("a failed attempt emits nothing").isEmpty();
+        creditBack.clear();
+        clock.advance(Duration.ofSeconds(10));
+        step(engine);
+        drain(engine);
+
+        // Then one event per undone step, newest first
+        assertThat(undone(engine, id)).containsExactly("debit-source:COMPLETED", "hold-funds:COMPLETED");
+        assertThat(events(engine, "processes.compensation.step-completed.v1").get(0).payload())
+                .containsKey("attemptId");
+    }
+
+    @Test
+    void PRE_377_an_undo_an_approver_marks_done_by_hand_is_completed_manually_without_an_attempt() {
+        // Given the failed transfer, where credit-back times out on all 3 attempts
+        TestEngine engine = engine();
+        creditBack.add(new AdapterResult.Failed("ADAPTER_TIMEOUT", "no answer in 30s", true));
+        String id = failedTransfer(engine, "fund-transfer", "TRF-2026-0377M");
+        step(engine);
+        clock.advance(Duration.ofSeconds(10));
+        step(engine);
+        clock.advance(Duration.ofSeconds(20));
+        step(engine);
+        assertThat(undone(engine, id)).isEmpty();
+
+        // When ops.lan proposes the reversal done by hand and ops.minh approves it
+        Incident open = incident(engine, id);
+        Incident proposed = engine.services.resolve(open.id(), open.lockVersion(),
+                Map.of("reversalRef", "FT26325999"), "Reversed by hand in core banking, ticket OPS-4411", "resolve-377");
+        engine.identity.as("bank-a", "ops.minh", OPERATOR);
+        engine.services.approveResolution(open.id(), proposed.lockVersion(), "Checked", "approve-377");
+
+        // Then the hand-done step has an event with outcome COMPLETED_MANUALLY and no attempt, before release-hold's
+        drain(engine);
+        assertThat(undone(engine, id)).containsExactly("debit-source:COMPLETED_MANUALLY", "hold-funds:COMPLETED");
+        assertThat(events(engine, "processes.compensation.step-completed.v1").get(0).payload())
+                .containsEntry("handler", "credit-back").doesNotContainKey("attemptId");
+    }
+
+    @Test
     void PRE_073_a_failure_that_is_not_retryable_or_uses_the_last_attempt_compensates_too() {
         // Given the transfer, whose credit fails with a failure that is not retryable
         TestEngine engine = engine();

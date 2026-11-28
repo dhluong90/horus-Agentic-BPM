@@ -213,7 +213,7 @@ class DecisionLogSearchIT {
     }
 
     private Reply get(String user, String path) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearer(user)).GET().build();
         HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());

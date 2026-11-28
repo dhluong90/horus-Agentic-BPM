@@ -786,6 +786,105 @@ class MaskedInputsTest {
         assertThat(stores.maskingKeyCheckOrder).containsExactly("* k1", "* k2", "bank-b b1", "bank-b b2", "bank-b b3");
     }
 
+    /** A host policy that declares nothing and returns one key for every tenant. */
+    static MaskingPolicy undeclared(java.util.function.Supplier<MaskingKey> key) {
+        return tenantId -> Optional.of(key.get());
+    }
+
+    @Test
+    void TR_SEC_10_the_first_decision_with_a_key_id_first_seen_with_other_bytes_is_refused_and_logs_no_plain_value() {
+        // Given key id k2 recorded for the host with check value A, and a host policy that declares nothing and returns
+        // k2 with check value B, with a rule set imported after start-up (nothing was checked then)
+        MaskingKey recorded = MaskingKey.of("k2", KEY_A);
+        MaskingKey restored = MaskingKey.of("k2", KEY_B);
+        stores.maskingKeyChecks.put("*\u0000k2", recorded.checkValue());
+        RuleEngines engines = engines(undeclared(() -> restored));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+
+        // When the first decision of minor-review with nationalId 079090001234 is evaluated
+        DecisionResult result = evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+
+        // Then it is refused with a code and the rule set only: no key, no check value, and no row holds the plain value
+        assertThat(result.outcome()).isInstanceOf(DecisionResult.Failed.class);
+        String detail = ((DecisionResult.Failed) result.outcome()).detail();
+        assertThat(detail).startsWith("MASKING_KEY_MISMATCH").contains("minor-review")
+                .doesNotContain(recorded.checkValue()).doesNotContain(restored.checkValue())
+                .doesNotContain(HexFormat.of().formatHex(KEY_B)).doesNotContain(HexFormat.of().formatHex(KEY_A))
+                .doesNotContain(NATIONAL_ID);
+        assertThat(stores.decisions).hasSize(1);
+        assertThat(stores.decisions.getFirst().errorCode()).isEqualTo("MASKING_KEY_MISMATCH");
+        assertThat(stores.decisions.getFirst().maskedInputsJson()).isEqualTo("{}");
+        // and the refusal repeats; the recorded value is not replaced
+        assertThat(evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16)).outcome())
+                .isInstanceOf(DecisionResult.Failed.class);
+        assertThat(stores.maskingKeyChecks).containsEntry("*\u0000k2", recorded.checkValue());
+    }
+
+    @Test
+    void TR_SEC_10_the_refusal_an_api_caller_sees_is_a_code_and_the_rule_set_and_no_check_value() {
+        // Given k2 recorded with the check value of KEY_A and a restored k2 with KEY_B
+        MaskingKey recorded = MaskingKey.of("k2", KEY_A);
+        MaskingKey restored = MaskingKey.of("k2", KEY_B);
+        stores.maskingKeyChecks.put("*\u0000k2", recorded.checkValue());
+        RuleEngines engines = engines(undeclared(() -> restored));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+
+        // When the decision is refused, the detail is the text of the problem body the REST module returns as 422
+        DecisionResult.Failed failed = (DecisionResult.Failed) evaluate(engines, "bank-a", "minor-review",
+                Map.of("nationalId", NATIONAL_ID, "age", 16)).outcome();
+
+        // Then it is one fixed sentence: no key id, tenant, check value (the full value or its first 8 digits)
+        assertThat(failed.code()).isEqualTo("EVALUATION_ERROR");
+        assertThat(failed.detail()).isEqualTo("MASKING_KEY_MISMATCH: the masking key in use does not match the key"
+                + " first recorded for it, so the inputs of minor-review cannot be logged");
+        assertThat(failed.detail()).doesNotContain("k2", "bank-a", recorded.checkValue().substring(0, 8),
+                restored.checkValue().substring(0, 8));
+    }
+
+    @Test
+    void TR_SEC_10_a_key_returned_again_is_checked_against_the_database_once_for_a_thousand_decisions() {
+        // Given a policy that declares nothing and returns a new key object for the same bytes on each call
+        RuleEngines engines = engines(undeclared(() -> MaskingKey.of("k2", KEY_A)));
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+
+        // When 1,000 decisions are evaluated
+        for (int i = 0; i < 1_000; i++) {
+            assertThat(evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16))
+                    .outcome()).isNotInstanceOf(DecisionResult.Failed.class);
+        }
+
+        // Then the check value was read once, recorded for the tenant and key id
+        assertThat(stores.maskingKeyCheckOrder).containsExactly("bank-a k2");
+        assertThat(stores.maskingKeyChecks).containsEntry("bank-a\u0000k2", MaskingKey.of("k2", KEY_A).checkValue());
+    }
+
+    @Test
+    void TR_SEC_10_a_declared_host_key_is_recorded_under_the_host_scope_at_first_use_for_a_tenant_without_rule_sets() {
+        // Given a host key k1 declared by the policy, with the derived subkey returned for each tenant
+        MaskingKey host = MaskingKey.of("k1", KEY_A);
+        RuleEngines engines = engines(new MaskingPolicy() {
+            @Override
+            public Optional<MaskingKey> hmacKey(String tenantId) {
+                return Optional.of(host.forTenant(tenantId));
+            }
+
+            @Override
+            public Map<String, List<MaskingKey>> configuredKeys() {
+                return Map.of(MaskingPolicy.HOST_SCOPE, List.of(host));
+            }
+        });
+        publish(engines, "bank-a", MINOR_REVIEW, "minor-review");
+
+        // When the first decision runs, and then a second tenant's
+        evaluate(engines, "bank-a", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+        publish(engines, "bank-b", MINOR_REVIEW, "minor-review");
+        evaluate(engines, "bank-b", "minor-review", Map.of("nationalId", NATIONAL_ID, "age", 16));
+
+        // Then the host key's own check value is recorded once under the host scope, not a tenant subkey's
+        assertThat(stores.maskingKeyChecks).containsOnlyKeys("*\u0000k1")
+                .containsEntry("*\u0000k1", host.checkValue());
+    }
+
     static MaskingPolicy configured(Map<String, List<MaskingKey>> keys) {
         return new MaskingPolicy() {
             @Override

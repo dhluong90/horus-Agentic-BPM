@@ -422,6 +422,7 @@ export const en = {
 
   /* Process approval with the graph diff (CKP-024) */
   'definition.lens.changes': 'Changes',
+  'definition.subtitleStored': 'Version {version}, drawn as in its diagram',
   'definition.subtitlePending': 'Version {version}, requested by {who}',
   'diff.side': 'Version drawn',
   'diff.side.target': 'Proposed · version {version}',

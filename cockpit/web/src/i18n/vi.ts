@@ -424,6 +424,7 @@ export const vi: Record<MessageKey, string> = {
 
   /* Process approval with the graph diff (CKP-024) */
   'definition.lens.changes': 'Thay đổi',
+  'definition.subtitleStored': 'Phiên bản {version}, vẽ theo sơ đồ của mô hình',
   'definition.subtitlePending': 'Phiên bản {version}, do {who} gửi duyệt',
   'diff.side': 'Phiên bản hiển thị',
   'diff.side.target': 'Đề xuất · phiên bản {version}',
