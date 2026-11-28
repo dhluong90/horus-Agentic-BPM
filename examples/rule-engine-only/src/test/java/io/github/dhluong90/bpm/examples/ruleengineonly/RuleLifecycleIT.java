@@ -394,7 +394,7 @@ class RuleLifecycleIT {
                 .json().path("canonicalHash").asString();
 
         // When
-        HttpResponse<String> me = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpResponse<String> me = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                 + environment.getProperty("local.server.port") + "/api/bpm/me")).header("Authorization", minh).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         HttpResponse<String> approve = HTTP.send(HttpRequest.newBuilder(uri("/rule-sets/card-fee-roles/versions/1:approve"))
@@ -474,7 +474,7 @@ class RuleLifecycleIT {
     }
 
     URI uri(String path) {
-        return URI.create("http://localhost:" + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path);
+        return URI.create("http://127.0.0.1:" + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path);
     }
 
     static byte[] resource(String path) {

@@ -337,6 +337,39 @@ class ErrorMatrixWebMvcTest {
     }
 
     @Test
+    void TR_SEC_10_a_masking_key_mismatch_problem_has_exactly_the_documented_fields_and_no_key_material() throws Exception {
+        // Given a decision the engine refused because the masking key does not match the one first recorded for its id,
+        // with the detail the engine builds and check values that must not appear anywhere
+        String checkValue = "9f2c4be1a07d55c3e8b6a1d4f0c97e2b3a5d6c8e1f4a7b0c2d5e8f1a4b7c0d3e";
+        scene.outcome = new DecisionResult.Failed("EVALUATION_ERROR",
+                io.github.dhluong90.bpm.rules.internal.service.DefaultRuleEngine.maskingKeyMismatchDetail("minor-review"));
+        byte[] body = "{\"inputs\":{\"nationalId\":\"079090001234\",\"age\":16}}".getBytes(StandardCharsets.UTF_8);
+
+        // When it is answered
+        MockHttpServletResponse response = mvc.perform(post("/api/bpm/rules/v1/decisions/minor-review:evaluate")
+                .contentType("application/json").content(body).header("X-Correlation-Id", "01KDG7Z0RQ6V2Y8M1C4N5P7T9W"))
+                .andReturn().getResponse();
+
+        // Then the whole Problem body is these fields and these values: no check value, key, key id, tenant, input or stack
+        assertThat(response.getStatus()).isEqualTo(422);
+        JsonNode problem = EngineJson.JSON.readTree(response.getContentAsByteArray());
+        assertThat(problem.propertyNames()).containsExactlyInAnyOrder("type", "title", "status", "code", "detail",
+                "correlationId", "decisionId", "matchedRuleIds");
+        assertThat(problem.path("type").asString()).isEqualTo(TYPE_BASE + "evaluation_error");
+        assertThat(problem.path("title").asString()).isEqualTo("Unprocessable Content");
+        assertThat(problem.path("status").asInt()).isEqualTo(422);
+        assertThat(problem.path("code").asString()).isEqualTo("EVALUATION_ERROR");
+        assertThat(problem.path("detail").asString()).isEqualTo("MASKING_KEY_MISMATCH: the masking key in use does not"
+                + " match the key first recorded for it, so the inputs of minor-review cannot be logged");
+        assertThat(problem.path("correlationId").asString()).isEqualTo("01KDG7Z0RQ6V2Y8M1C4N5P7T9W");
+        assertThat(problem.path("decisionId").asString()).isEqualTo("01KDG7Z0RQ6V2Y8M1C4N5P7T9W");
+        assertThat(problem.path("matchedRuleIds").size()).isZero();
+        String text = response.getContentAsString(StandardCharsets.UTF_8);
+        assertThat(text).doesNotContain(checkValue, "079090001234", "hmac", "k2", "bank-a", "Exception", "\tat ", "java.",
+                "rle_");
+    }
+
+    @Test
     void TR_SEC_01_a_decision_past_its_step_budget_names_the_limit_it_reached() throws Exception {
         // Given a large collect tariff table that ran past the step budget on this input
         scene.outcome = new DecisionResult.Failed("EVALUATION_ERROR",

@@ -62,6 +62,11 @@ const KEYS: Record<KnownNodeType, MessageKey> = {
   'intermediateThrowEvent:message': 'node.messageThrow',
   receiveTask: 'node.receiveTask',
   sendTask: 'node.sendTask',
+  'receiveTask:instantiate': 'node.receiveTaskStart',
+  intermediateCatchEvent: 'node.intermediateEvent',
+  intermediateThrowEvent: 'node.intermediateEvent',
+  'intermediateThrowEvent:multiple': 'node.multiple',
+  'endEvent:multiple': 'node.multiple',
 };
 
 /** Event definitions a node of an unknown element type can still be named by: `boundaryEvent:timer` is a timer. */

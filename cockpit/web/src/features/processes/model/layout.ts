@@ -1,4 +1,6 @@
 import dagre from '@dagrejs/dagre';
+import { applyStoredLayout } from './storedLayout';
+import { placeNotes, type Notes, type PlacedGroup } from './notes';
 import { isKnownNodeType, type DiagramGraph, type DiagramNode } from './bpmnGraph';
 
 /*
@@ -42,6 +44,8 @@ export interface PlacedEdge {
   isLink?: boolean;
   /** The line from a compensation boundary event to its compensation activity (#488), drawn dotted. */
   isAssociation?: boolean;
+  /** The flow carries a condition (BPMN's small diamond at its start when it leaves an activity). */
+  conditional?: boolean;
   points: Point[];
   /** Centre of the edge's label, in the space dagre kept free for it. */
   labelAt: Point | undefined;
@@ -69,6 +73,10 @@ export interface Layout {
   edges: PlacedEdge[];
   /** Data symbols and their associations, in a band under every step; absent when the process has none. */
   data?: { items: PlacedDataItem[]; links: PlacedDataLink[] };
+  /** Text annotations and their associations (#209), read only; absent when the process has none. */
+  annotations?: Notes;
+  /** Groups the model's diagram frames, at its own bounds; absent when it has none. */
+  groups?: PlacedGroup[];
 }
 
 /** Width of a task box; its height follows the number of lines of its name. */
@@ -81,6 +89,8 @@ const TYPE_ROW = 17;
 export const TYPE_INDENT = 22;
 const TASK_MIN_HEIGHT = 56;
 /** Events and gateways: the symbol in a 48 px box, its name centred below in up to CAPTION_WIDTH. */
+/** Room kept at the foot of a step for its loop or compensation marker. */
+export const MARKER_ROW = 16;
 export const SYMBOL_SIZE = 48;
 export const CAPTION_WIDTH = 84;
 export const CAPTION_GAP = 10;
@@ -119,6 +129,33 @@ export function wrapText(text: string, maxWidth: number, charWidth: number): str
   return lines.length > 0 ? lines : [''];
 }
 
+/**
+ * Wrap for a type label (#609): a line breaks only at a space or just after a hyphen, never inside a word. A word that is
+ * wider than the line stays whole on its own line rather than being cut in two.
+ */
+export function wrapWords(text: string, maxWidth: number, charWidth: number): string[] {
+  const perLine = Math.max(4, Math.floor(maxWidth / charWidth));
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/).filter((part) => part !== '')) {
+    const parts = word.match(/[^-]+-?|-/g) ?? [word];
+    parts.forEach((part, index) => {
+      const joined = index === 0 ? (line === '' ? part : `${line} ${part}`) : line + part;
+      if (line === '' || joined.length <= perLine) line = joined;
+      else { lines.push(line); line = part; }
+    });
+  }
+  if (line !== '') lines.push(line);
+  return lines.length > 0 ? lines : [''];
+}
+
+/** A line wider than its room is cut with an ellipsis; the step's own title carries the whole text. */
+function fitted(lines: string[], maxWidth: number, charWidth: number): string[] {
+  // Wrapping estimates generously; the cut is made at the width the text really draws at (about 0.9 of the estimate).
+  const perLine = Math.max(4, Math.floor(maxWidth / (charWidth * 0.9)));
+  return lines.map((line) => (line.length > perLine ? `${line.slice(0, perLine - 1)}…` : line));
+}
+
 /** Events and gateways get their symbol; every other node, and any type this cockpit does not know, a box. */
 export function shapeOf(type: string): Shape {
   if (!isKnownNodeType(type)) return 'task';
@@ -138,9 +175,11 @@ interface Size { width: number; height: number; lines: string[]; typeLines: stri
 function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
   const name = node.name ?? node.id;
   if (shape === 'task') {
-    const lines = wrapText(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
-    const typeLines = wrapText(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
-    const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW;
+    const lines = fitted(wrapWords(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR), TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
+    const typeLines = fitted(wrapWords(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR), TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
+    // A step that repeats or undoes another carries a marker at its foot (#496): the box keeps a row for it, clear of the text.
+    const marked = node.loop !== undefined || (node.compensation === true && node.type !== 'serviceTask:compensation');
+    const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW + (marked ? MARKER_ROW : 0);
     return { width: TASK_WIDTH, height: Math.max(TASK_MIN_HEIGHT, content), lines, typeLines };
   }
   const lines = wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);
@@ -151,7 +190,7 @@ export const TASK_TEXT = { padX: TASK_PAD_X, padY: TASK_PAD_Y, nameLine: NAME_LI
 export const CAPTION_LINE_HEIGHT = CAPTION_LINE;
 
 /** Moves an edge end from the box edge onto the symbol's outline, so the arrow touches the circle or diamond. */
-function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
+export function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
   if (node.shape === 'task') return end;
   const centre = symbolCentre(node);
   const dx = toward.x - centre.x;
@@ -323,8 +362,10 @@ function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: 
  */
 export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
   const level = layoutLevel(graph, undefined, typeLabel, options);
-  const base: Layout = { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
-  return graph.data === undefined ? base : placeData(graph.data, base);
+  const placed: Layout = { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
+  // The model's own diagram wins where it has coordinates; automatic layout stands for the rest.
+  const base = graph.stored === undefined ? placed : applyStoredLayout(placed, graph.stored, graph);
+  return placeNotes(graph.data === undefined ? base : placeData(graph.data, base), graph);
 }
 
 /** The data object is a page 30 by 38, the store a drum 44 by 38; each has its name below, up to DATA_CAPTION wide. */

@@ -84,6 +84,10 @@ public final class EngineMeters {
          * @param count how many, at least 1
          */
         void retired(RetireReason reason, int count);
+
+        /** A version was served on a plain or pre-seal seal while a seal key is set (the {@code acceptUnkeyedSeals} window). */
+        default void unkeyedSealAccepted() {
+        }
     }
 
     private final List<Recorder> recorders = new CopyOnWriteArrayList<>();
@@ -118,6 +122,13 @@ public final class EngineMeters {
             record(Outcome.REFUSED, code(refusal.code()), nanos);
         } else {
             record(Outcome.FAILED, INTERNAL_ERROR_CODE, nanos);
+        }
+    }
+
+    /** Records a version accepted on an unkeyed seal while a key is set; no tenant, rule set or seal is passed. */
+    void unkeyedSealAccepted() {
+        for (Recorder recorder : recorders) {
+            recorder.unkeyedSealAccepted();
         }
     }
 

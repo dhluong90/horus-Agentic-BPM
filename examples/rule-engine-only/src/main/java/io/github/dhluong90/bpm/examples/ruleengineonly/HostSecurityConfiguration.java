@@ -7,12 +7,14 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Locale;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.core.env.Environment;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -118,16 +120,24 @@ class HostSecurityConfiguration {
     }
 
     /**
-     * The page to return to after sign-in. Engine calls, background calls (X-Requested-With) and the
-     * browser's automatic favicon request are never remembered: otherwise the sign-in page's own
-     * {@code /favicon.ico} request replaces the page the user asked for, such as {@code /bpm/cockpit/}.
-     * Spring Security's default matcher skips the last two; a custom matcher must keep doing so.
+     * The page to return to after sign-in: the rules of Spring Security's default request cache (a GET that
+     * does not ask for JSON, is not a background call and is not the favicon) plus the engine API, which is
+     * never remembered. A form post, a JSON call or the browser's automatic {@code /favicon.ico} request must
+     * not replace the page the user asked for, such as {@code /bpm/cockpit/}, nor have its parameters replayed
+     * after sign-in. A custom matcher must keep every one of these rules.
      */
     static HttpSessionRequestCache pagesOnly(RequestMatcher engineApi) {
         RequestMatcher favicon = PathPatternRequestMatcher.withDefaults().matcher("/favicon.*");
         RequestMatcher backgroundCall = request -> "XMLHttpRequest".equals(request.getHeader("X-Requested-With"));
+        RequestMatcher get = PathPatternRequestMatcher.withDefaults().matcher(HttpMethod.GET, "/**");
+        RequestMatcher json = request -> {
+            String accept = request.getHeader("Accept");
+            return accept != null && accept.toLowerCase(Locale.ROOT).contains("application/json");
+        };
         HttpSessionRequestCache requestCache = new HttpSessionRequestCache();
         requestCache.setRequestMatcher(new AndRequestMatcher(
+                get,
+                new NegatedRequestMatcher(json),
                 new NegatedRequestMatcher(engineApi),
                 new NegatedRequestMatcher(favicon),
                 new NegatedRequestMatcher(backgroundCall)));

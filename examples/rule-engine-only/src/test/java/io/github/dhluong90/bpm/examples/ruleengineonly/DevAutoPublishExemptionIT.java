@@ -85,7 +85,7 @@ class DevAutoPublishExemptionIT {
             // and the database refuses a row its own requester approved under the former exempt id
             JdbcClient jdbc = host.getBean(JdbcClient.class);
             assertThatThrownBy(() -> jdbc.sql("""
-                    UPDATE rle_version SET requested_by = :id, approved_by = :id, approved_at = now(), status = 'PUBLISHED'
+                    UPDATE rle_version SET requested_by = :id, approved_by = :id, approved_at = now(), approval_seal = 'sha256:' || repeat('0', 64), status = 'PUBLISHED'
                     WHERE tenant_id = 'bank-a' AND version_num = 1
                     """).param("id", FORMER_EXEMPT_ID).update())
                     .isInstanceOf(DataIntegrityViolationException.class)
@@ -131,7 +131,7 @@ class DevAutoPublishExemptionIT {
             }
             body = bound;
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/bpm/rules/v1"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/bpm/rules/v1"
                         + path))
                 .header("Authorization", TestTokens.bearerFor(user, "bank-a", ALL_RULE_PERMISSIONS))
                 .header("Idempotency-Key", "k-" + System.nanoTime())

@@ -350,6 +350,33 @@ class MaskedInputsPostgresIT {
                         + " inputs that only the default masked: kyc-routing v1 [nationalId]");
     }
 
+    @Test
+    void TR_SEC_10_a_key_first_used_after_start_up_is_checked_against_the_id_recorded_for_the_host() {
+        // Given k2 recorded for the host with the check value of KEY_A, and a policy that declares nothing and returns
+        // k2 with the bytes of KEY_B for bank-a, which had no rule set at start-up
+        JdbcClient jdbc = JdbcClient.create(db);
+        jdbc.sql("INSERT INTO rle_masking_key_check (tenant_id, key_id, check_value, first_seen_at)"
+                + " VALUES ('*', 'k2', :check, now())").param("check", MaskingKey.of("k2", KEY_A).checkValue()).update();
+        engines = engines(tenantId -> Optional.of(MaskingKey.of("k2", KEY_B)));
+        publish("bank-a");
+
+        // When the first decision with a masked nationalId is evaluated
+        String refused = evaluate("bank-a", 16);
+
+        // Then it is refused as MASKING_KEY_MISMATCH, no row holds the plain value, and nothing was recorded for bank-a
+        assertThat(jdbc.sql("SELECT error_code FROM rle_decision WHERE id = :id").param("id", refused)
+                .query(String.class).single()).isEqualTo("MASKING_KEY_MISMATCH");
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_decision WHERE masked_inputs::text LIKE :plain")
+                .param("plain", "%" + NATIONAL_ID + "%").query(Long.class).single()).isZero();
+        assertThat(jdbc.sql("SELECT count(*) FROM rle_masking_key_check WHERE tenant_id = 'bank-a'")
+                .query(Long.class).single()).isZero();
+
+        // and the same key id with the bytes it was recorded with is accepted, in a transaction of its own
+        engines = engines(tenantId -> Optional.of(MaskingKey.of("k2", KEY_A)));
+        assertThat(jdbc.sql("SELECT error_code FROM rle_decision WHERE id = :id").param("id", evaluate("bank-a", 16))
+                .query(String.class).optional()).isEmpty();
+    }
+
     static MaskingPolicy maskByDefault(String tenant) {
         return new MaskingPolicy() {
             @Override

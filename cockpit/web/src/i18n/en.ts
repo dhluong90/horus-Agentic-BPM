@@ -407,6 +407,8 @@ export const en = {
   'definition.diagramLabel': 'Diagram of {name}, {count} steps',
   'diagram.zoom': 'Zoom',
   'diagram.data.object': 'Data object',
+  'diagram.note': 'Note',
+  'diagram.group': 'Group',
   'diagram.data.store': 'Data store',
   'diagram.fit': 'Fit',
   'diagram.fitAt': 'Fit · {percent} %',
@@ -422,6 +424,7 @@ export const en = {
 
   /* Process approval with the graph diff (CKP-024) */
   'definition.lens.changes': 'Changes',
+  'definition.subtitleStored': 'Version {version}, drawn as in its diagram',
   'definition.subtitlePending': 'Version {version}, requested by {who}',
   'diff.side': 'Version drawn',
   'diff.side.target': 'Proposed · version {version}',
@@ -525,6 +528,7 @@ export const en = {
   'node.complexGateway': 'Complex gateway',
   'node.adHocSubProcess': 'Ad-hoc sub-process',
   'node.multiple': 'Multiple event',
+  'node.intermediateEvent': 'Intermediate event',
   'node.parallelMultiple': 'Parallel multiple event',
   'node.timer': 'Timer',
   'node.messageStart': 'Message start',
@@ -532,6 +536,7 @@ export const en = {
   'node.messageCatch': 'Wait for message',
   'node.messageThrow': 'Send message',
   'node.receiveTask': 'Receive task',
+  'node.receiveTaskStart': 'Receive task, starts the process',
   'node.sendTask': 'Send task',
   'node.callActivity': 'Call activity',
   'node.transaction': 'Transaction',

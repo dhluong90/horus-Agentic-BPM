@@ -328,6 +328,26 @@ export const nodeActivity = z
   .loose();
 export type NodeActivity = z.infer<typeof nodeActivity>;
 
+const coordinate = z.number().min(-100000).max(100000);
+
+/**
+ * The stored layout of a version (`definition-layout.v1`, ADR-0013): the bounds of the steps and the waypoints of
+ * the flows as a BPMN import's own diagram drew them. It may list a subset; the rest is laid out automatically.
+ */
+export const definitionLayout = z
+  .object({
+    schemaVersion: z.literal(1),
+    nodes: z.record(z.string(), z.object({ x: coordinate, y: coordinate, width: z.number().positive().optional(), height: z.number().positive().optional() })),
+    edges: z.record(z.string(), z.array(z.object({ x: coordinate, y: coordinate }))).optional(),
+    /** Where the diagram puts the name of a flow (BPMNLabel bounds), by `source->target`; a flow not listed has its name placed clear of the steps. */
+    labels: z.record(z.string(), z.object({ x: coordinate, y: coordinate, width: z.number().positive(), height: z.number().positive() })).optional(),
+  })
+  .loose();
+export type DefinitionLayout = z.infer<typeof definitionLayout>;
+
+/** `GET .../layout`: a revision with its layout document (`204`, no layout, is read as `undefined`). */
+export const layoutRevision = z.object({ revision: z.number().int(), layout: definitionLayout.optional() }).loose();
+
 /** One history entry. The undo fields (#80, PRE-203) are present on the entries of an undo only. */
 export const activityEntry = z
   .object({

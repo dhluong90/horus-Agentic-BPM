@@ -34,6 +34,7 @@ class RefusalsLiftedTest {
                               xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:t"
                               expressionLanguage="urn:horus-bpm:expr:v1">
               <bpmn:message id="m-app" name="loan-application"/>
+              <bpmn:signal id="s-alert" name="alert"/>
               <bpmn:process id="loan" isExecutable="true">
             """;
     private static final String TAIL = "</bpmn:process></bpmn:definitions>";
@@ -130,20 +131,62 @@ class RefusalsLiftedTest {
     @Test
     void PRE_383_every_task_type_and_the_call_activity_can_be_a_compensation_activity_and_exports_back() {
         for (String activity : List.of(
-                "<bpmn:userTask id=\"undo\" isForCompensation=\"true\" horus:assignee=\"role:OPS\" horus:resultVariable=\"r\"/>",
+                "<bpmn:userTask id=\"undo\" isForCompensation=\"true\"/>",
                 "<bpmn:manualTask id=\"undo\" isForCompensation=\"true\"/>",
                 "<bpmn:task id=\"undo\" isForCompensation=\"true\"/>",
-                "<bpmn:sendTask id=\"undo\" isForCompensation=\"true\" messageRef=\"m-app\"/>",
-                "<bpmn:receiveTask id=\"undo\" isForCompensation=\"true\" messageRef=\"m-app\" horus:correlationKey=\"k\"/>",
-                "<bpmn:scriptTask id=\"undo\" isForCompensation=\"true\" scriptFormat=\"urn:horus-bpm:expr:v1\" horus:resultVariable=\"r\">"
-                        + "<bpmn:script>1</bpmn:script></bpmn:scriptTask>",
-                "<bpmn:callActivity id=\"undo\" isForCompensation=\"true\" calledElement=\"reverse-disbursement\"/>")) {
+                "<bpmn:sendTask id=\"undo\" isForCompensation=\"true\"/>",
+                "<bpmn:scriptTask id=\"undo\" isForCompensation=\"true\"/>")) {
             String xml = compensationOn(activity);
 
             assertThat(codes(xml)).as(activity).isEmpty();
             assertThat(CanonicalProcessWriter.canonicalText(read(xml))).as(activity).contains("\"forCompensation\":true");
             assertRoundTrip(read(xml));
         }
+    }
+
+    @Test
+    void PRE_383_a_manual_undo_refuses_the_content_it_would_never_run_with_a_named_code() {
+        for (String activity : List.of(
+                "<bpmn:userTask id=\"undo\" isForCompensation=\"true\" horus:assignee=\"role:OPS\"/>",
+                "<bpmn:userTask id=\"undo\" isForCompensation=\"true\" horus:resultVariable=\"reversal\"/>",
+                "<bpmn:sendTask id=\"undo\" isForCompensation=\"true\" messageRef=\"m-app\"/>",
+                "<bpmn:scriptTask id=\"undo\" isForCompensation=\"true\" scriptFormat=\"urn:horus-bpm:expr:v1\">"
+                        + "<bpmn:script>1</bpmn:script></bpmn:scriptTask>",
+                "<bpmn:callActivity id=\"undo\" isForCompensation=\"true\" calledElement=\"reverse-disbursement\"/>")) {
+            assertThatThrownBy(() -> read(compensationOn(activity))).as(activity).isInstanceOfSatisfying(
+                    ValidationFailedException.class, e -> assertThat(e.problems()).extracting(DefinitionProblem::code,
+                            DefinitionProblem::elementId).contains(tuple("COMPENSATION_ACTIVITY_CONTENT_UNUSED", "undo")));
+        }
+    }
+
+    @Test
+    void PRE_382_isInterrupting_false_outside_an_event_sub_process_gives_an_import_warning_naming_the_element() {
+        String xml = HEAD + """
+                <bpmn:startEvent id="start" isInterrupting="false"/>
+                <bpmn:task id="work"/>
+                """ + LINE + TAIL;
+
+        assertThat(reader.readWithWarnings(xml.getBytes(StandardCharsets.UTF_8)).warnings())
+                .extracting(DefinitionProblem::code, DefinitionProblem::elementId)
+                .containsExactly(tuple("INTERRUPTING_HAS_NO_EFFECT", "start"));
+    }
+
+    @Test
+    void PRE_382_isInterrupting_false_inside_an_event_sub_process_gives_no_warning() {
+        String xml = HEAD + """
+                <bpmn:startEvent id="start"/>
+                <bpmn:task id="work"/>
+                <bpmn:subProcess id="alert" triggeredByEvent="true">
+                  <bpmn:startEvent id="alert-start" isInterrupting="false">
+                    <bpmn:signalEventDefinition signalRef="s-alert"/>
+                  </bpmn:startEvent>
+                  <bpmn:endEvent id="alert-end"/>
+                  <bpmn:sequenceFlow id="a1" sourceRef="alert-start" targetRef="alert-end"/>
+                </bpmn:subProcess>
+                """ + LINE + TAIL;
+
+        assertThat(reader.readWithWarnings(xml.getBytes(StandardCharsets.UTF_8)).warnings())
+                .extracting(DefinitionProblem::code).doesNotContain("INTERRUPTING_HAS_NO_EFFECT");
     }
 
     @Test
@@ -167,7 +210,7 @@ class RefusalsLiftedTest {
         String unattached = HEAD + """
                 <bpmn:startEvent id="start"/>
                 <bpmn:task id="work"/>
-                <bpmn:userTask id="undo" isForCompensation="true" horus:assignee="role:OPS" horus:resultVariable="r"/>
+                <bpmn:userTask id="undo" isForCompensation="true"/>
                 <bpmn:sequenceFlow id="f3" sourceRef="work" targetRef="undo"/>
                 """ + LINE + TAIL;
 

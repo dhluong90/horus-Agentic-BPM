@@ -233,7 +233,7 @@ public final class MaskingStartupCheck {
         }
     }
 
-    private static boolean declared(Map<String, List<MaskingKey>> byScope, String tenant, MaskingKey key) {
+    static boolean declared(Map<String, List<MaskingKey>> byScope, String tenant, MaskingKey key) {
         for (MaskingKey own : byScope.getOrDefault(tenant, List.of())) {
             if (own.keyId().equals(key.keyId()) && own.sameKeyAs(key)) {
                 return true;

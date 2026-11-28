@@ -6,7 +6,7 @@
     <bpmn:boundaryEvent id="disburse-undo" attachedToRef="disburse" cancelActivity="false">
       <bpmn:compensateEventDefinition/>
     </bpmn:boundaryEvent>
-    <bpmn:userTask id="reverse-by-operator" isForCompensation="true" horus:assignee="role:OPS" horus:resultVariable="reversal"/>
+    <bpmn:userTask id="reverse-by-operator" isForCompensation="true"/>
     <bpmn:association id="disburse-undo-link" associationDirection="One" sourceRef="disburse-undo" targetRef="reverse-by-operator"/>
     <bpmn:endEvent id="end"/>
     <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="disburse"/>

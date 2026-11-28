@@ -320,7 +320,8 @@ public final class ProcessCompiler {
             LoopChecks.check(node, problems);
             eventSubProcessProblems(node, flows, nodes, containerOf, process, problems);
             complexAndMultipleProblems(node, out, nodes, containerOf, flows, process, problems);
-            if (node instanceof UserTask task && task.extensions().first(ResultVariable.class).isEmpty()) {
+            if (node instanceof UserTask task && !isForCompensation(node)
+                    && task.extensions().first(ResultVariable.class).isEmpty()) {
                 problems.add(DefinitionProblem.of("RESULT_VARIABLE_REQUIRED", "A userTask needs horus:resultVariable, so"
                         + " a completion result can never overwrite other process variables", node.id()));
             }

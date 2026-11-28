@@ -2789,25 +2789,78 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
 - **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)
 
+### PRE-377 Each undo step that finishes raises an event naming the handler, the step it undid and the outcome
+- **Traces to:** `TR-COMP-01`, `PRE-073`, `PRE-085`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The fund transfer of `PRE-073`: `hold-funds` (undone by `release-hold`), `debit-source` (undone by `credit-back`) and `credit-target`, which fails with `ACCOUNT_CLOSED`. `25,000,000 VND` is moved from `0011-223344`.
+- **When:** Both undo steps complete.
+- **Then:**
+  - `processes.compensation.step-completed.v1` is published twice, newest first: first `nodeId` `debit-source` with `handler` `credit-back`, then `nodeId` `hold-funds` with `handler` `release-hold`; each has `outcome` `COMPLETED`, the instance id, the saga `scopeId` and the undo `attemptId`.
+  - Each event is published in the transaction that writes the matching `COMPENSATION_STEP_COMPLETED` history entry, and carries no variable or output. An undo an approver marks done by hand has `outcome` `COMPLETED_MANUALLY` and no `attemptId`.
+  - A failed undo step publishes no such event.
+- **Example:** `credit-back undoes debit-source -> step-completed(nodeId=debit-source, handler=credit-back, COMPLETED)`.
+- **Test ID:** `PRE_377_each_finished_undo_step_raises_an_event_newest_first` (`SagaCompensationTest`)
+
+### PRE-378 A duplicate of a request that is still running waits at most the lock timeout, is then refused as IDEMPOTENCY_IN_FLIGHT, and never runs the work twice
+- **Traces to:** `TR-IDEM-01`, ADR-0006, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a the payment screening `PAY-2027-0412` was started with `Idempotency-Key: PAY-2027-0412` and its transaction is still open; `horus.bpm.processes.idempotency.lock-timeout` is `300ms` (the default is `2s`).
+- **When:** The client sends the same request again, then once more after the first has committed.
+- **Then:** The second request gives up within the lock timeout with `409 IDEMPOTENCY_IN_FLIGHT` and `Retry-After: 1`; it starts nothing and the screening has run once. The timeout covers the claim statement only, so the work after the claim keeps the database's own lock timeout. The third request returns the first answer, the same instance id.
+- **Example:** `POST /instances` with `Idempotency-Key: PAY-2027-0412` while the first runs -> `409 IDEMPOTENCY_IN_FLIGHT`; after it commits -> `200` with the first instance
+- **Test ID:** `PRE_378_a_duplicate_of_a_request_still_running_is_refused_within_the_lock_timeout_and_a_later_retry_replays` (`IdempotencyWaitPostgresIT`)
+
+### PRE-379 A duplicate that waits for the first request within the lock timeout returns the same result
+- **Traces to:** `TR-IDEM-01`, ADR-0006, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The screening of PRE-378 is running with `Idempotency-Key: PAY-2027-0413` and the lock timeout is `2s`; the same request arrives while it runs.
+- **When:** The first request commits 400 ms later.
+- **Then:** The duplicate was waiting, not refused, and now returns the instance the first created; one instance exists and the screening ran once.
+- **Example:** first commits after 0.4 s -> both answers carry instance `01J...` of `PAY-2027-0413`
+- **Test ID:** `PRE_379_a_duplicate_that_waits_for_the_first_within_the_timeout_returns_the_same_result_and_runs_nothing` (`IdempotencyWaitPostgresIT`)
+
+### PRE-380 A version is compiled only when its stored hashes equal the hashes recorded at its approval
+- **Traces to:** `TR-SEC-04`, ADR-0026 decision 4, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `payment-screening` v1 is approved. Someone who can update `pre_definition` replaces the source and rewrites `source_hash` and `definition_hash` of the row so that they agree with the new source.
+- **When:** Anyone starts, exports or diffs that version.
+- **Then:** The engine refuses it with `DEFINITION_INTEGRITY_FAILED`, "the stored hashes differ from the hashes approved", because `pre_definition_approval` holds the hashes written when the version was approved; nothing starts. A version with an approver and no approval record is refused the same way. The record is written in the transaction of the approval (and of a dev auto-approval) and the table refuses `UPDATE`, `DELETE` and `TRUNCATE`; versions approved before V2 are recorded with the hashes their row held when V2 ran. A writer who can also disable the table's triggers is outside this control.
+- **Example:** source `screen-payment` swapped to `skip-screening` with matching hashes -> `DEFINITION_INTEGRITY_FAILED`
+- **Test ID:** `PRE_380_a_version_whose_source_and_both_hashes_were_rewritten_is_refused_because_the_approval_record_disagrees` (`IdempotencyWaitPostgresIT`)
+
+### PRE-381 The approval record is written with the approval, cannot be changed, and the lock timeout may be lowered only
+- **Traces to:** `TR-SEC-04`, `TR-OPS-01`, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** An approved version at bank-a; `horus.bpm.processes.idempotency.lock-timeout` set by the host.
+- **When:** A row of `pre_definition_approval` is updated, deleted or truncated; the timeout is set to `5s` or `0s`.
+- **Then:** The row exists with the hashes of the version, and each change fails with "append-only". Start-up fails naming `idempotency.lock-timeout` for a value outside 1 millisecond to 2 seconds.
+- **Example:** `UPDATE pre_definition_approval SET source_hash = ...` -> `55000 append-only`; `lock-timeout=5s` -> start-up refused
+- **Test IDs:** `PRE_381_the_approval_record_is_written_with_the_approval_and_cannot_be_changed` (`IdempotencyWaitPostgresIT`), `PRE_381_the_idempotency_lock_timeout_defaults_to_2_seconds_and_may_be_lowered_only` (`IdempotencyLockTimeoutSettingsTest`)
+
 ### PRE-382 A start event with isInterrupting="false" is read in every scope, and a boundary event may say it as cancelActivity="false"
 - **Traces to:** `TR-STD-04`
 - **Milestone:** M3
 - **Kind:** semantics
 - **Given:** A loan review whose process and whose embedded sub-process `assess` each start on `<startEvent isInterrupting="false"/>`; a user task `approve` with a timer boundary event that says `isInterrupting="false"` instead of `cancelActivity="false"`.
 - **When:** The files are read, compiled, run and exported.
-- **Then:** The attribute is ignored outside an event sub-process, as BPMN says, because a process or sub-process has no other work to interrupt; the instance runs and completes as it does with a plain start. The canonical form keeps `interrupting: false`, so the hash covers it, and the export writes the attribute back. On a boundary event it means `cancelActivity="false"`; `isInterrupting="false"` with `cancelActivity="true"` is `422 VALIDATION_FAILED`, `BOUNDARY_INTERRUPTING_CONFLICT`. On any other element the attribute stays refused (`BPMN_UNSUPPORTED_ELEMENT`, `not planned`) because BPMN defines it on none. An event sub-process start keeps its behaviour (`PRE-320` to `PRE-326`).
-- **Example:** `<startEvent id="start" isInterrupting="false"/>` in process `loan-review-nonint` -> instance `COMPLETED`; `<task isInterrupting="false"/>` -> refused, element `isInterrupting`.
-- **Test ID:** `PRE_382_a_start_event_that_is_not_interrupting_runs_as_any_start_outside_an_event_sub_process` (`ConformanceSuiteTest`), `PRE_382_isInterrupting_false_on_a_start_event_outside_an_event_sub_process_is_read_and_kept`, `PRE_382_a_boundary_event_may_say_isInterrupting_false_for_cancelActivity_false_but_not_both_ways`, `PRE_382_isInterrupting_false_on_an_element_that_is_neither_a_start_nor_a_boundary_event_stays_refused` (`RefusalsLiftedTest`)
+- **Then:** The attribute is ignored outside an event sub-process, as BPMN says, because a process or sub-process has no other work to interrupt; the instance runs and completes as it does with a plain start. The canonical form keeps `interrupting: false`, so the hash covers it, and the export writes the attribute back. The import result carries the warning `INTERRUPTING_HAS_NO_EFFECT` naming the start event, so the user knows the attribute does nothing there; inside an event sub-process there is no warning. On a boundary event it means `cancelActivity="false"`; `isInterrupting="false"` with `cancelActivity="true"` is `422 VALIDATION_FAILED`, `BOUNDARY_INTERRUPTING_CONFLICT`. On any other element the attribute stays refused (`BPMN_UNSUPPORTED_ELEMENT`, `not planned`) because BPMN defines it on none. An event sub-process start keeps its behaviour (`PRE-320` to `PRE-326`).
+- **Example:** `<startEvent id="start" isInterrupting="false"/>` in process `loan-review-nonint` -> instance `COMPLETED`, import warning `INTERRUPTING_HAS_NO_EFFECT` naming `start`; `<task isInterrupting="false"/>` -> refused, element `isInterrupting`.
+- **Test ID:** `PRE_382_a_start_event_that_is_not_interrupting_runs_as_any_start_outside_an_event_sub_process` (`ConformanceSuiteTest`), `PRE_382_isInterrupting_false_on_a_start_event_outside_an_event_sub_process_is_read_and_kept`, `PRE_382_a_boundary_event_may_say_isInterrupting_false_for_cancelActivity_false_but_not_both_ways`, `PRE_382_isInterrupting_false_outside_an_event_sub_process_gives_an_import_warning_naming_the_element`, `PRE_382_isInterrupting_false_inside_an_event_sub_process_gives_no_warning`, `PRE_382_isInterrupting_false_on_an_element_that_is_neither_a_start_nor_a_boundary_event_stays_refused` (`RefusalsLiftedTest`)
 
-### PRE-383 A compensation activity may be a user, manual, script, send, receive, business rule or abstract task or a call activity: a person does the undo
+### PRE-383 A compensation activity may be a user, manual, script, send, receive, business rule or abstract task or a call activity: an operator does the undo through an incident
 - **Traces to:** `TR-STD-04`
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** A loan payout with the service task `disburse` (remote handler `core-banking`), a compensation boundary event on it and an association to the user task `reverse-by-operator` marked `isForCompensation="true"` and assigned to `role:OPS`.
+- **Given:** A loan payout with the service task `disburse` (remote handler `core-banking`), a compensation boundary event on it and an association to the user task `reverse-by-operator` marked `isForCompensation="true"`, with no assignee, result variable or form. A second file gives the same user task `horus:assignee="role:OPS"`.
 - **When:** The disbursement completes with posting `FT26332001`; later the scope is undone.
-- **Then:** The stack holds one entry for `disburse` whose handler is `manual`: the walk raises the `COMPENSATION_MANUAL_REQUIRED` incident that names the step, as `horus:compensate="manual"` does, and an operator resolves it after the reversal. A service task as compensation activity still runs its handler. The compensation activity keeps its rules for every type: no sequence flow (`COMPENSATION_ACTIVITY_HAS_FLOW`) and one boundary event that points at it (`COMPENSATION_ACTIVITY_UNATTACHED`, `COMPENSATION_ACTIVITY_MISSING`). The export writes `isForCompensation="true"` on the element and the canonical form keeps `forCompensation`. A sub-process, a transaction, an ad-hoc sub-process or an element that is not an activity stays refused.
+- **Then:** The stack holds one entry for `disburse` whose handler is `manual`: the walk raises the `COMPENSATION_MANUAL_REQUIRED` incident that names the step, as `horus:compensate="manual"` does, and an operator resolves it after the reversal, with the existing four-eyes resolution. A manual undo is an incident, never a task: no work item is created, nobody in a role is asked, no result variable is written, and nothing is run (no script, message or child process). Content that only a run would use is therefore refused at import with `422 VALIDATION_FAILED`, `COMPENSATION_ACTIVITY_CONTENT_UNUSED`, which names the element: `horus:assignee`, `horus:resultVariable` and a form on a user task, `calledElement` on a call activity, `messageRef` on a send or receive task and a script on a script task. Creating a real task for the undo is a later feature. A service task as compensation activity still runs its handler. The compensation activity keeps its rules for every type: no sequence flow (`COMPENSATION_ACTIVITY_HAS_FLOW`) and one boundary event that points at it (`COMPENSATION_ACTIVITY_UNATTACHED`, `COMPENSATION_ACTIVITY_MISSING`). The export writes `isForCompensation="true"` on the element and the canonical form keeps `forCompensation`. A sub-process, a transaction, an ad-hoc sub-process or an element that is not an activity stays refused.
 - **Example:** `userTask reverse-by-operator isForCompensation` on `disburse` -> `PushCompensation(disburse, handler "manual")`; `subProcess isForCompensation` -> refused.
-- **Test ID:** `PRE_383_a_user_task_compensation_activity_is_a_manual_undo_on_the_stack` (`ConformanceSuiteTest`), `PRE_383_every_task_type_and_the_call_activity_can_be_a_compensation_activity_and_exports_back`, `PRE_383_a_sub_process_or_a_gateway_is_not_a_compensation_activity`, `PRE_383_a_compensation_activity_keeps_its_rules_whatever_its_type` (`RefusalsLiftedTest`)
+- **Test ID:** `PRE_383_a_user_task_compensation_activity_is_a_manual_undo_on_the_stack` (`ConformanceSuiteTest`), `PRE_383_every_task_type_and_the_call_activity_can_be_a_compensation_activity_and_exports_back`, `PRE_383_a_manual_undo_refuses_the_content_it_would_never_run_with_a_named_code`, `PRE_383_a_sub_process_or_a_gateway_is_not_a_compensation_activity`, `PRE_383_a_compensation_activity_keeps_its_rules_whatever_its_type` (`RefusalsLiftedTest`)
 
 ### PRE-384 A receive task with instantiate="true" starts the process on the first matching message
 - **Traces to:** `TR-STD-04`

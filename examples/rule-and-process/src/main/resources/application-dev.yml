@@ -80,6 +80,7 @@ horus:
           - classpath:processes/customer-onboarding.bpmn
           - classpath:processes/conformance/compensation-background.bpmn
           - classpath:processes/conformance/compensation-event-subprocess.bpmn
+          - classpath:processes/conformance/compensation-manual-undo.bpmn
           - classpath:processes/conformance/data-objects.bpmn
           - classpath:processes/conformance/data-store.bpmn
           - classpath:processes/conformance/event-gateway-parallel-start.bpmn
@@ -90,5 +91,6 @@ horus:
           - classpath:processes/conformance/parallel-join.bpmn
           - classpath:processes/conformance/parallel-multiple-start.bpmn
           - classpath:processes/conformance/receive-task-start.bpmn
+          - classpath:processes/conformance/service-task-handler-urn.bpmn
           - classpath:processes/conformance/sub-process-and-timer.bpmn
         auto-approve: true
