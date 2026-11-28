@@ -15,6 +15,10 @@ public interface ProcessQueryStore {
     record LiveCount(String nodeId, String status, long count) {
     }
 
+    /** Open incidents at one node. */
+    record IncidentCount(String nodeId, long count) {
+    }
+
     /**
      * One range of the task query (PRE-030): tasks declared to a user, tasks a user claimed, open tasks of a role, of a
      * group, or every open or claimed task of the tenant. Each is served by its own index ordered by due time.
@@ -63,6 +67,12 @@ public interface ProcessQueryStore {
 
     /** @return live token counts per node and status, read through the live token index only */
     List<LiveCount> liveTokenCounts(String tenant, String definitionId);
+
+    /**
+     * @return the {@code OPEN} incidents of one definition version per node, through {@code idx_pre_incident_node}
+     *     only; a node without an open incident is absent
+     */
+    List<IncidentCount> openIncidentCounts(String tenant, String definitionId);
 
     /**
      * The history of one step of one instance, aggregated (PRE-027).

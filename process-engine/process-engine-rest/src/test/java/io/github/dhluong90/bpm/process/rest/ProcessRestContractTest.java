@@ -138,6 +138,12 @@ class ProcessRestContractTest {
         MvcResult counts = exchange(get(BASE + "/definitions/card-fee-review/versions/1/node-stats"));
         assertThat(counts.getResponse().getStatus()).isEqualTo(200);
         assertThat(counts.getResponse().getContentAsString()).contains("\"WAITING_USER\":3");
+        // PRE-521: the open incidents per node, a node that holds no live token among them
+        tools.jackson.databind.JsonNode live = io.github.dhluong90.bpm.process.internal.json.EngineJson.JSON
+                .readTree(counts.getResponse().getContentAsString());
+        assertThat(live.at("/openIncidents/review").asInt()).isEqualTo(2);
+        assertThat(live.at("/openIncidents/post-to-core").asInt()).isEqualTo(1);
+        assertThat(live.at("/nodes/post-to-core").isMissingNode()).isTrue();
 
         assertProblem(get(BASE + "/definitions/no-such-process/versions/1/node-stats"), 404, "DEFINITION_NOT_FOUND");
     }
@@ -540,7 +546,8 @@ class ProcessRestContractTest {
             if (!"card-fee-review".equals(definitionKey)) {
                 throw new DefinitionNotFoundException("No definition " + definitionKey + " version " + version);
             }
-            return new NodeCounts(definitionKey, version, NOW, Map.of("review", Map.of("WAITING_USER", 3L)));
+            return new NodeCounts(definitionKey, version, NOW, Map.of("review", Map.of("WAITING_USER", 3L)),
+                    Map.of("review", 2L, "post-to-core", 1L));
         }
 
         @Override

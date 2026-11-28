@@ -83,6 +83,46 @@ class ReadTimeoutPostgresIT {
     }
 
     @Test
+    void PRE_521_live_counts_slower_than_the_limit_are_stopped_with_a_named_code_and_no_partial_counts() throws Exception {
+        // Given a definition version, and the incident table locked elsewhere while the open incidents are counted
+        engine.identity.as("bank-a", "pipeline", "processes:deploy", "processes:read");
+        engine.services.importDefinition(new io.github.dhluong90.bpm.process.api.ImportRequest(
+                io.github.dhluong90.bpm.process.api.SourceFormat.BPMN_XML, """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                                  xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="Definitions_kyc"
+                                  targetNamespace="urn:horus-bpm:examples" expressionLanguage="urn:horus-bpm:expr:v1">
+                  <bpmn:process id="kyc" name="KYC" isExecutable="true">
+                    <bpmn:startEvent id="start"/>
+                    <bpmn:userTask id="review" horus:assignee="role:KYC_OFFICER"/>
+                    <bpmn:endEvent id="end"/>
+                    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="review"/>
+                    <bpmn:sequenceFlow id="f2" sourceRef="review" targetRef="end"/>
+                  </bpmn:process>
+                </bpmn:definitions>
+                """.strip().getBytes(java.nio.charset.StandardCharsets.UTF_8), null));
+        slowDown("pre_incident");
+
+        // Then the counts are refused as QUERY_TIMEOUT, not answered with the token counts alone
+        assertThatThrownBy(() -> engine.queries.liveNodeCounts("kyc", 1))
+                .isInstanceOf(QueryTimeoutException.class)
+                .isInstanceOfSatisfying(ProcessException.class, e -> assertThat(e.code()).isEqualTo("QUERY_TIMEOUT"));
+        locker.rollback();
+        assertThat(engine.queries.liveNodeCounts("kyc", 1).openIncidents()).isEmpty();
+    }
+
+    @Test
+    void PRE_522_an_incident_list_slower_than_the_limit_is_stopped_with_a_named_code() throws Exception {
+        slowDown("pre_incident");
+
+        assertThatThrownBy(() -> engine.services.incidents(new io.github.dhluong90.bpm.process.api.IncidentQuery("OPEN",
+                null, "kyc", 1))).isInstanceOfSatisfying(ProcessException.class,
+                        e -> assertThat(e.code()).isEqualTo("QUERY_TIMEOUT"));
+        assertThatThrownBy(() -> engine.services.incidents(io.github.dhluong90.bpm.process.api.IncidentQuery.open()))
+                .isInstanceOf(QueryTimeoutException.class);
+    }
+
+    @Test
     void PRE_394_a_host_write_transaction_around_the_timed_out_read_is_untouched() throws Exception {
         slowDown("pre_definition");
         TransactionTemplate host = new TransactionTemplate(new DataSourceTransactionManager(db));
