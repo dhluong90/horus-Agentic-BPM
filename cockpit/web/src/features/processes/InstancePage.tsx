@@ -246,11 +246,15 @@ function CaseTiles({ instance, current, showAction }: { instance: ProcessInstanc
   const { assigneeName } = useNames();
   const task = current !== undefined ? openTaskAt(instance, current.id) : undefined;
   useWantNames(wantedOf(task !== undefined ? [task.assignee] : [], []));
-  const none = <span className="muted" aria-label={t('rulesArea.none')}>—</span>;
+  const stepName = current !== undefined ? (current.name ?? current.id) : undefined;
+  const holder = task !== undefined ? assigneeName(task.assignee) : undefined;
+  // A tile with nothing to say is left out; when none has anything, one plain line says so.
+  const empty = stepName === undefined && holder === undefined && !(showAction && task !== undefined);
   return (
     <section className="case-tiles" aria-label={t('instance.tiles')}>
-      <div className="case-tile"><p className="case-tile__term">{t('instance.tile.step')}</p><p className="case-tile__value">{current !== undefined ? (current.name ?? current.id) : none}</p></div>
-      <div className="case-tile"><p className="case-tile__term">{t('instance.tile.assigned')}</p><p className="case-tile__value">{task !== undefined ? assigneeName(task.assignee) : none}</p></div>
+      {stepName !== undefined ? <div className="case-tile"><p className="case-tile__term">{t('instance.tile.step')}</p><p className="case-tile__value">{stepName}</p></div> : null}
+      {holder !== undefined ? <div className="case-tile"><p className="case-tile__term">{t('instance.tile.assigned')}</p><p className="case-tile__value">{holder}</p></div> : null}
+      {empty ? <p className="muted">{t('instance.tile.empty')}</p> : null}
       {showAction && task !== undefined ? <TaskAction taskId={task.id} noActivity={false} /> : null}
     </section>
   );

@@ -79,6 +79,8 @@ Lists are keyset pages:
 |---|---|---|
 | `horus.bpm.processes.query.max-page-size` | `200` | Most items per page; may be lowered, never raised |
 | `horus.bpm.processes.query.max-range` | `P31D` | Longest start-time range of `GET /instances`; may be lowered, never raised |
+| `horus.bpm.processes.variable-encryption.variables`, `...definitions.<key>` | none | Top-level instance variables encrypted at rest (AES-256-GCM), in every definition or in one (`*` is all of its variables). Nothing is encrypted until you name one. See the key custody section of [[Multi-Tenancy-and-Security]] (`PRE-525`) |
+| `horus.bpm.processes.variable-encryption.keys.<id>`, `...active-key-id` | none | Base64 keys of exactly 32 bytes and the id that writes new values; other keys only read, so a rotation locks nobody out. Naming a variable without a key stops start-up (`PRE-526`, `PRE-527`) |
 | `horus.bpm.processes.query.statement-timeout` | `PT2S` | Longest one statement of `GET /instances` or `GET /definitions` may run. The read has a read-only transaction of its own with `SET LOCAL statement_timeout`; over the limit it is `503 QUERY_TIMEOUT` and returns no partial page (1.1, `PRE-394`) |
 | `horus.bpm.processes.query.max-roles` | `100` | Most role and group queues one `GET /tasks` reads, 1 to 1,000. A caller with more, who names no `role` or `group`, gets `400 ROLE_FAN_OUT_EXCEEDED` with `cap` and `provided`; naming one `role` or `group` narrows the list to one queue (0.3.0, #408) |
 | `horus.bpm.processes.query.due-soon-window` | `PT1H` | A task due within this time before `dueAt` reads `slaState: DUE_SOON` in `GET /tasks` (0.3.0, #472) |
@@ -107,12 +109,12 @@ Every endpoint answers errors as RFC 9457 problem details with a `code`:
 | 401 | `UNAUTHENTICATED` |
 | 403 | `PERMISSION_DENIED`, `TASK_NOT_ASSIGNED`, `SELF_APPROVAL_FORBIDDEN`, `TENANT_NOT_ALLOWED` |
 | 404 | `NO_EFFECTIVE_VERSION`, `DEFINITION_NOT_FOUND`, `INSTANCE_NOT_FOUND`, `TASK_NOT_FOUND`, `MIGRATION_NOT_FOUND` |
-| 409 | `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
+| 409 | `VERSION_CONFLICT`, `VERSION_SUPERSEDED`, `LAST_VERSION_IN_EFFECT`, `INVALID_STATE`, `VARIABLE_ENCRYPTION_RULE_REMOVED` (a write would store an encrypted variable in the clear because the rules no longer name it), `IDEMPOTENCY_IN_FLIGHT` (with `Retry-After: 1`) |
 | 413 | `PAYLOAD_TOO_LARGE` |
 | 422 | `VALIDATION_FAILED`, `BPMN_UNSUPPORTED_ELEMENT`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`, `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED` |
 | 428 | `PRECONDITION_REQUIRED` |
 | 503 | `QUERY_TIMEOUT` (a list read stopped by `query.statement-timeout`) |
-| 500 | `INTERNAL`, `DEFINITION_INTEGRITY_FAILED`, `EVENT_LISTENER_FAILED` (correlation id only) |
+| 500 | `INTERNAL`, `DEFINITION_INTEGRITY_FAILED`, `VARIABLE_KEY_UNAVAILABLE` (an encrypted variable's key is not in the keyring, or none is current), `VARIABLE_INTEGRITY_FAILED` (an encrypted variable does not authenticate), `EVENT_LISTENER_FAILED` (correlation id only) |
 
 A request the framework refuses before the engine runs (an unreadable body, an unsupported media type) keeps its 4xx status with code `INPUT_INVALID`. `403 TENANT_NOT_ALLOWED` and `401 UNAUTHENTICATED` from the host contract carry the host's correlation id and, on a `401`, the `WWW-Authenticate` challenge. No body ever carries a stack trace, a class name or SQL.
 

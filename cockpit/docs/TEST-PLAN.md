@@ -78,6 +78,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | CKP-081 | `CKP_081_*` (`cockpit/web/src/features/rules/DiscardDraft.test.tsx`, `cockpit/web/e2e/discard.spec.ts`) | Vitest with the fake engine; Playwright for every state, keyboard and axe-core | M2 | `TR-UI-02`, `TR-IDEM-01` | Automated |
 | CKP-090 | `CKP_090_*` (`cockpit/web/src/features/rules/EffectiveDate.test.tsx`) | Vitest with the fake engine | M3 | `TR-SEC-04` | Done (#470) |
 | CKP-091 | `CKP_091_*` (`cockpit/web/src/features/processes/calendars/CalendarChanges.test.tsx`, `cockpit/web/src/features/approvals/kinds.test.ts`) | Vitest with the fake engine | M3 | `TR-SEC-04` | Done (#473) |
+| CKP-092 | `CKP_092_*` (`cockpit/web/src/features/processes/calendars/CalendarEditor.test.tsx`, `calendarDraft.test.ts`) | Vitest with the fake engine | M3 | `TR-SEC-04` | Passing (#125) |
 | CKP-079 | `CKP_079_*` (`cockpit/web/src/features/rules/Readings.test.tsx`, `cockpit/web/e2e/readings.spec.ts`) | Vitest with problem answers, Playwright for every state, axe-core | M2 | `TR-SEC-05`, `TR-UI-02`, `TR-UI-04` | Automated |
 
 ## Visual regression baselines
@@ -102,5 +103,5 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | Federation envelope (`TR-UI-05`) is pending PD-046 | Stub-host load test designed with the process engine load harness |
 | Identity providers without refresh tokens for browser clients (DESIGN open question 15.2) | A second sign-in test profile once the fallback is decided |
 | The process engine sends no label for a definition's inputs and outputs, so the process review names a changed input (`highRiskAmount`) and an unclassified field (`documentType`) by its identifier spelled out in words, in the engine's language, also on a Vietnamese screen (#415, #438) | Show the engine's label when the definition carries one; no text is invented in the cockpit |
-| BPMN data inputs and outputs, participants of processes the cockpit does not draw, and some flow names and captions that a line crosses (`cockpit/web/e2e/miwg-known-gaps.json`, #209) | Each entry is removed from the list when the drawing is fixed |
+| Flow names and gateway captions that a line crosses in one crowded model, C.10.0 (`cockpit/web/e2e/miwg-known-gaps.json`, #209) | Each entry is removed from the list when the drawing is fixed |
 | Tenant names are slugs when the host sends no display name | The host supplies tenant names |

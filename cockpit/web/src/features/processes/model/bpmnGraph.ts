@@ -152,9 +152,11 @@ export interface DiagramCollaboration { pools: DiagramPool[]; lanes: DiagramLane
  * A data symbol of the process (#499): a data object (its reference, or the object itself when nothing refers to it)
  * or a data store reference. Read only; the cockpit draws them and never edits them.
  */
+export type DataKind = 'dataObject' | 'dataStore' | 'dataInput' | 'dataOutput';
 export interface DiagramDataItem {
   id: string;
-  kind: 'dataObject' | 'dataStore';
+  /** A data input or output is one a process or sub-process declares in its input/output specification; it is drawn with an arrow on its page. */
+  kind: DataKind;
   name: string | undefined;
   /** The sub-process or saga block it stands in; absent for the process itself. */
   parentId?: string;
@@ -279,6 +281,14 @@ function refsOf(association: Element, name: 'sourceRef' | 'targetRef'): string[]
 function readDataOf(container: Element, parentId: string | undefined, raw: RawData): void {
   for (const child of elementChildren(container)) {
     if (child.namespaceURI !== BPMN) continue;
+    if (child.localName === 'ioSpecification') {
+      for (const slot of elementChildren(child)) {
+        if (slot.namespaceURI !== BPMN || (slot.localName !== 'dataInput' && slot.localName !== 'dataOutput')) continue;
+        const slotId = nonEmpty(slot.getAttribute('id'));
+        if (slotId !== undefined) raw.references.push({ id: slotId, kind: slot.localName, name: nonEmpty(slot.getAttribute('name')), ref: undefined, parentId });
+      }
+      continue;
+    }
     const id = nonEmpty(child.getAttribute('id'));
     if (id === undefined) continue;
     if (child.localName === 'dataObject') raw.objects.set(id, { name: nonEmpty(child.getAttribute('name')), ...(parentId !== undefined ? { parentId } : {}) });
@@ -301,7 +311,7 @@ function readDataOf(container: Element, parentId: string | undefined, raw: RawDa
 interface RawData {
   depth: number;
   objects: Map<string, { name: string | undefined; parentId?: string }>;
-  references: { id: string; kind: 'dataObject' | 'dataStore'; name: string | undefined; ref: string | undefined; parentId: string | undefined }[];
+  references: { id: string; kind: DataKind; name: string | undefined; ref: string | undefined; parentId: string | undefined }[];
   links: DiagramDataLink[];
 }
 
@@ -394,7 +404,9 @@ function readLanes(set: Element, out: DiagramLane[], parent?: string): void {
 function readCollaboration(document: Document, process: Element): DiagramCollaboration | undefined {
   const lanes: DiagramLane[] = [];
   for (const child of elementChildren(process)) if (child.namespaceURI === BPMN && child.localName === 'laneSet') readLanes(child, lanes);
-  const collaboration = Array.from(document.getElementsByTagNameNS(BPMN, 'collaboration'))[0];
+  // A file may hold several collaborations (MIWG C.4.0); the one whose pool runs the drawn process is read.
+  const collaborations = Array.from(document.getElementsByTagNameNS(BPMN, 'collaboration'));
+  const collaboration = collaborations.find((c) => elementChildren(c).some((p) => p.localName === 'participant' && p.getAttribute('processRef') === process.getAttribute('id'))) ?? collaborations[0];
   const pools: DiagramPool[] = [];
   const messageFlows: DiagramMessageFlow[] = [];
   const processId = process.getAttribute('id');

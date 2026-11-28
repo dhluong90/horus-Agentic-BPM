@@ -38,6 +38,8 @@ import java.time.Instant;
  *     for a version not yet approved or approved before seals existed
  * @param legacyBackfilledAt when migration V3 scoped the pre-seal marker to this version, or null; only a version
  *     that existed before the seals has it, and only such a version may carry the marker (RLE-231)
+ * @param sourceFileName the name of the file the version was imported from, or null; display metadata, outside every
+ *     hash and the approval seal (RLE-232)
  */
 public record StoredVersion(
         String tenantId, String id, String ruleSetId, String ruleSet, int version, VersionStatus status,
@@ -45,7 +47,7 @@ public record StoredVersion(
         SourceFormat sourceFormat, String sourceDocument, String sourceHash, long lockVersion,
         String requestedBy, Instant requestedAt, String approvedBy, Instant approvedAt, String approvalComment,
         String createdBy, Instant createdAt, Instant retiredAt, Integer copiedFrom,
-        RetirementRequest retirementRequest, String approvalSeal, Instant legacyBackfilledAt) {
+        RetirementRequest retirementRequest, String approvalSeal, Instant legacyBackfilledAt, String sourceFileName) {
 
     public StoredVersion {
         if (retirementRequest != null && status != VersionStatus.PUBLISHED) {
@@ -55,7 +57,7 @@ public record StoredVersion(
     }
 
     /**
-     * Creates a row that is not scoped to the pre-seal marker.
+     * Creates a row that is not scoped to the pre-seal marker and was not imported from a named file.
      *
      * @param tenantId see the record
      * @param id see the record
@@ -91,7 +93,7 @@ public record StoredVersion(
             String approvalSeal) {
         this(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom, canonicalJson, canonicalHash,
                 sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy, requestedAt, approvedBy, approvedAt,
-                approvalComment, createdBy, createdAt, retiredAt, copiedFrom, retirementRequest, approvalSeal, null);
+                approvalComment, createdBy, createdAt, retiredAt, copiedFrom, retirementRequest, approvalSeal, null, null);
     }
 
     /**
@@ -142,15 +144,28 @@ public record StoredVersion(
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
                 canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy,
                 requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom,
-                retirementRequest, seal, legacyBackfilledAt);
+                retirementRequest, seal, legacyBackfilledAt, sourceFileName);
     }
 
-    /** Returns this row with the seal and the pre-seal scope of {@code source}, which it was derived from. */
+    /**
+     * Returns a copy that names the file the version was imported from.
+     *
+     * @param name the file name, already sanitised, or null
+     * @return the copy
+     */
+    public StoredVersion withSourceFileName(String name) {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
+                canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy,
+                requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom,
+                retirementRequest, approvalSeal, legacyBackfilledAt, name);
+    }
+
+    /** Returns this row with the seal, the pre-seal scope and the file name of {@code source}, which it was derived from. */
     private StoredVersion carryingSealOf(StoredVersion source) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
                 canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion, requestedBy,
                 requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom,
-                retirementRequest, source.approvalSeal, source.legacyBackfilledAt);
+                retirementRequest, source.approvalSeal, source.legacyBackfilledAt, source.sourceFileName);
     }
 
     /**
@@ -163,7 +178,7 @@ public record StoredVersion(
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
                 canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1, requestedBy,
                 requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom,
-                retirementRequest, seal, legacyBackfilledAt);
+                retirementRequest, seal, legacyBackfilledAt, sourceFileName);
     }
 
     /**
@@ -321,7 +336,7 @@ public record StoredVersion(
         return new RuleSetVersion(ruleSet, version, status, hitPolicy, effectiveFrom, lockVersion, canonicalJson,
                 canonicalHash, sourceFormat, sourceHash, includeSource ? sourceDocument : null, requestedBy,
                 requestedAt, approvedBy, approvedAt, createdBy, createdAt, retiredAt, copiedFrom, java.util.List.of(),
-                retirementRequest);
+                retirementRequest, sourceFileName);
     }
 
     /**
@@ -351,7 +366,7 @@ public record StoredVersion(
                 : requestedEffectiveFrom.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PENDING_APPROVAL, hitPolicy,
                 requestedEffectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
-                requester, at, null, null, null, createdBy, createdAt, null, copiedFrom);
+                requester, at, null, null, null, createdBy, createdAt, null, copiedFrom).withSourceFileName(sourceFileName);
     }
 
     /**
@@ -369,7 +384,7 @@ public record StoredVersion(
                 effectiveFrom == null ? at
                         : effectiveFrom.truncatedTo(java.time.temporal.ChronoUnit.MICROS), canonicalJson, canonicalHash, sourceFormat, sourceDocument,
                 sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt, null,
-                copiedFrom);
+                copiedFrom).withSourceFileName(sourceFileName);
     }
 
     /**
@@ -381,7 +396,7 @@ public record StoredVersion(
     public StoredVersion rejected() {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.DRAFT, hitPolicy,
                 effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1,
-                null, null, null, null, approvalComment, createdBy, createdAt, null, copiedFrom);
+                null, null, null, null, approvalComment, createdBy, createdAt, null, copiedFrom).withSourceFileName(sourceFileName);
     }
 
     /**
@@ -461,10 +476,30 @@ public record StoredVersion(
      */
     public StoredVersion replaced(String hitPolicyName, Instant newEffectiveFrom, String newCanonicalJson,
             String newCanonicalHash, SourceFormat newSourceFormat, String newSourceDocument, String newSourceHash) {
+        return replaced(hitPolicyName, newEffectiveFrom, newCanonicalJson, newCanonicalHash, newSourceFormat,
+                newSourceDocument, newSourceHash, null);
+    }
+
+    /**
+     * Returns a copy of this draft with its document replaced and the file name of the new document (RLE-232).
+     *
+     * @param hitPolicyName the new hit policy name
+     * @param newEffectiveFrom the document's {@code effectiveFrom}, or null
+     * @param newCanonicalJson the new canonical JSON
+     * @param newCanonicalHash its SHA-256
+     * @param newSourceFormat the new source format
+     * @param newSourceDocument the new source text
+     * @param newSourceHash SHA-256 of the new source bytes
+     * @param newSourceFileName the file name of the new document, or null
+     * @return the new state with the lock version incremented
+     */
+    public StoredVersion replaced(String hitPolicyName, Instant newEffectiveFrom, String newCanonicalJson,
+            String newCanonicalHash, SourceFormat newSourceFormat, String newSourceDocument, String newSourceHash,
+            String newSourceFileName) {
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicyName, newEffectiveFrom,
                 newCanonicalJson, newCanonicalHash, newSourceFormat, newSourceDocument, newSourceHash, lockVersion + 1,
                 requestedBy, requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt,
-                copiedFrom);
+                copiedFrom).withSourceFileName(newSourceFileName);
     }
 
     /**

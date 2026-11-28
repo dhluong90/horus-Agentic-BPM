@@ -16,6 +16,7 @@ Find, explain and protect the record of every decision. The decision log is the 
 | `inputs` | As received after type validation; masked inputs appear as keyed hashes |
 | `matchedRuleIds`, `outputs` | The explanation |
 | `outcome` | `ok` or an error code such as `UNIQUE_HIT_VIOLATION` |
+| `limit` | `STEPS` or `TIME` on a decision that failed with `EVALUATION_BUDGET_EXCEEDED` (1.1, `RLE-233`); absent otherwise and on earlier rows. `STEPS` is the step budget, the same on every machine, so the rule set must change; `TIME` is the wall-clock backstop, so the machine was slow and a retry may pass |
 | `caller`, `correlationId` | From the security context and the request |
 | `onBehalfOf` | Set only for a process decision step (0.2.0): the step is evaluated as `system:process-engine`, and `onBehalfOf` names the user who triggered it, or is null after a timer. The task worker needs no `rules:evaluate`. A retried step replays its decision instead of writing a second row |
 | `evalClock`, `evaluatedAt`, `durationMicros` | The instant the decision reasoned about, when it ran, and how long |

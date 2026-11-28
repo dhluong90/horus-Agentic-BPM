@@ -13,6 +13,7 @@ import { DisplayNamesProvider } from '../features/processes/api/displayNames';
 import { ProcessesProvider } from '../features/processes/api/processesContext';
 import { DefinitionPage } from '../features/processes/DefinitionPage';
 import { MigrationBuilder } from '../features/processes/migration/MigrationBuilder';
+import { CalendarsPage } from '../features/processes/calendars/CalendarsPage';
 import { CalendarChangesPage } from '../features/processes/calendars/CalendarChangesPage';
 import { MigrationPage } from '../features/processes/migration/MigrationPage';
 import { InstancePage } from '../features/processes/InstancePage';
@@ -144,6 +145,9 @@ function AreaContent({ route, meta, me, areas, engines, refresh }: { route: Rout
       return <MigrationBuilder definitionKey={route.key} target={route.version} from={route.from} pageLimit={pageLimit} />;
     case 'migration':
       return <MigrationPage migrationId={route.migrationId} pageLimit={pageLimit} />;
+    case 'calendars':
+    case 'calendar':
+      return <CalendarsPage calendarKey={route.name === 'calendar' ? route.calendarKey : undefined} pageLimit={pageLimit} />;
     case 'calendar-changes':
     case 'calendar-change':
       return <CalendarChangesPage changeId={route.name === 'calendar-change' ? route.changeId : undefined} pageLimit={pageLimit} />;
