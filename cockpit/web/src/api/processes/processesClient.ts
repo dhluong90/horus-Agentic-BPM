@@ -13,6 +13,7 @@ import {
   type CalendarChange,
   type PendingDefinitionApproval,
   graphDiff,
+  nodeWindowStats,
   migrationDryRun,
   migrationExecution,
   migrationOutcomePage,
@@ -31,6 +32,7 @@ import {
   type DefinitionSummary,
   type DefinitionVersion,
   type GraphDiff,
+  type NodeWindowStats,
   type InstanceActivities,
   type InstanceSummary,
   type MigrationDryRun,
@@ -113,6 +115,8 @@ export interface ProcessesClient {
   getVersion(key: string, version: number, signal?: AbortSignal): Promise<DefinitionVersion>;
   /** getDefinitionDiff: steps and links changed from `base` (the version in effect when absent) to this version */
   getDiff(key: string, version: number, base?: number, signal?: AbortSignal): Promise<GraphDiff>;
+  /** getNodeStats (mode=window): per step the counts and the median and 95th percentile of completed durations over whole hours */
+  getStepTiming(key: string, version: number, range: { from: string; to?: string | undefined }, signal?: AbortSignal): Promise<NodeWindowStats>;
   /** approveDefinition: as a second person, bound to the reviewed content hash */
   approveDefinition(key: string, version: number, lockVersion: number, approval: DefinitionApproval, idempotencyKey: string): Promise<DefinitionVersion>;
   /** rejectDefinition: back to draft with a reason */
@@ -243,6 +247,11 @@ export function createProcessesClient(baseUrl: string, fetchImpl: Fetch = fetch)
     async getDiff(key, version, base, signal) {
       const query = base !== undefined ? `?base=${String(base)}` : '';
       return (await call({ method: 'GET', path: `${versionPath(key, version)}/diff${query}`, ...withSignal(signal) }, graphDiff)).data;
+    },
+    async getStepTiming(key, version, range, signal) {
+      const query = new URLSearchParams({ mode: 'window', from: range.from });
+      if (range.to !== undefined) query.set('to', range.to);
+      return (await call({ method: 'GET', path: `${versionPath(key, version)}/node-stats?${query.toString()}`, ...withSignal(signal) }, nodeWindowStats)).data;
     },
     async approveDefinition(key, version, lockVersion, approval, idempotencyKey) {
       const comment = approval.comment.trim();

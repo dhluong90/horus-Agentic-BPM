@@ -20,6 +20,7 @@ export function useKeys() {
     approvals: [...base, 'approvals'] as const,
     version: (key: string, version: number) => [...base, 'definition', key, version] as const,
     graph: (key: string, version: number) => [...base, 'graph', key, version] as const,
+    timing: (key: string, version: number, from: string) => [...base, 'timing', key, version, from] as const,
     diff: (key: string, version: number) => [...base, 'diff', key, version] as const,
     task: (id: string) => [...base, 'task', id] as const,
     taskForm: (id: string) => [...base, 'task', id, 'form'] as const,
@@ -294,4 +295,14 @@ export function useVersionsWithCases(key: string, pageLimit: number): { pending:
   const versions = new Set<number>();
   for (const page of query.data?.pages ?? []) for (const item of page.data) if (item.status === 'RUNNING' || item.status === 'COMPENSATING') versions.add(item.definitionVersion);
   return { pending: query.isPending || hasNextPage, versions };
+}
+
+/**
+ * Per step the counts and the median and 95th percentile of completed durations since `from` (a whole hour, so the
+ * key holds still while the page is open). The rollup runs behind real time, so the answer names how far.
+ */
+export function useStepTiming(key: string, version: number, from: string) {
+  const { client } = useProcessesSession();
+  const keys = useKeys();
+  return useQuery({ queryKey: keys.timing(key, version, from), queryFn: ({ signal }) => client.getStepTiming(key, version, { from }, signal), staleTime: 60_000 });
 }

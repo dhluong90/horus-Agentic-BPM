@@ -17,6 +17,7 @@ import { useDockReserve } from './approval/dock';
 import { InstanceStatusPill } from './InstanceStatusPill';
 import { approvalBlock, humanise, reviewedHash, type DiffState } from './model/graphDiff';
 import { ancestorsOf, flowOrder, type DiagramGraph } from './model/bpmnGraph';
+import { StepTiming } from './timing/StepTiming';
 import { nodeTypeLabel } from './model/nodeLabels';
 import { DefinitionStatusPill } from './ProcessesPage';
 
@@ -76,6 +77,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
     { id: 'diagram' as const, label: t('definition.lens.diagram') },
     { id: 'steps' as const, label: steps !== undefined ? t('definition.lens.steps', { count: String(steps) }) : t('definition.lens.stepsPlain') },
     { id: 'cases' as const, label: t('definition.lens.cases') },
+    ...(reviewable ? [] : [{ id: 'timing' as const, label: t('definition.lens.timing') }]),
   ];
   return (
     <section className={docked ? 'workspace workspace--docked' : 'workspace'} aria-labelledby="definition-title">
@@ -105,7 +107,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
             <Suspense fallback={<LoadingRows rows={6} />}>
               <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: dockReserve } : {})} />
             </Suspense>
-          ) : <StepList graph={graph.data} />}
+          ) : shown === 'timing' ? <StepTiming definitionKey={definitionKey} version={version} graph={graph.data} /> : <StepList graph={graph.data} />}
         </Tabs>
       </article>
       {details.data !== undefined && docked ? (
