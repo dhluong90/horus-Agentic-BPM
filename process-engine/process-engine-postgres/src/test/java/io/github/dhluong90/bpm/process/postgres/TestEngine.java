@@ -203,9 +203,13 @@ final class TestEngine {
             this.services.useImportedLayouts(new JdbcLayoutStore(ds), Map.of(SourceFormat.BPMN_XML,
                     new io.github.dhluong90.bpm.process.bpmn.subset.BpmnLayoutReader(Limits.DEFAULTS)::read));
         }
-        this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services,
+        io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService liveCounts =
                 new io.github.dhluong90.bpm.process.internal.service.LiveNodeCountService(() -> id.tenant, id, b.clock,
-                        tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults()),
+                        tx, processStore, io.github.dhluong90.bpm.process.internal.service.LiveStatsSettings.defaults());
+        if (b.readTimeout != null) {
+            liveCounts.useReadTimeout(b.readTimeout);
+        }
+        this.queries = new io.github.dhluong90.bpm.process.internal.service.ProcessQueries(services, liveCounts,
                 new io.github.dhluong90.bpm.process.internal.service.NodeWindowStatsService(() -> id.tenant, id, b.clock,
                         tx, processStore, new JdbcNodeStatsStore(ds), Duration.ofDays(31)),
                 new io.github.dhluong90.bpm.process.internal.service.InstanceActivityService(() -> id.tenant, id, tx,

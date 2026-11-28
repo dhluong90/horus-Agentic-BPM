@@ -49,11 +49,21 @@ public class IncidentController {
     /** Lists incidents of one status, newest first ({@code processes:read}, PRE-080). */
     @GetMapping("/incidents")
     public ResponseEntity<byte[]> list(@RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "definitionKey", required = false) String definitionKey,
+            @RequestParam(value = "version", required = false) String version,
             @RequestParam(value = "limit", required = false) String limit,
             @RequestParam(value = "cursor", required = false) String cursor,
             @RequestHeader(value = "If-None-Match", required = false) String ifNoneMatch) {
+        Integer versionNumber = null;
+        if (version != null) {
+            try {
+                versionNumber = Integer.valueOf(version.strip());
+            } catch (NumberFormatException e) {
+                throw new QueryInvalidException("version must be a positive integer");
+            }
+        }
         IncidentQuery query = new IncidentQuery(status == null ? null : status.strip(),
-                new PageRequest(limitOf(limit), cursor));
+                new PageRequest(limitOf(limit), cursor), definitionKey, versionNumber);
         return ProcessController.conditional(Views.page(incidents.incidents(query), Views::incident), ifNoneMatch);
     }
 

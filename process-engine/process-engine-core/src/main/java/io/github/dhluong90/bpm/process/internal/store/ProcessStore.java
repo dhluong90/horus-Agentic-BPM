@@ -792,6 +792,24 @@ public interface ProcessStore {
     }
 
     /**
+     * A page of the tenant's incidents of one status in the versions of one process key, or in one version of it,
+     * newest first on {@code (created_at, id)} (PRE-522). An unknown key or version gives no rows.
+     *
+     * @param tenant tenant
+     * @param status the status
+     * @param definitionKey the process key
+     * @param version the version number, or null for every version of the key
+     * @param afterCreatedAt keyset: the {@code createdAt} of the last row of the previous page, or null
+     * @param afterId keyset: its id, or null
+     * @param limit most rows
+     * @return the rows
+     */
+    default List<IncidentRow> incidentsOfDefinition(String tenant, String status, String definitionKey,
+            Integer version, Instant afterCreatedAt, String afterId, int limit) {
+        throw new UnsupportedOperationException("incidents are not supported by this store");
+    }
+
+    /**
      * @param tenant tenant
      * @param instanceId instance
      * @param eventType a history event type, for example {@code ASYNC_RESULT_REFUSED}

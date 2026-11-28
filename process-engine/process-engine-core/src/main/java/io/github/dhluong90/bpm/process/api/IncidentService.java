@@ -25,11 +25,14 @@ public interface IncidentService {
     List<Incident> openIncidents(String instanceId);
 
     /**
-     * Lists the caller's tenant's incidents of one status, newest first (PRE-080).
+     * Lists the caller's tenant's incidents of one status, newest first (PRE-080), optionally of one process key or one
+     * version of it (PRE-522). The read runs under {@code query.statement-timeout}.
      *
-     * @param query the status and page
-     * @return a page; its cursor is signed and bound to the tenant and status
-     * @throws QueryInvalidException for an unknown status, a bad limit or a cursor issued for another list
+     * @param query the status, the optional definition filter and the page
+     * @return a page; its cursor is signed and bound to the tenant, the status and the definition filter
+     * @throws QueryInvalidException for an unknown status, a version without a key, a bad limit or a cursor issued for
+     *     another list
+     * @throws QueryTimeoutException when the read ran longer than the statement timeout; no partial page
      * @throws PermissionDeniedException without {@code processes:read}
      */
     Page<Incident> incidents(IncidentQuery query);

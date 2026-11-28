@@ -759,8 +759,11 @@ public class ProcessEngineAutoConfiguration {
     LiveNodeCountService processEngineLiveNodeCounts(ObjectProvider<TenantResolver> tenants,
             ObjectProvider<CallerResolver> callers, ObjectProvider<Clock> clock, ProcessEngineTransactions transactions,
             JdbcProcessStore store, ProcessEngineProperties properties) {
-        return new LiveNodeCountService(tenants.getIfUnique(() -> () -> null), callers.getIfUnique(),
-                clock.getIfUnique(Clock::systemUTC), transactions, store, properties.stats().toSettings());
+        LiveNodeCountService service = new LiveNodeCountService(tenants.getIfUnique(() -> () -> null),
+                callers.getIfUnique(), clock.getIfUnique(Clock::systemUTC), transactions, store,
+                properties.stats().toSettings());
+        service.useReadTimeout(properties.query().statementTimeout());
+        return service;
     }
 
     @Bean

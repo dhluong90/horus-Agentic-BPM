@@ -190,6 +190,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-518 | `PRE_518_*` in `ProcessEngineTracingTest`; `TracingSpansIT` | Unit, integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 | PRE-519 | `PRE_519_*` in `ProcessServicesQaTest` | Unit | M3 | `TR-OBS-03`, `TR-TEN-01` | Done |
 | PRE-520 | `PRE_520_*` in `TracingExportOffIT` | Integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
+| PRE-521 | `PRE_521_*` in `IncidentCountsAndFiltersTest`, `ReadTimeoutPostgresIT`, `ListQueryPlanCheckTest`; `list_and_live_count_bodies_match_the_contract` in `ProcessRestContractTest` | Testcontainers: open incidents per version and node, a resolved one, two tenants, a locked table, the plan of the count | M3 | `TR-TEN-01`, `TR-PERF-07` | Done (#91) |
+| PRE-522 | `PRE_522_*` in `IncidentCountsAndFiltersTest`, `ReadTimeoutPostgresIT`, `ListQueryPlanCheckTest`, `IncidentRestContractTest` | Testcontainers: key and version filters, cursor bound to the filter, two tenants, a locked table, the plan of the version page | M3 | `TR-TEN-01`, `TR-PERF-04`, `TR-PERF-07` | Done (#91) |
 | PRE-219 | `PRE_219_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Done (#79) |
 | PRE-220 | `PRE_220_*` in `TaskFormsTest`; `PRE_031_*` in `TaskFormTest` and `ProcessRestContractTest` | Unit, Testcontainers, WebMvC against `openapi.yaml` | M2 | `TR-SEC-05`, `TR-UI-02` | Done (#79) |
 | PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |

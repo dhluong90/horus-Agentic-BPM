@@ -70,6 +70,12 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public List<IncidentCount> openIncidentCounts(String tenant, String definitionId) {
+        return ProcessListQueries.OPEN_INCIDENT_COUNTS.list(jdbc, List.of(tenant, definitionId),
+                (rs, row) -> new IncidentCount(rs.getString("node_id"), rs.getLong("open")));
+    }
+
+    @Override
     public java.util.Map<String, java.time.Instant> tokenEnteredAt(String tenant, String instanceId) {
         java.util.Map<String, java.time.Instant> entered = new java.util.HashMap<>();
         ProcessListQueries.TOKEN_ENTERED_AT.list(jdbc, List.of(tenant, instanceId), (rs, row) -> {
@@ -926,6 +932,26 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         }
         return ProcessListQueries.INCIDENTS_AFTER.list(jdbc, List.of(tenant, status, ts(afterCreatedAt), afterId,
                 limit), JdbcProcessStore::incident);
+    }
+
+    @Override
+    public List<IncidentRow> incidentsOfDefinition(String tenant, String status, String definitionKey, Integer version,
+            Instant afterCreatedAt, String afterId, int limit) {
+        List<Object> params = new java.util.ArrayList<>(List.of(tenant, status, tenant, definitionKey));
+        if (version != null) {
+            params.add(version);
+        }
+        ListQuery query;
+        if (afterCreatedAt == null) {
+            query = version != null ? ProcessListQueries.INCIDENTS_OF_VERSION : ProcessListQueries.INCIDENTS_OF_KEY;
+        } else {
+            params.add(ts(afterCreatedAt));
+            params.add(afterId);
+            query = version != null ? ProcessListQueries.INCIDENTS_OF_VERSION_AFTER
+                    : ProcessListQueries.INCIDENTS_OF_KEY_AFTER;
+        }
+        params.add(limit);
+        return query.list(jdbc, params, JdbcProcessStore::incident);
     }
 
     private static IncidentRow incident(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
