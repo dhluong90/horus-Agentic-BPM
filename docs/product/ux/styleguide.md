@@ -4,8 +4,8 @@
 |---|---|
 | Type | Design specification |
 | Owner area | Product |
-| Last reviewed | 2026-11-19 |
-| Status | Light Green default theme added; otherwise proposed; menu visibility, the page ground and card titles decided in PD-093 |
+| Last reviewed | 2026-11-28 |
+| Status | Light Green default theme added; otherwise proposed; menu visibility, the page ground and card titles decided in PD-093; no chips ruled by the product owner on 28 Nov 2026 |
 
 This is the build-ready styleguide for the cockpit and for the sign-in page of the example host. It turns the approved hybrid direction ([UX design](../ux-design.md), [PD-056](../decisions.md#pd-056-rule-management-ux-direction)) into CSS variables, a type scale, spacing, radius, elevation, the shell layout and the state of every core component.
 
@@ -219,7 +219,7 @@ The shell is the same on every screen after sign-in.
 | Left, over the content | Breadcrumb: `Rules / card-fee / Version 2`. On Home, nothing |
 | Right | Service line, plain text: green dot, `Loan origination`, tenant `bank-a`, and `· Demo` in `--warn` text when the host is a demo, with no box around any of it; EN / VI segmented control; theme button; avatar button with the user's initials |
 
-The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approver`), Sign out. The labels "Service", "Tenant" and "Signed in as" are not shown above each value; the pill and avatar make them clear and the full text is in their accessible names.
+The avatar opens a menu (level 4): full name, roles in words (`Author`, `Approver`), Sign out. The labels "Service", "Tenant" and "Signed in as" are not shown above each value; the service line and the avatar make them clear and the full text is in their accessible names.
 
 **Menu** (`--rail-w` 248 px):
 
@@ -305,7 +305,7 @@ A version has three states: Draft, Waiting for approval and Published. A rejecte
 |---|---|
 | Default | `--ink-2` label, `--muted` icon |
 | Hover | `--select` fill; on the selected item `--primary-hover` |
-| Selected | Filled pill: `--primary-fill`, `--on-primary` label and icon at 600, 10 px radius, no edge tick, `aria-current="page"`. Collapsed, the icon sits in the same pill |
+| Selected | Filled item: `--primary-fill`, `--on-primary` label and icon at 600, 10 px radius, no edge tick, `aria-current="page"`. Collapsed, the icon sits in the same item |
 | Focus | 3 px `--focus` ring, 2 px offset |
 | With count | The number on the right in tabular figures, `--muted`; on the selected item `--on-primary`. No box |
 
