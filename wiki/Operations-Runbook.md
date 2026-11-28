@@ -592,12 +592,13 @@ Expected: only the new id.
 
 ## Variable encryption key custody
 
-Only when you set `variable-encryption.*` (PRE-525 to PRE-528). The keys must stay outside the database, and a database restore without them leaves every protected value refused with `VARIABLE_KEY_UNAVAILABLE`.
+Only when you set `variable-encryption.*` (PRE-525 to PRE-529). The keys must stay outside the database, and a database restore without them leaves every protected value refused with `VARIABLE_KEY_UNAVAILABLE`.
 
 1. Generate each key with `openssl rand -base64 32`; keep it in the bank's vault, injected as `horus.bpm.processes.variable-encryption.keys.<id>` and `active-key-id`. Every replica gets the same keys.
 2. Back the keys up in the vault's own backup, apart from the database backup. A lost key cannot be recovered.
 3. To rotate: add the new key, make it active, keep the old one listed, roll the replicas, then run `JdbcVariableReencryption.reencrypt(tenant, afterId, 500)` per tenant, passing back `lastId`, until `rewritten` and `refused` are both 0. Remove the old key only then.
 4. After a leak, rotate the same way and treat the old key as exposed.
+5. Do not take a variable out of `variable-encryption.*` while instances still hold it encrypted: the write is refused with `VARIABLE_ENCRYPTION_RULE_REMOVED` and nothing is decrypted (PRE-529). The sweep rewrites the instance rows only; keep the old key listed while jobs, tokens or history written under it remain. Run one sweeper per tenant at a time.
 
 The full rules are in [[Multi-Tenancy-and-Security]] under key custody.
 

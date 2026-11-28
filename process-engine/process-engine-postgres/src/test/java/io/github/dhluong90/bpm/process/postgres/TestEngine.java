@@ -137,16 +137,19 @@ final class TestEngine {
     private final io.github.dhluong90.bpm.process.spi.OutputSchemaValidator replicaSchemas;
     private final ProcessEventPublisher replicaPublisher;
 
+    private final io.github.dhluong90.bpm.process.internal.store.VariableVault replicaVault;
+
     private TestEngine(Builder b) {
         DataSource ds = b.dataSource != null ? b.dataSource : dataSource();
         DataSourceTransactionManager transactionManager = new DataSourceTransactionManager(ds);
         ProcessEngineTransactions tx = new ProcessEngineTransactions(transactionManager,
                 org.springframework.jdbc.core.simple.JdbcClient.create(ds));
         this.replicaDataSource = ds;
+        this.replicaVault = b.variableVault;
         this.replicaTransactions = tx;
         this.replicaClock = b.clock;
         this.replicaSchemas = b.outputSchemas;
-        JdbcJobStore jobStore = new JdbcJobStore(ds);
+        JdbcJobStore jobStore = new JdbcJobStore(ds, b.variableVault);
         SubsetBpmnReader reader = new SubsetBpmnReader(Limits.DEFAULTS);
         JobSettings jobSettings = JobSettings.defaults(b.replicaId).withTimerLease(b.lease);
         jobSettings = new JobSettings(jobSettings.replicaId(), jobSettings.timerLease(), b.batchSize,
@@ -247,7 +250,7 @@ final class TestEngine {
             io.github.dhluong90.bpm.process.internal.service.ReplaySettings settings) {
         Identity id = identity;
         return new io.github.dhluong90.bpm.process.internal.service.AgentReplays(() -> id.tenant, id, replicaClock,
-                replicaTransactions, new JdbcAgentReplayStore(replicaDataSource), decisions, replicaSchemas, settings,
+                replicaTransactions, new JdbcAgentReplayStore(replicaDataSource, replicaVault), decisions, replicaSchemas, settings,
                 io.github.dhluong90.bpm.process.internal.service.EngineDefaults.MAX_RANGE);
     }
 

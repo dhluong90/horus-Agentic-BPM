@@ -199,4 +199,36 @@ class VariableVaultTest {
         assertThatThrownBy(() -> new Key("k1", new byte[16])).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new Key("bad id", bytes(1))).isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    void PRE_525_chosen_members_of_a_document_are_sealed_in_place_and_open_to_the_same_document() {
+        VariableVault vault = new VariableVault(ring(K1), RULES);
+        String entry = "{\"jobId\":\"J1\",\"submission\":{\"salary\":18500000},\"output\":{\"score\":712}}";
+
+        String stored = vault.sealMembers("bank-a", "history/H1", entry, List.of("submission", "output", "changes"));
+
+        assertThat(stored).doesNotContain("18500000", "712").contains("\"jobId\":\"J1\"", "\"$enc\"");
+        assertThat(Values.readMap(vault.openMembers("bank-a", "history/H1", stored))).isEqualTo(Values.readMap(entry));
+        // bound to its row and tenant: the same envelope under another row or tenant does not open
+        assertThatThrownBy(() -> vault.openMembers("bank-a", "history/H2", stored))
+                .isInstanceOf(VariableIntegrityException.class);
+        assertThatThrownBy(() -> vault.openMembers("bank-b", "history/H1", stored))
+                .isInstanceOf(VariableIntegrityException.class);
+    }
+
+    @Test
+    void PRE_525_a_vault_with_no_rules_seals_no_member_and_no_document_and_an_empty_document_is_not_sealed() {
+        String entry = "{\"submission\":{\"salary\":18500000}}";
+        VariableVault vault = new VariableVault(ring(K1), RULES);
+
+        assertThat(VariableVault.NONE.sealMembers("bank-a", "history/H1", entry, List.of("submission")))
+                .isSameAs(entry);
+        assertThat(VariableVault.NONE.sealDocument("bank-a", "token/T1", entry)).isSameAs(entry);
+        assertThat(vault.sealDocument("bank-a", "token/T1", "{}")).isEqualTo("{}");
+        assertThat(vault.active()).isTrue();
+        assertThat(VariableVault.NONE.active()).isFalse();
+        assertThat(vault.sealDocument("bank-a", "token/T1", entry)).doesNotContain("18500000");
+        assertThat(vault.openDocument("bank-a", "token/T1", vault.sealDocument("bank-a", "token/T1", entry)))
+                .isEqualTo(entry);
+    }
 }

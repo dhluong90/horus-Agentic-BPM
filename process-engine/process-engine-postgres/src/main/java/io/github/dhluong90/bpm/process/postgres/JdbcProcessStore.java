@@ -1,5 +1,6 @@
 package io.github.dhluong90.bpm.process.postgres;
 
+import io.github.dhluong90.bpm.process.api.VariableEncryptionRuleRemovedException;
 import io.github.dhluong90.bpm.process.api.DefinitionSummary;
 import io.github.dhluong90.bpm.process.api.InstanceActivities;
 import io.github.dhluong90.bpm.process.internal.exec.HistoryEntry;
@@ -104,14 +105,14 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public List<InstanceActivities.Entry> historyEntries(String tenant, String instanceId, Instant from, Instant to,
             int limit) {
         return ProcessListQueries.HISTORY_ENTRIES.list(jdbc, List.of(tenant, instanceId, ts(from), ts(to), limit),
-                (rs, row) -> historyEntry(rs));
+                (rs, row) -> historyEntry(tenant, rs));
     }
 
     @Override
     public List<InstanceActivities.Entry> compensationEntries(String tenant, String instanceId, Instant from,
             Instant to, int limit) {
         return ProcessListQueries.COMPENSATION_ENTRIES.list(jdbc,
-                List.of(tenant, instanceId, ts(from), ts(to), limit), (rs, row) -> historyEntry(rs));
+                List.of(tenant, instanceId, ts(from), ts(to), limit), (rs, row) -> historyEntry(tenant, rs));
     }
 
     private static Integer counter(Map<String, Object> details, String key) {
@@ -123,7 +124,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     /** An entry as the timeline shows it: the undo's own fields come from the history row's token, attempt and details. */
-    private static InstanceActivities.Entry historyEntry(java.sql.ResultSet rs) throws java.sql.SQLException {
+    private InstanceActivities.Entry historyEntry(String tenant, java.sql.ResultSet rs) throws java.sql.SQLException {
         String type = rs.getString("event_type");
         String id = rs.getString("id");
         String node = rs.getString("node_id");
@@ -181,7 +182,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
             }
             // #663: what the user submitted, as it was stored (masked fields masked); older rows have none.
             if ("TASK_COMPLETED".equals(type)) {
-                Map<String, Object> details = Values.readMap(rs.getString("details"));
+                Map<String, Object> details = Values.readMap(
+                        vault.openMembers(tenant, historyScope(id), rs.getString("details")));
                 if (details.get("submission") instanceof Map<?, ?> submitted) {
                     @SuppressWarnings("unchecked")
                     Map<String, Object> recorded = (Map<String, Object>) submitted;
@@ -407,6 +409,21 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     // ---- instances ----------------------------------------------------------------------------------------
 
+    /** The members of a history entry that may carry a value: what a user submitted and what an agent answered. */
+    private static final java.util.Set<String> HISTORY_SEALED = java.util.Set.of("submission", "output", "changes");
+
+    private static String historyScope(String historyId) {
+        return "history/" + historyId;
+    }
+
+    private static String stepResultScope(String instanceId, String nodeId) {
+        return "step-result/" + instanceId + "/" + nodeId;
+    }
+
+    private static String arrivalScope(String keyName, String kind, String eventName, String correlationKey) {
+        return "start-arrival/" + keyName + "/" + kind + "/" + eventName + "/" + correlationKey;
+    }
+
     private static final String INSTANCE_COLUMNS = ProcessListQueries.INSTANCE_COLUMNS;
 
     @Override
@@ -495,13 +512,36 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 afterStartedAt != null).list(jdbc, params, JdbcProcessStore::summary);
     }
 
+    /**
+     * A stored envelope is never rewritten as a clear value by a write: when the rules no longer name a variable that
+     * the row still holds encrypted, the update changes nothing and is refused with
+     * {@code VARIABLE_ENCRYPTION_RULE_REMOVED} (PRE-529). The check runs in the same statement, so a removed rule costs
+     * no extra read on the normal path.
+     */
     @Override
     public void updateInstance(InstanceRow r) {
-        jdbc.sql("UPDATE pre_instance SET status = ?, variables = ?::jsonb, seq = ?, ended_at = ?, "
-                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ?")
-                .params(r.status(), vault.seal(r.tenantId(), r.id(), r.definitionKey(), r.variablesJson()), r.sequence(),
-                        ts(r.endedAt()), r.tenantId(), r.id())
+        String sealed = vault.seal(r.tenantId(), r.id(), r.definitionKey(), r.variablesJson());
+        int updated = jdbc.sql("UPDATE pre_instance SET status = ?, variables = ?::jsonb, seq = ?, ended_at = ?, "
+                        + "lock_version = lock_version + 1 WHERE tenant_id = ? AND id = ? "
+                        + "AND NOT EXISTS (SELECT 1 FROM jsonb_each(pre_instance.variables) e "
+                        + "WHERE jsonb_typeof(e.value) = 'object' AND jsonb_exists(e.value, '$enc') "
+                        + "AND jsonb_exists(?::jsonb, e.key) AND NOT (jsonb_typeof((?::jsonb) -> e.key) = 'object' "
+                        + "AND jsonb_exists((?::jsonb) -> e.key, '$enc')))")
+                .params(r.status(), sealed, r.sequence(), ts(r.endedAt()), r.tenantId(), r.id(), sealed, sealed, sealed)
                 .update();
+        if (updated == 0) {
+            String released = jdbc.sql("SELECT string_agg(e.key, ', ' ORDER BY e.key) FROM pre_instance i, "
+                            + "jsonb_each(i.variables) e WHERE i.tenant_id = ? AND i.id = ? "
+                            + "AND jsonb_typeof(e.value) = 'object' AND jsonb_exists(e.value, '$enc') "
+                            + "AND jsonb_exists(?::jsonb, e.key) AND NOT (jsonb_typeof((?::jsonb) -> e.key) = 'object' "
+                            + "AND jsonb_exists((?::jsonb) -> e.key, '$enc'))")
+                    .params(r.tenantId(), r.id(), sealed, sealed, sealed).query(String.class).optional().orElse(null);
+            if (released != null) {
+                throw new VariableEncryptionRuleRemovedException("Variable [" + released + "] of instance " + r.id()
+                        + " is stored encrypted, but the encryption rules no longer name it. Name it "
+                        + "again; the engine never stores an encrypted value in the clear on its own");
+            }
+        }
     }
 
     @Override
@@ -533,7 +573,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         return ProcessListQueries.TOKENS.list(jdbc, List.of(tenant, instanceId), (rs, row) -> new Token(rs.getString("id"), TokenKind.valueOf(rs.getString("token_kind")),
                         TokenStatus.valueOf(rs.getString("status")), rs.getString("scope_token_id"),
                         rs.getString("current_node_id"), rs.getString("activity_instance_id"),
-                        Values.readMap(rs.getString("locals"))));
+                        Values.readMap(vault.openDocument(tenant, "token/" + rs.getString("id"),
+                                rs.getString("locals")))));
     }
 
     private static void placeWithEnclosing(Token token, Map<String, Token> byId, java.util.Set<String> placed,
@@ -570,7 +611,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                             // A token row of another instance is never touched: zero rows fails the transaction.
                             + "WHERE pre_token.instance_id = EXCLUDED.instance_id")
                     .params(tenant, t.id(), instanceId, definitionId, t.kind().name(), t.scopeTokenId(), t.nodeId(),
-                            t.status().name(), t.activityInstanceId(), Values.write(t.locals()), ts(now), ts(now))
+                            t.status().name(), t.activityInstanceId(),
+                            vault.sealDocument(tenant, "token/" + t.id(), Values.write(t.locals())), ts(now), ts(now))
                     .update();
             if (written != 1) {
                 throw new IllegalStateException("Token " + t.id() + " belongs to another instance");
@@ -613,7 +655,9 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         + "payload, arrived_at) VALUES (?, ?, ?, ?, ?, ?::jsonb, ?) "
                         + "ON CONFLICT (tenant_id, key_name, trigger_kind, event_name, correlation_key) "
                         + "DO UPDATE SET payload = EXCLUDED.payload, arrived_at = EXCLUDED.arrived_at")
-                .params(tenant, keyName, kind, eventName, correlationKey, payloadJson, ts(now)).update();
+                .params(tenant, keyName, kind, eventName, correlationKey,
+                        vault.sealDocument(tenant, arrivalScope(keyName, kind, eventName, correlationKey), payloadJson),
+                        ts(now)).update();
     }
 
     @Override
@@ -621,7 +665,9 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
             String correlationKey) {
         return jdbc.sql("SELECT payload::text FROM pre_start_arrival WHERE tenant_id = ? AND key_name = ? "
                         + "AND trigger_kind = ? AND event_name = ? AND correlation_key = ?")
-                .params(tenant, keyName, kind, eventName, correlationKey).query(String.class).optional();
+                .params(tenant, keyName, kind, eventName, correlationKey).query(String.class).optional()
+                .map(stored -> vault.openDocument(tenant, arrivalScope(keyName, kind, eventName, correlationKey),
+                        stored));
     }
 
     @Override
@@ -667,14 +713,14 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 .params(t.tenantId(), t.id(), t.instanceId(), t.tokenId(), t.definitionId(), t.nodeId(), t.name(),
                         kind.equals("user") ? value : null, kind.equals("role") ? value : null,
                         kind.equals("group") ? value : null, t.fourEyes(), t.status(), t.lockVersion(), ts(t.createdAt()),
-                        t.reviewJson(), t.dueAt() == null ? null : ts(t.dueAt()))
+                        vault.sealDocument(t.tenantId(), "task-review/" + t.id(), t.reviewJson()), t.dueAt() == null ? null : ts(t.dueAt()))
                 .update();
     }
 
     @Override
     public Optional<TaskRow> findTask(String tenant, String id) {
         return jdbc.sql("SELECT " + TASK_COLUMNS + " FROM pre_task WHERE tenant_id = ? AND id = ?")
-                .params(tenant, id).query(JdbcProcessStore::task).optional();
+                .params(tenant, id).query(this::task).optional();
     }
 
     @Override
@@ -772,10 +818,10 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
     @Override
     public List<TaskRow> tasks(String tenant, String instanceId) {
-        return ProcessListQueries.TASKS.list(jdbc, List.of(tenant, instanceId), JdbcProcessStore::task);
+        return ProcessListQueries.TASKS.list(jdbc, List.of(tenant, instanceId), this::task);
     }
 
-    private static TaskRow task(ResultSet rs, int row) throws SQLException {
+    private TaskRow task(ResultSet rs, int row) throws SQLException {
         String assignee = rs.getString("assignee_user") != null ? "user:" + rs.getString("assignee_user")
                 : rs.getString("assignee_role") != null ? "role:" + rs.getString("assignee_role")
                 : "group:" + rs.getString("assignee_group");
@@ -783,7 +829,9 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 rs.getString("token_id"), rs.getString("definition_id"), rs.getString("node_id"), rs.getString("name"),
                 assignee, rs.getBoolean("four_eyes"), rs.getString("status"), rs.getLong("lock_version"),
                 rs.getString("claimed_by"), instant(rs, "claimed_at"), rs.getString("completed_by"),
-                instant(rs, "created_at"), instant(rs, "completed_at"), rs.getString("review"), instant(rs, "due_at"));
+                instant(rs, "created_at"), instant(rs, "completed_at"),
+                vault.openDocument(rs.getString("tenant_id"), "task-review/" + rs.getString("id"),
+                        rs.getString("review")), instant(rs, "due_at"));
     }
 
     @Override
@@ -834,10 +882,13 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     @Override
     public void appendHistory(String tenant, String instanceId, String definitionId, List<HistoryEntry> entries) {
         for (HistoryEntry e : entries) {
+            String historyId = Ulid.next(e.occurredAt());
             jdbc.sql("INSERT INTO pre_history (tenant_id, occurred_at, id, instance_id, definition_id, event_type, node_id, "
                             + "token_id, actor_id, attempt_id, details) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)")
-                    .params(tenant, ts(e.occurredAt()), Ulid.next(e.occurredAt()), instanceId, definitionId, e.type(),
-                            e.nodeId(), e.tokenId(), e.actor(), e.attemptId(), Values.write(e.details()))
+                    .params(tenant, ts(e.occurredAt()), historyId, instanceId, definitionId, e.type(),
+                            e.nodeId(), e.tokenId(), e.actor(), e.attemptId(),
+                            vault.sealMembers(tenant, historyScope(historyId), Values.write(e.details()),
+                                    HISTORY_SEALED))
                     .update();
         }
     }
@@ -849,7 +900,9 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         + "ON CONFLICT (tenant_id, instance_id, node_id) DO UPDATE SET definition_id = "
                         + "EXCLUDED.definition_id, result_json = EXCLUDED.result_json, source = EXCLUDED.source, "
                         + "activity_instance_id = EXCLUDED.activity_instance_id, recorded_at = EXCLUDED.recorded_at")
-                .params(r.tenantId(), r.instanceId(), r.nodeId(), r.definitionId(), r.resultJson(), r.source(),
+                .params(r.tenantId(), r.instanceId(), r.nodeId(), r.definitionId(),
+                        vault.sealDocument(r.tenantId(), stepResultScope(r.instanceId(), r.nodeId()), r.resultJson()),
+                        r.source(),
                         r.activityInstanceId(), ts(r.recordedAt()))
                 .update();
     }
@@ -861,7 +914,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
         }
         Map<String, String> results = new java.util.LinkedHashMap<>();
         ProcessListQueries.STEP_RESULTS.list(jdbc, List.of(tenant, instanceId, nodeIds.toArray(String[]::new)),
-                (rs, n) -> results.put(rs.getString("node_id"), rs.getString("result")));
+                (rs, n) -> results.put(rs.getString("node_id"), vault.openDocument(tenant,
+                        stepResultScope(instanceId, rs.getString("node_id")), rs.getString("result"))));
         return results;
     }
 
@@ -887,7 +941,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                         + "AND instance_id = ?)")
                 .params(e.tenantId(), e.id(), e.instanceId(), e.scopeTokenId(), e.tenantId(), e.instanceId(),
                         e.scopeTokenId(), e.stepId(), e.forwardJobId(), e.forwardAttemptId(), e.handler(), e.mode(),
-                        e.inputSnapshotJson(), e.status(), e.jobId(), ts(e.pushedAt()), ts(e.completedAt()),
+                        vault.sealDocument(e.tenantId(), "compensation/" + e.id(), e.inputSnapshotJson()), e.status(), e.jobId(), ts(e.pushedAt()), ts(e.completedAt()),
                         e.tenantId(), e.instanceId())
                 .update();
     }
@@ -895,7 +949,7 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     @Override
     public List<CompensationEntry> compensationEntries(String tenant, String instanceId) {
         return ProcessListQueries.COMPENSATION_STACK.list(jdbc, List.of(tenant, instanceId),
-                JdbcProcessStore::compensation);
+                this::compensation);
     }
 
     @Override
@@ -906,31 +960,32 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 .update();
     }
 
-    private static CompensationEntry compensation(ResultSet rs, int row) throws SQLException {
+    private CompensationEntry compensation(ResultSet rs, int row) throws SQLException {
         return new CompensationEntry(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
                 rs.getString("scope_token_id"), rs.getInt("seq"), rs.getString("step_id"),
                 rs.getString("forward_job_id"), rs.getString("forward_attempt_id"), rs.getString("handler"),
-                rs.getString("mode"), rs.getString("input_snapshot"), rs.getString("status"), rs.getString("job_id"),
+                rs.getString("mode"), vault.openDocument(rs.getString("tenant_id"),
+                "compensation/" + rs.getString("id"), rs.getString("input_snapshot")), rs.getString("status"), rs.getString("job_id"),
                 instant(rs, "pushed_at"), instant(rs, "completed_at"), rs.getInt("instance_seq"));
     }
 
     @Override
     public List<IncidentRow> openIncidents(String tenant, String instanceId) {
-        return ProcessListQueries.OPEN_INCIDENTS.list(jdbc, List.of(tenant, instanceId), JdbcProcessStore::incident);
+        return ProcessListQueries.OPEN_INCIDENTS.list(jdbc, List.of(tenant, instanceId), this::incident);
     }
 
     @Override
     public java.util.Optional<IncidentRow> lockIncident(String tenant, String id) {
         return jdbc.sql("SELECT " + ProcessListQueries.INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? "
                         + "AND id = ? FOR UPDATE")
-                .params(tenant, id).query(JdbcProcessStore::incident).optional();
+                .params(tenant, id).query(this::incident).optional();
     }
 
     @Override
     public java.util.Optional<IncidentRow> findIncident(String tenant, String id) {
         return jdbc.sql("SELECT " + ProcessListQueries.INCIDENT_COLUMNS + " FROM pre_incident WHERE tenant_id = ? "
                         + "AND id = ?")
-                .params(tenant, id).query(JdbcProcessStore::incident).optional();
+                .params(tenant, id).query(this::incident).optional();
     }
 
     @Override
@@ -942,7 +997,8 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 .params(i.errorCode(), i.causeSummary(), i.retryCount(), i.status(), i.lockVersion(),
                         i.resolvedAt() == null ? null : ts(i.resolvedAt()), i.resolution(), i.resolvedBy(),
                         i.approvalMode(), i.proposedBy(), i.proposedAt() == null ? null : ts(i.proposedAt()),
-                        i.proposalReason(), i.proposalOutputJson(), i.retrying(), i.tenantId(), i.id(),
+                        i.proposalReason(), vault.sealDocument(i.tenantId(), "incident/" + i.id(), i.proposalOutputJson()),
+                        i.retrying(), i.tenantId(), i.id(),
                         i.lockVersion() - 1)
                 .update();
     }
@@ -951,20 +1007,21 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     public List<IncidentRow> incidents(String tenant, String status, Instant afterCreatedAt, String afterId,
             int limit) {
         if (afterCreatedAt == null) {
-            return ProcessListQueries.INCIDENTS.list(jdbc, List.of(tenant, status, limit), JdbcProcessStore::incident);
+            return ProcessListQueries.INCIDENTS.list(jdbc, List.of(tenant, status, limit), this::incident);
         }
         return ProcessListQueries.INCIDENTS_AFTER.list(jdbc, List.of(tenant, status, ts(afterCreatedAt), afterId,
-                limit), JdbcProcessStore::incident);
+                limit), this::incident);
     }
 
-    private static IncidentRow incident(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
+    private IncidentRow incident(java.sql.ResultSet rs, int row) throws java.sql.SQLException {
         return new IncidentRow(rs.getString("tenant_id"), rs.getString("id"), rs.getString("instance_id"),
                 rs.getString("definition_id"), rs.getString("token_id"), rs.getString("node_id"),
                 rs.getString("error_code"), rs.getString("cause_summary"), rs.getInt("retry_count"),
                 rs.getString("status"), rs.getLong("lock_version"), instant(rs, "created_at"),
                 instant(rs, "resolved_at"), rs.getString("resolution"), rs.getString("resolved_by"),
                 rs.getString("approval_mode"), rs.getString("proposed_by"), instant(rs, "proposed_at"),
-                rs.getString("proposal_reason"), rs.getString("proposal_output"), rs.getBoolean("retrying"));
+                rs.getString("proposal_reason"), vault.openDocument(rs.getString("tenant_id"),
+                "incident/" + rs.getString("id"), rs.getString("proposal_output")), rs.getBoolean("retrying"));
     }
 
     @Override

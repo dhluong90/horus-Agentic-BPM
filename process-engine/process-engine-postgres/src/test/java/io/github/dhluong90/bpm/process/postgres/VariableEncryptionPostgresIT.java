@@ -95,6 +95,9 @@ class VariableEncryptionPostgresIT {
         engine(VariableVault.NONE).importAtStartup("bank-a", ImportRequest.bpmn(bpmn("loan-origination.bpmn")));
         engine(VariableVault.NONE).importAtStartup("bank-b", ImportRequest.bpmn(bpmn("loan-origination.bpmn")));
         engine(VariableVault.NONE).importAtStartup("bank-c", ImportRequest.bpmn(bpmn("loan-origination.bpmn")));
+        for (String tenant : List.of("bank-e", "bank-f", "bank-g")) {
+            engine(VariableVault.NONE).importAtStartup(tenant, ImportRequest.bpmn(bpmn("loan-origination.bpmn")));
+        }
     }
 
     private static ProcessServices engine(VariableVault vault) {
@@ -230,6 +233,129 @@ class VariableEncryptionPostgresIT {
                 .reencrypt("bank-b", null, 500);
 
         assertThat(page.scanned()).isZero();
+    }
+
+    @Test
+    void PRE_529_removing_a_rule_never_stores_the_encrypted_variable_in_the_clear() {
+        CALLER.as("bank-a");
+        ProcessInstance started = startLoan(engine(new VariableVault(ring(K1), RULES)), 150_000_000);
+        String before = stored(started.id());
+        // the same keys, but the configuration no longer names amount
+        ProcessServices released = engine(new VariableVault(ring(K1), VariableEncryptionRules.NONE));
+        ProcessInstance.Task task = released.instance(started.id()).openTasks().get(0);
+        long claimed = released.claim(task.id(), task.lockVersion(), "k-claim-rm").lockVersion();
+
+        assertThatThrownBy(() -> released.complete(task.id(), Map.of("approved", true), claimed, "k-complete-rm"))
+                .isInstanceOf(io.github.dhluong90.bpm.process.api.VariableEncryptionRuleRemovedException.class)
+                .hasMessageContaining("amount").hasMessageNotContaining("150000000")
+                .extracting(e -> ((io.github.dhluong90.bpm.process.api.ProcessException) e).code())
+                .isEqualTo("VARIABLE_ENCRYPTION_RULE_REMOVED");
+
+        // nothing changed: the row still holds the envelope, and naming the variable again lets the work go on
+        assertThat(stored(started.id())).isEqualTo(before).contains("$enc").doesNotContain("150000000");
+        ProcessServices again = engine(new VariableVault(ring(K1), RULES));
+        ProcessInstance.Task retry = again.instance(started.id()).openTasks().get(0);
+        assertThat(again.complete(retry.id(), Map.of("approved", true), retry.lockVersion(), "k-complete-rm2"))
+                .isNotNull();
+        assertThat(stored(started.id())).contains("$enc").doesNotContain("150000000");
+    }
+
+    @Test
+    void PRE_526_the_sweep_runs_in_a_transaction_of_its_own_and_holds_its_row_locks_until_it_has_written() {
+        CALLER.as("bank-g");
+        ProcessInstance started = startLoan(engine(new VariableVault(ring(K1), RULES)), 20_000_000);
+        List<Boolean> writerBlocked = new ArrayList<>();
+        // the keyring is asked for the old key while the sweep holds the row: a concurrent writer must wait for it
+        VariableKeyring spying = new VariableKeyring() {
+            @Override
+            public Optional<Key> current() {
+                return Optional.of(K2);
+            }
+
+            @Override
+            public List<Key> previous() {
+                return List.of(K1);
+            }
+
+            @Override
+            public Optional<Key> find(String id) {
+                writerBlocked.add(writerWaits(started.id()));
+                return VariableKeyring.super.find(id);
+            }
+        };
+
+        JdbcVariableReencryption.Page page = new JdbcVariableReencryption(db, new VariableVault(spying, RULES))
+                .reencrypt("bank-g", null, 500);
+
+        assertThat(page.rewritten()).isEqualTo(1);
+        assertThat(page.contended()).isZero();
+        assertThat(writerBlocked).isNotEmpty().containsOnly(true);
+        assertThat(stored(started.id())).contains("\"k2\"").doesNotContain("\"k1\"");
+    }
+
+    /** A second connection tries to write the instance row with a short lock timeout; true when the row was locked. */
+    private static boolean writerWaits(String instanceId) {
+        try (java.sql.Connection c = db.getConnection(); java.sql.Statement st = c.createStatement()) {
+            st.execute("SET lock_timeout = '300ms'");
+            st.executeUpdate("UPDATE pre_instance SET seq = seq WHERE id = '" + instanceId + "'");
+            return false;
+        } catch (java.sql.SQLException e) {
+            return "55P03".equals(e.getSQLState());
+        }
+    }
+
+    @Test
+    void PRE_526_a_second_sweeper_of_the_same_tenant_is_told_it_is_busy_and_touches_nothing() throws Exception {
+        CALLER.as("bank-e");
+        ProcessInstance started = startLoan(engine(new VariableVault(ring(K1), RULES)), 20_000_000);
+        String before = stored(started.id());
+        try (java.sql.Connection other = db.getConnection(); java.sql.Statement st = other.createStatement()) {
+            other.setAutoCommit(false);
+            // the first sweeper: holds the tenant's advisory lock inside its own transaction
+            st.execute("SELECT pg_advisory_xact_lock(hashtextextended('horus-pre-variable-reencryption/bank-e', 0))");
+
+            JdbcVariableReencryption.Page page = new JdbcVariableReencryption(db,
+                    new VariableVault(ring(K2, K1), RULES)).reencrypt("bank-e", null, 500);
+
+            assertThat(page.busy()).isTrue();
+            assertThat(page.scanned()).isZero();
+            assertThat(stored(started.id())).isEqualTo(before);
+            other.rollback();
+        }
+        // once the first has finished, the second proceeds
+        assertThat(new JdbcVariableReencryption(db, new VariableVault(ring(K2, K1), RULES))
+                .reencrypt("bank-e", null, 500).rewritten()).isEqualTo(1);
+    }
+
+    @Test
+    void PRE_526_a_sweep_resumes_from_its_cursor_and_a_row_a_writer_holds_is_left_for_the_next_run() throws Exception {
+        CALLER.as("bank-f");
+        ProcessInstance first = startLoan(engine(new VariableVault(ring(K1), RULES)), 20_000_000);
+        ProcessInstance second = startLoan(engine(new VariableVault(ring(K1), RULES)), 21_000_000);
+        VariableVault rotated = new VariableVault(ring(K2, K1), RULES);
+        JdbcVariableReencryption sweep = new JdbcVariableReencryption(db, rotated);
+        List<String> ids = new ArrayList<>(List.of(first.id(), second.id()));
+        java.util.Collections.sort(ids);
+
+        // a writer holds the first row: the sweep skips it and carries on with the second
+        try (java.sql.Connection writer = db.getConnection(); java.sql.Statement st = writer.createStatement()) {
+            writer.setAutoCommit(false);
+            st.execute("SELECT 1 FROM pre_instance WHERE id = '" + ids.get(0) + "' FOR UPDATE");
+            JdbcVariableReencryption.Page page = sweep.reencrypt("bank-f", null, 500);
+            assertThat(page.rewritten()).isEqualTo(1);
+            assertThat(stored(ids.get(0))).contains("\"k1\"");
+            assertThat(stored(ids.get(1))).contains("\"k2\"");
+            writer.rollback();
+        }
+        // a page of one resumes from where the last stopped, and a finished sweep rewrites nothing more
+        JdbcVariableReencryption.Page one = sweep.reencrypt("bank-f", null, 1);
+        assertThat(one.scanned()).isEqualTo(1);
+        assertThat(one.lastId()).isEqualTo(ids.get(0));
+        assertThat(one.rewritten()).isEqualTo(1);
+        JdbcVariableReencryption.Page next = sweep.reencrypt("bank-f", one.lastId(), 1);
+        assertThat(next.scanned()).isEqualTo(1);
+        assertThat(next.rewritten()).isZero();
+        assertThat(sweep.reencrypt("bank-f", null, 500).rewritten()).isZero();
     }
 
     @Test

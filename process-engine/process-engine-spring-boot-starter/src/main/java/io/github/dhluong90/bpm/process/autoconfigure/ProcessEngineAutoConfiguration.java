@@ -193,8 +193,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcJobStore processEngineJobStore(DataSource dataSource) {
-        return new JdbcJobStore(dataSource);
+    JdbcJobStore processEngineJobStore(DataSource dataSource, VariableVault vault) {
+        return new JdbcJobStore(dataSource, vault);
     }
 
     /** This replica's job settings; the replica id defaults to the host name plus a random suffix. */
@@ -698,8 +698,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource) {
-        return new JdbcAgentReplayStore(dataSource);
+    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource, VariableVault vault) {
+        return new JdbcAgentReplayStore(dataSource, vault);
     }
 
     /**

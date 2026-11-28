@@ -42,6 +42,8 @@ public final class VariableVault {
     public static final VariableVault NONE = new VariableVault(VariableKeyring.none(), VariableEncryptionRules.NONE);
 
     private static final String DOCUMENT = "document";
+    private static final String MEMBER = "member";
+    private static final String EMPTY_OBJECT = "{}";
     private static final String MARKER_TEXT = "\"" + MARKER + "\"";
     private static final int IV_BYTES = 12;
     private static final int TAG_BITS = 128;
@@ -137,7 +139,7 @@ public final class VariableVault {
      * @throws VariableKeyUnavailableException when no key is current
      */
     public String sealDocument(String tenant, String scope, String json) {
-        if (rules.isEmpty() || json == null) {
+        if (rules.isEmpty() || json == null || EMPTY_OBJECT.equals(json.strip())) {
             return json;
         }
         return Values.write(encrypt(tenant, DOCUMENT, scope, json));
@@ -160,6 +162,65 @@ public final class VariableVault {
         }
         Map<String, Object> stored = Values.readMap(storedJson);
         return isEnvelope(stored) ? (String) decrypt(tenant, DOCUMENT, scope, envelope(stored, scope)) : storedJson;
+    }
+
+    /**
+     * Encrypts chosen top-level members of a stored document in place, for a row whose other members a query still
+     * reads (the history entry). Done whenever any variable is protected; a vault with no rules leaves the document as
+     * it is. A member that is absent or null is left alone.
+     *
+     * @param tenant the tenant of the row
+     * @param scope what the row is, for example the table and its id; bound as associated data with the member name
+     * @param json the document
+     * @param members the members that may carry a value
+     * @return the JSON to store
+     * @throws VariableKeyUnavailableException when no key is current
+     */
+    public String sealMembers(String tenant, String scope, String json, java.util.Collection<String> members) {
+        if (rules.isEmpty() || json == null) {
+            return json;
+        }
+        Map<String, Object> map = Values.readMap(json);
+        boolean changed = false;
+        for (String member : members) {
+            Object value = map.get(member);
+            if (value != null && !isEnvelope(value)) {
+                map.put(member, encrypt(tenant, MEMBER, scope + "/" + member, value));
+                changed = true;
+            }
+        }
+        return changed ? Values.write(map) : json;
+    }
+
+    /**
+     * Opens the members written by {@link #sealMembers}; a member stored in the clear is returned as it is.
+     *
+     * @param tenant the tenant of the row
+     * @param scope what the row is
+     * @param storedJson the stored document
+     * @return the document with its values
+     * @throws VariableKeyUnavailableException when a member names a key the keyring does not hold
+     * @throws VariableIntegrityException when a member does not authenticate
+     */
+    public String openMembers(String tenant, String scope, String storedJson) {
+        if (storedJson == null || !storedJson.contains(MARKER_TEXT)) {
+            return storedJson;
+        }
+        Map<String, Object> stored = Values.readMap(storedJson);
+        boolean changed = false;
+        for (Map.Entry<String, Object> entry : stored.entrySet()) {
+            if (isEnvelope(entry.getValue())) {
+                entry.setValue(decrypt(tenant, MEMBER, scope + "/" + entry.getKey(),
+                        envelope(entry.getValue(), entry.getKey())));
+                changed = true;
+            }
+        }
+        return changed ? Values.write(stored) : storedJson;
+    }
+
+    /** @return true when at least one variable is protected, so every store that may hold a value is sealed */
+    public boolean active() {
+        return !rules.isEmpty();
     }
 
     /**

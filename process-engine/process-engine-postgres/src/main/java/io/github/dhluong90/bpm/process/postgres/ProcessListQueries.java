@@ -147,10 +147,9 @@ final class ProcessListQueries {
      */
     static final ListQuery OVERRIDDEN_ATTEMPTS = new ListQuery("replay-overridden-attempts",
             new Bound.ParentKeys("instance_id", "the instances of one page of recorded answers, at most one page"),
-            "SELECT details->>'refusedAttemptId' AS attempt_id FROM pre_history WHERE tenant_id = ? "
-                    + "AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
-                    + "AND details->>'refusedAttemptId' = ANY (?) AND EXISTS (SELECT 1 FROM jsonb_each(details->'changes') c "
-                    + "WHERE c.value->>'from' IS DISTINCT FROM '***')");
+            "SELECT id, details->>'refusedAttemptId' AS attempt_id, details::text AS details FROM pre_history "
+                    + "WHERE tenant_id = ? AND instance_id = ANY (?) AND event_type = 'HUMAN_OVERRIDE' "
+                    + "AND details->>'refusedAttemptId' = ANY (?)");
 
     /** The first page of recorded answers of one agent step in a period (#98). */
     static final ListQuery RECORDED_ANSWERS = recordedAnswers(false);
@@ -517,7 +516,7 @@ final class ProcessListQueries {
     /** Every registered query, the instance list in its smallest and fullest form. */
     static List<ListQuery> all() {
         List<ListQuery> all = new ArrayList<>(List.of(LIVE_COUNTS, LOCK_DEFINITIONS, ACTIVE_DEFINITIONS, SIGNAL_START_DEFINITIONS, DEFINITION_HISTORY, TOKENS, TASKS,
-                OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_ANSWERS,
+                OPEN_INCIDENTS, COMPENSATION_STACK, INCIDENTS, INCIDENTS_AFTER, PENDING_APPROVALS, PENDING_APPROVALS_AFTER, STEP_RESULTS, OVERRIDDEN_ATTEMPTS, RECORDED_PAYLOADS, RECORDED_ANSWERS,
                 RECORDED_ANSWERS_AFTER, REPLAY_CASES, DEFINITION_KEYS, DEFINITION_KEYS_AFTER, HISTORY_ACTORS,
                 NODE_ACTIVITIES, HISTORY_ENTRIES, COMPENSATION_ENTRIES,
                 CLAIM_TIMERS, CLAIM_ASYNC, CLAIM_ASYNC_KIND,
@@ -544,6 +543,17 @@ final class ProcessListQueries {
             + "WHERE h.tenant_id = ? AND d.key_name = ? AND h.node_id = ? "
             + "AND h.event_type IN ('ASYNC_RESULT_ACCEPTED','ASYNC_RESULT_REFUSED') AND h.details->'outputFields' IS NOT NULL "
             + "AND h.occurred_at >= ? AND h.occurred_at < ? ";
+
+    /**
+     * The job payloads of the newest recorded answers of one agent step in a period, for the search of a recorded output
+     * schema when payloads are sealed (PRE-525): newest first, at most one bounded page. Parameters: tenant, definition
+     * key, node, from, to, limit.
+     */
+    static final ListQuery RECORDED_PAYLOADS = new ListQuery("replay-recorded-payloads",
+            new Bound.Page("newest first on the (tenant_id, occurred_at, id) primary key of pre_history, one page"),
+            "SELECT j.id AS job_id, j.payload::text AS payload " + ANSWERS_WHERE.replace("WHERE",
+                    "JOIN pre_timer j ON j.tenant_id = h.tenant_id AND j.id = h.details->>'jobId' WHERE")
+                    + "ORDER BY h.occurred_at DESC, h.id DESC LIMIT ?");
 
     /**
      * The recorded answers of one agent step in a period, oldest first, by the {@code (tenant_id, occurred_at, id)}

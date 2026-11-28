@@ -55,13 +55,22 @@ class VariableEncryptionHistoryTest {
         long claimed = engine.services.claim(approve.id(), approve.lockVersion(), "an-claim").lockVersion();
         engine.services.complete(approve.id(), Map.of("decision", "REJECT", "reason", "income not verified"), claimed,
                 "an-complete");
-        return TestEngine.jdbc().sql("SELECT string_agg(details::text, ' ') FROM pre_history WHERE instance_id = ? "
+        // what is stored, and what the engine reads back from it
+        lastStored = TestEngine.jdbc().sql("SELECT string_agg(details::text, ' ') FROM pre_history WHERE instance_id = ? "
                 + "AND event_type = 'TASK_COMPLETED'").param(started.id()).query(String.class).single();
+        return TestEngine.jdbc().sql("SELECT id, details::text FROM pre_history WHERE instance_id = ? "
+                + "AND event_type = 'TASK_COMPLETED'").param(started.id())
+                .query((rs, n) -> vault.openMembers("bank-a", "history/" + rs.getString(1), rs.getString(2))).list()
+                .stream().collect(java.util.stream.Collectors.joining(" "));
     }
+
+    private String lastStored;
 
     @Test
     void PRE_528_a_submission_that_lands_in_an_encrypted_result_variable_is_masked_in_history() {
         assertThat(historyOfApproval(vault("review"))).doesNotContain("income not verified").contains("masked");
+        // PRE-525: with any variable protected the submission member is sealed too, so even the mask is not readable
+        assertThat(lastStored).doesNotContain("income not verified", "masked").contains("$enc");
     }
 
     @Test
