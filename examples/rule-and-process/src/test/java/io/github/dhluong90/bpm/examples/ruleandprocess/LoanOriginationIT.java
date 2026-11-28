@@ -196,6 +196,26 @@ class LoanOriginationIT {
         assertThat(taskId(approval, "approve-committee")).isNotBlank();
     }
 
+    @Test
+    void ruleIds_reads_only_the_decisions_of_the_instance_it_is_asked_about() {
+        // Given another instance decided R9 in the same rule set a moment later than ours decided R1
+        insertDecision("credit-risk-grade", "inst-own-626", "[\"R1\"]", "2026-01-01T10:00:00Z");
+        insertDecision("credit-risk-grade", "inst-other-626", "[\"R9\"]", "2026-01-01T10:00:05Z");
+
+        // Then each instance sees only its own decision, and an instance with none sees none
+        assertThat(ruleIds("inst-own-626", "credit-risk-grade")).containsExactly("R1");
+        assertThat(ruleIds("inst-other-626", "credit-risk-grade")).containsExactly("R9");
+        assertThat(ruleIds("inst-unknown-626", "credit-risk-grade")).isEmpty();
+    }
+
+    private void insertDecision(String ruleSet, String correlationId, String matched, String createdAt) {
+        jdbc.sql("INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome, "
+                + "masked_inputs, matched_rule_ids, correlation_id, eval_clock, duration_micros, log_mode) "
+                + "VALUES ('bank-a', ?::timestamptz, ?, ?, 1, 'FIRST', 'OK', '{}'::jsonb, ?::jsonb, ?, ?::timestamptz, 1, 'TRANSACTIONAL')")
+                .param(createdAt).param(correlationId).param(ruleSet).param(matched).param(correlationId).param(createdAt)
+                .update();
+    }
+
     // ---- helpers ------------------------------------------------------------------------------------------
 
     private String start(String applicationId, String customerId, String family, boolean secured, long amount,
