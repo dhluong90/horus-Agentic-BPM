@@ -38,10 +38,10 @@ public final class JdbcDecisionLog implements DecisionLog {
         jdbc.sql("""
                 INSERT INTO rle_decision (tenant_id, created_at, id, rule_set_name, version_num, hit_policy, outcome,
                   error_code, masked_inputs, outputs, matched_rule_ids, caller_id, correlation_id, eval_clock,
-                  duration_micros, log_mode, pinned, on_behalf_of, function_versions)
+                  duration_micros, log_mode, pinned, on_behalf_of, function_versions, budget_limit)
                 VALUES (:tenant, :createdAt, :id, :ruleSet, :version, :hitPolicy, :outcome, :errorCode,
                   CAST(:inputs AS jsonb), CAST(:outputs AS jsonb), CAST(:matched AS jsonb), :caller, :correlation,
-                  :clock, :micros, 'TRANSACTIONAL', :pinned, :onBehalfOf, :functionVersions)
+                  :clock, :micros, 'TRANSACTIONAL', :pinned, :onBehalfOf, :functionVersions, :budgetLimit)
                 """)
                 .param("tenant", r.tenantId()).param("createdAt", Timestamp.from(r.createdAt())).param("id", r.id())
                 .param("ruleSet", r.ruleSet()).param("version", r.version()).param("hitPolicy", r.hitPolicy())
@@ -51,6 +51,7 @@ public final class JdbcDecisionLog implements DecisionLog {
                 .param("correlation", r.correlationId()).param("clock", Timestamp.from(r.evalClock()))
                 .param("micros", r.durationMicros()).param("pinned", r.pinned())
                 .param("onBehalfOf", r.onBehalfOf()).param("functionVersions", r.functionVersions())
+                .param("budgetLimit", r.budgetLimit())
                 .update();
     }
 
@@ -228,6 +229,6 @@ public final class JdbcDecisionLog implements DecisionLog {
                 rs.getString("inputs"), rs.getString("outputs"), rs.getString("matched"), rs.getString("caller_id"),
                 rs.getString("correlation_id"), rs.getTimestamp("eval_clock").toInstant(),
                 rs.getLong("duration_micros"), rs.getBoolean("pinned"), rs.getString("on_behalf_of"),
-                rs.getString("function_versions"));
+                rs.getString("function_versions"), rs.getString("budget_limit"));
     }
 }
