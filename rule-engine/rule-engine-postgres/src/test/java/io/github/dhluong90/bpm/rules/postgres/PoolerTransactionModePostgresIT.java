@@ -46,6 +46,7 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.DockerImageName;
 
 /**
@@ -91,14 +92,13 @@ class PoolerTransactionModePostgresIT {
         new RuleEngineSchemaMigrator(direct(DATABASE)).migrate();
         pgbouncer = new GenericContainer<>(DockerImageName.parse(TestImages.pgbouncer()))
                 .withNetwork(NETWORK)
-                .withEnv("DB_HOST", "pg")
-                .withEnv("DB_PORT", "5432")
-                .withEnv("DB_NAME", DATABASE)
-                .withEnv("DB_USER", POSTGRES.getUsername())
-                .withEnv("DB_PASSWORD", POSTGRES.getPassword())
-                .withEnv("AUTH_TYPE", "scram-sha-256")
-                .withEnv("POOL_MODE", "transaction")
-                .withEnv("LISTEN_PORT", "5432")
+                .withCopyToContainer(Transferable.of(
+                        TestImages.pgbouncerIni(DATABASE, POSTGRES.getUsername(), POSTGRES.getPassword()), 0644),
+                        "/tmp/pgbouncer.ini")
+                .withCopyToContainer(Transferable.of(
+                        TestImages.pgbouncerUserlist(POSTGRES.getUsername(), POSTGRES.getPassword()), 0644),
+                        "/tmp/userlist.txt")
+                .withCommand("/tmp/pgbouncer.ini")
                 .withExposedPorts(5432)
                 .waitingFor(Wait.forListeningPort());
         pgbouncer.start();

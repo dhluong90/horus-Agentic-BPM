@@ -324,7 +324,7 @@ class EffectiveDatesAndReplayIT {
             }
             body = bound;
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearerFor(user, tenant, PERMISSIONS.get(user)))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()

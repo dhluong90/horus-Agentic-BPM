@@ -136,6 +136,17 @@ class ApprovalSealPostgresIT {
     }
 
     @Test
+    void RLE_223_an_approval_at_a_nanosecond_instant_is_sealed_over_the_stored_microseconds_and_still_served() {
+        // Given a clock with nanoseconds, which PostgreSQL would round to microseconds when it stores the approval
+        RuleEngines engines = engines(ApprovalSealKey.none());
+        clock.set(Instant.parse("2026-11-25T10:00:00.653124694Z"));
+        publish(engines, "50000 VND", null);
+
+        // When the version is evaluated, Then the seal verifies against the stored row and the rule set is served
+        assertThat(evaluate(engines, Instant.parse("2026-11-26T00:00:00Z")).version()).isEqualTo(1);
+    }
+
+    @Test
     void RLE_223_a_date_moved_in_the_table_is_refused_with_one_audit_entry_and_the_other_version_still_serves() {
         // Given v1 in force at once and v2 scheduled for 1 Dec, both approved
         RuleEngines engines = engines(ApprovalSealKey.none());

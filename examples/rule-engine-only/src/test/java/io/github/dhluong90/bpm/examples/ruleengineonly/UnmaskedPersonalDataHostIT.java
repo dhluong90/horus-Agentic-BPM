@@ -202,7 +202,7 @@ class UnmaskedPersonalDataHostIT {
     }
 
     private static Reply send(int port, String bearer, String method, String path, String yaml) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", bearer)
                 .method(method, yaml == null ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(yaml, StandardCharsets.UTF_8));
@@ -214,7 +214,7 @@ class UnmaskedPersonalDataHostIT {
     }
 
     private static Reply sendJson(int port, String bearer, String path, String json, String key) throws Exception {
-        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", bearer).header("Content-Type", "application/json")
                 .header("If-Match", "\"1\"").header("Idempotency-Key", key)
                 .POST(HttpRequest.BodyPublishers.ofString(json, StandardCharsets.UTF_8)).build(),

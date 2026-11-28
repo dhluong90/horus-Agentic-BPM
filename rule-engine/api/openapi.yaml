@@ -4220,8 +4220,9 @@ components:
           description: |
             Why a decision failed: `EVALUATION_ERROR`, `UNIQUE_HIT_VIOLATION`, or
             `MASKING_KEY_MISSING` when the rule set masks an input and the tenant has no masking
-            key, or `MASKED_INPUT_IN_OUTPUT` when an output reads an input masked by the tenant
-            default (the decision was refused and no input was logged)
+            key, `MASKING_KEY_MISMATCH` when the tenant's masking key id was first recorded with
+            other key bytes (the response `detail` carries only the code and the rule set, never a key or check value), or `MASKED_INPUT_IN_OUTPUT` when an output reads an input masked by the
+            tenant default (the decision was refused and no input was logged)
         inputs:
           type: object
           additionalProperties: true

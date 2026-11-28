@@ -309,6 +309,8 @@ public record StoredVersion(
      * @return the new state with the lock version incremented
      */
     public StoredVersion approved(String approver, Instant at, String comment) {
+        // PostgreSQL stores microseconds and rounds a finer instant, so the seal is computed over the stored value.
+        at = at.truncatedTo(java.time.temporal.ChronoUnit.MICROS);
         return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, VersionStatus.PUBLISHED, hitPolicy,
                 effectiveFrom == null ? at : effectiveFrom, canonicalJson, canonicalHash, sourceFormat, sourceDocument,
                 sourceHash, lockVersion + 1, requestedBy, requestedAt, approver, at, comment, createdBy, createdAt, null,
