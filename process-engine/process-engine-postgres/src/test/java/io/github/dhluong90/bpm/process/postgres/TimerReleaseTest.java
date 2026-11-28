@@ -91,7 +91,7 @@ class TimerReleaseTest {
         assertThat(reminders.get(card)).as("reminder sends of %s", card).hasValue(1);
         assertThat(timerFired(instanceId)).as("TIMER_FIRED history rows").isEqualTo(1);
         assertThat(count("SELECT count(*) FROM pre_history WHERE instance_id = ? AND node_id = 'send-reminder' "
-                + "AND event_type = 'NODE_ENTERED'", instanceId)).as("send-reminder entered").isLessThanOrEqualTo(1);
+                + "AND event_type = 'NODE_ENTERED'", instanceId)).as("send-reminder entered").isEqualTo(1);
         assertThat(count("SELECT count(*) FROM pre_task WHERE instance_id = ?", instanceId)).as("call tasks").isEqualTo(1);
         assertThat(reader.services.instance(instanceId).tasks()).singleElement()
                 .satisfies(t -> assertThat(t.nodeId()).isEqualTo("call-customer"));
@@ -253,19 +253,36 @@ class TimerReleaseTest {
         }
     }
 
+    /**
+     * Both nodes announce themselves, pass one barrier, and only then claim. Each records how many contenders had
+     * arrived when it was released; the race counts only if both saw the other there. Claims are summed before firing.
+     */
     private static int raceOnce(ExecutorService pool, List<TestEngine> nodes) throws Exception {
         CyclicBarrier start = new CyclicBarrier(nodes.size());
-        List<Future<Integer>> results = new ArrayList<>();
+        AtomicInteger arrived = new AtomicInteger();
+        List<Future<int[]>> results = new ArrayList<>();
         for (TestEngine node : nodes) {
             results.add(pool.submit(() -> {
+                arrived.incrementAndGet();
                 start.await(30, TimeUnit.SECONDS);
-                return node.jobs.pollOnce();
+                int seenAtRelease = arrived.get();
+                List<JobRow> claimed = node.jobs.claim();
+                int fired = 0;
+                for (JobRow job : claimed) {
+                    fired += node.jobs.fire(job) ? 1 : 0;
+                }
+                return new int[] {seenAtRelease, claimed.size(), fired};
             }));
         }
         int fired = 0;
-        for (Future<Integer> result : results) {
-            fired += result.get(60, TimeUnit.SECONDS);
+        int claims = 0;
+        for (Future<int[]> result : results) {
+            int[] r = result.get(60, TimeUnit.SECONDS);
+            assertThat(r[0]).as("contenders in the claim window together").isEqualTo(nodes.size());
+            claims += r[1];
+            fired += r[2];
         }
+        assertThat(claims).as("claims granted for one due timer").isEqualTo(1);
         return fired;
     }
 }
