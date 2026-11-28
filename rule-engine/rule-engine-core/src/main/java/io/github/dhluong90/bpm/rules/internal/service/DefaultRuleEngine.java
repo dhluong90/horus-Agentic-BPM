@@ -81,6 +81,8 @@ public final class DefaultRuleEngine implements RuleEngine {
 
     /** {@code error_code} of a decision refused because its tenant has no masking key. */
     static final String MASKING_KEY_MISSING = "MASKING_KEY_MISSING";
+    /** A masking key id first seen with other key bytes (TR-SEC-10, #340). */
+    static final String MASKING_KEY_MISMATCH = "MASKING_KEY_MISMATCH";
 
     /** {@code error_code} of a decision refused because an output reads an input that is masked for the tenant. */
     static final String MASKED_INPUT_IN_OUTPUT = "MASKED_INPUT_IN_OUTPUT";
@@ -97,6 +99,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final EngineMeters meters;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
     private final HistoryComparisons comparisons;
+    private final MaskingKeyFirstUse maskingKeys;
 
     /**
      * Creates the engine with a selection cache of its own.
@@ -132,6 +135,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         this.querySettings = Objects.requireNonNull(querySettings, "querySettings must not be null");
         this.meters = Objects.requireNonNull(meters, "meters must not be null");
         this.comparisons = new HistoryComparisons(context, store, log, querySettings, this::validated);
+        this.maskingKeys = new MaskingKeyFirstUse(context.masking(), store, context.transactions(), context.clock());
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -878,6 +882,16 @@ public final class DefaultRuleEngine implements RuleEngine {
             return refuse(tenant, caller, onBehalfOf, request, version, now, at, MASKING_KEY_MISSING, "No masking key is configured"
                     + " for this tenant, so the inputs of " + version.ruleSet() + " cannot be logged; set "
                     + EngineDefaults.MASKING_KEY_PROPERTY);
+        }
+        if (key != null && rules.inputs().stream().anyMatch(clause -> clause.masked(maskByDefault))) {
+            // TR-SEC-10 (#340): the first use of a key in this process is checked against what was first recorded
+            // under its id, so a wrong secret restored under a known id never writes tokens no search finds.
+            String refusal = maskingKeys.refusal(tenant, key);
+            if (refusal != null) {
+                System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
+                        refusal + "; the decision on " + version.ruleSet() + " is refused");
+                return refuse(tenant, caller, onBehalfOf, request, version, now, at, MASKING_KEY_MISMATCH, refusal);
+            }
         }
         String echoed = rules.inputs().stream()
                 .filter(clause -> clause.masked(maskByDefault) && rules.inputsInOutputs().contains(clause.name()))
