@@ -507,7 +507,8 @@ The starter contributes the `rules` entry of `GET /api/bpm/meta` (engine version
 | `definitions`, `definitions-tenant` | empty, `default` | Rule sets loaded from the classpath at start-up as drafts |
 | `definitions-auto-publish` | `false` | Refused unless the `dev` profile is active |
 | `maker-checker.enabled` | `true` | `false` refused outside the `dev` profile |
-| `decision-log.mode` | `transactional` | `transactional` keeps the decision row in the business transaction; `async` (outbox) for high-volume hosts. `async` ships in M2 (RE-F-15, PD-075); in M1 only `transactional` is accepted and `async` fails start-up naming the milestone |
+| `decision-log.mode` | `transactional` | `transactional` keeps the decision row in the business transaction. `async` (1.1, `RLE-230`, #45, opt-in) writes the decision to `rle_decision_queue` in the same transaction, so it is durable at the caller's commit and rolls back with it, and a relay moves it into `rle_decision` in batches (`log_mode = ASYNC`); the log lags by about `async.poll-interval`, and an evaluation is refused with `503 DECISION_LOG_BACKLOG`, never dropped, when the queue is over `async.max-backlog`. Another value stops start-up |
+| `decision-log.async.batch-size`, `.poll-interval`, `.max-backlog` | `100`, `PT1S`, `100000` | Rows the relay moves per transaction (1 to 10,000), how often it runs (`PT0.1S` to `PT1M`), and the queue depth above which evaluation is refused (1,000 to 10,000,000, approximate: counted at each relay run and every 256 decisions). Read only in `async` mode |
 | `authoring.cockpit-drafts` | `false` in 0.1.0 (PD-094; back to `true` by a new decision entry once replacing a draft in place, #165, ships) | Rule set draft creation and editing from the cockpit (CK-F-43, PD-075, PD-036, PD-094). `false` refuses `PUT .../versions/{v}` from `rules:author` callers with `403 DRAFT_AUTHORING_DISABLED`, hides the edit actions in the cockpit, and leaves import with a document, approvals and simulation working; a host that keeps production changes in Git sets it per environment. Shown in `/api/bpm/meta` as `authoring.cockpit-drafts` in the `rules` module's settings, always present and boolean; a client that does not find it treats it as off. In 0.1.0 the cockpit is the only enforcement point; from #165 the engine refuses `PUT .../versions/{v}` itself (service layer, Java API included). `POST .../versions?copyOf=` is allowed whatever the setting says (PD-121, `RLE-062`): a restore brings in content that was already approved and still needs four-eyes approval |
 | `readings.style` | `sentence` | Style of plain-language readings of rules and of explanation `text` (CK-F-44, PD-077): `sentence` (patterns from the message catalogue) or `shorthand` (`tier: GOLD, PLATINUM`). If sentences miss the M1 checkpoint of 8 Jan 2027, M1 ships with `shorthand` only and the property accepts only that value until sentences ship. Shown in `/api/bpm/meta` as `rules.readings.style` |
 | `explain.default-language` | `en` | Language of `text` when the request names none available (PD-027, PD-077) |
@@ -924,6 +925,21 @@ CREATE TABLE rle_decision (
   budget_limit      TEXT,
   PRIMARY KEY (tenant_id, created_at, id)
 ) PARTITION BY RANGE (created_at);
+
+-- V4 (RLE-230, #45): decision-log.mode async only. One row per decision, written in the caller's transaction and moved into
+-- rle_decision by the relay in one statement (DELETE ... RETURNING feeding an INSERT), so a row is in exactly one of the two tables.
+-- Same columns as rle_decision except log_mode; unpartitioned and index-light on purpose: a primary key and the relay order.
+-- Rollback: DROP TABLE rle_decision_queue (empty queue, no host in async mode).
+CREATE TABLE rle_decision_queue (
+  queue_seq         BIGINT      GENERATED ALWAYS AS IDENTITY,
+  tenant_id         TEXT        NOT NULL,
+  created_at        TIMESTAMPTZ NOT NULL,
+  id                VARCHAR(26) NOT NULL,
+  -- rule_set_name ... budget_limit: the columns of rle_decision above, unchanged
+  queued_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (tenant_id, id)
+);
+CREATE INDEX idx_rle_decision_queue_order ON rle_decision_queue (queue_seq);
 
 -- V26 (RLE-058, PD-119): the function versions a rule set version was approved with, written in the approval
 -- transaction; the baseline of the start-up WARN and of function-version-change = refuse. A version approved before V26

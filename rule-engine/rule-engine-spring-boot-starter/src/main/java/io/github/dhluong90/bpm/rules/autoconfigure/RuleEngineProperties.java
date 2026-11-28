@@ -290,10 +290,77 @@ public record RuleEngineProperties(
      *     A period must be at least {@code retention-floor}
      * @param retentionFloor the shortest {@code retention} accepted, in whole months; default and lowest value
      *     {@code P12M}. A host may raise it to its own policy, so a shorter value set by mistake stops start-up
+     * @param mode {@code transactional} (the default): each decision is one {@code INSERT} into the log in the caller's
+     *     transaction. {@code async} (#45, RLE-230): each decision is written to a queue in the caller's transaction,
+     *     durable at its commit, and a relay moves it into the log in batches; the log lags by about the poll interval
+     *     and the evaluation is cheaper. An evaluation is refused with {@code 503 DECISION_LOG_BACKLOG}, never dropped,
+     *     when the queue is over {@code async.max-backlog}. Off by default; no decision is lost in either mode
+     * @param async the settings of {@code async} mode; read only then
      */
     public record DecisionLog(Boolean maskDefault, Boolean requireExplicitMask, List<String> personalDataNames,
             List<String> additionalPersonalDataNames, Duration partitionsAhead, String retention,
-            Period retentionFloor) {
+            Period retentionFloor, Mode mode, Async async) {
+
+        /** How a decision reaches the log. */
+        public enum Mode {
+            /** One insert into the log, in the caller's transaction. */
+            TRANSACTIONAL,
+            /** A queue row in the caller's transaction, relayed into the log in batches. */
+            ASYNC
+        }
+
+        /**
+         * The settings of {@code decision-log.mode: async} (RLE-230).
+         *
+         * @param batchSize decisions the relay moves in one transaction, 1 to 10,000; default 100
+         * @param pollInterval how often the relay runs, 100 ms to one minute; default one second. The log lags by about
+         *     this long
+         * @param maxBacklog queued decisions above which an evaluation is refused with {@code 503 DECISION_LOG_BACKLOG},
+         *     1,000 to 10,000,000; default 100,000. Counted at the relay's runs and every 256 decisions, so it is
+         *     approximate
+         */
+        public record Async(@DefaultValue("100") int batchSize, @DefaultValue("PT1S") Duration pollInterval,
+                @DefaultValue("100000") int maxBacklog) {
+
+            /** Validates the three settings; an out-of-range value fails start-up naming the property. */
+            public Async {
+                if (batchSize < 1 || batchSize > 10_000) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.batch-size must be 1 to 10000, "
+                            + "was " + batchSize);
+                }
+                if (pollInterval.compareTo(Duration.ofMillis(100)) < 0 || pollInterval.compareTo(Duration.ofMinutes(1)) > 0) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.poll-interval must be PT0.1S to "
+                            + "PT1M, was " + pollInterval);
+                }
+                if (maxBacklog < 1_000 || maxBacklog > 10_000_000) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-backlog must be 1000 to "
+                            + "10000000, was " + maxBacklog);
+                }
+            }
+
+            /** @return the defaults: 100, one second, 100,000 */
+            public static Async defaults() {
+                return new Async(100, Duration.ofSeconds(1), 100_000);
+            }
+        }
+
+        /**
+         * Returns the mode in force.
+         *
+         * @return the configured mode, or {@code transactional}
+         */
+        public Mode modeOrDefault() {
+            return mode == null ? Mode.TRANSACTIONAL : mode;
+        }
+
+        /**
+         * Returns the async settings in force.
+         *
+         * @return the configured settings, or the defaults
+         */
+        public Async asyncOrDefault() {
+            return async == null ? Async.defaults() : async;
+        }
 
         /** Validates the periods; an out-of-range value fails start-up naming the property. */
         public DecisionLog {

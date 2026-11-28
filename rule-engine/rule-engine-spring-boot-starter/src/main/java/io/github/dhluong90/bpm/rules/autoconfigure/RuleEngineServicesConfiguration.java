@@ -99,7 +99,8 @@ class RuleEngineServicesConfiguration {
     RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking, Environment environment, DecisionExplainer explainer,
-            RuleFunctionRegistry functions, ObjectProvider<ApprovalSealKey> sealKey) {
+            RuleFunctionRegistry functions, ObjectProvider<ApprovalSealKey> sealKey,
+            ObjectProvider<io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog> asyncLog) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         requireDevProfileForUnboundApprovals(settings, environment);
@@ -116,7 +117,11 @@ class RuleEngineServicesConfiguration {
                     properties.toQuerySettings(), explainer, functions.functions(),
                     HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange()),
                     // RLE-223: a host bean supplies the key from outside the database; without one, plain seals.
-                    seal));
+                    seal,
+                    // RLE-230: the queue when decision-log.mode is async; otherwise the transactional log.
+                    asyncLog.getIfAvailable() != null
+                            ? asyncLog.getIfAvailable()
+                            : new io.github.dhluong90.bpm.rules.postgres.JdbcDecisionLog(dataSource)));
         } catch (IllegalArgumentException e) {
             // A function registered twice, with a built-in name or an invalid name (RLE-058): nothing is served.
             throw new IllegalStateException("The Rule Engine does not start: " + e.getMessage(), e);

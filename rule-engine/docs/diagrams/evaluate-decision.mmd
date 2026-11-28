@@ -22,7 +22,7 @@ sequenceDiagram
     alt log mode transactional
       E->>DB: INSERT rle_decision, the only statement added
     else log mode async
-      E->>DB: INSERT rle_decision_outbox
+      E->>DB: INSERT rle_decision_queue, durable at the caller's COMMIT
     end
     E-->>A: DecisionResult Matched, NoMatch or Failed
     alt host commits

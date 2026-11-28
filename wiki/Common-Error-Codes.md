@@ -93,6 +93,7 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 | 429 | [RATE_LIMITED](#rate_limited) | both | M1 |
 | 429 | [START_ARRIVALS_FULL](#start_arrivals_full) | processes | 1.0 |
 | 500 | [INTERNAL_ERROR](#internal_error) | both | M1 |
+| 503 | [DECISION_LOG_BACKLOG](#decision_log_backlog) | rules | 1.1 |
 | 503 | [SCHEMA_NOT_READY](#schema_not_ready) | rules | M1 |
 
 ## Codes on every endpoint
@@ -178,6 +179,9 @@ Every error from the Rule Engine (`/api/bpm/rules/v1`), the Process Engine (`/ap
 
 ### NO_EFFECTIVE_VERSION
 `404`. No approved version is effective at the clock: nothing is published or active yet, the effective date is in the future, the last version was retired, or the request names a tenant with no version. Publish or approve a version, or check the tenant.
+
+### DECISION_LOG_BACKLOG
+`503` with `Retry-After: 1`, Rule Engine, only with `decision-log.mode: async`. More than `decision-log.async.max-backlog` decisions (100,000 by default) wait in the queue to be written to the decision log, so the engine refuses a new evaluation instead of dropping a decision or letting the queue grow without bound. The refused evaluation returns no result and writes nothing; retry after a moment. Alert on `horus.rle.decision.log.queue.depth` before it reaches the limit, and check that the relay is running (`ruleEngine` health, job `decisionLogRelay`) and that the database is not slow.
 
 ### SCHEMA_NOT_READY
 `503`. The engine's schema was not current at start-up and `horus.bpm.rules.migrate-on-start` is `false`, so the list cursor key was not loaded; `detail` names the schema version and the pending migrations. Run the engine migrations and restart the host. Only `GET /rule-sets` and `GET /rule-sets/{name}/versions` answer it.

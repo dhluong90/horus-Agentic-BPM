@@ -2112,6 +2112,8 @@ paths:
       operationId: evaluate
       summary: Evaluate the version in force at the clock and log one decision
       description: |
+        With `decision-log.mode: async` and more than `decision-log.async.max-backlog` decisions queued, the call is
+        `503 DECISION_LOG_BACKLOG` with `Retry-After: 1`: the decision is refused, never dropped (`RLE-230`).
         Permission `rules:evaluate`; a request that sets `clock` also needs `rules:simulate`, otherwise
         `403 CLOCK_NOT_ALLOWED`. The clock defaults to the host clock. It selects the version in force
         (the highest approved version whose `effectiveFrom` is at or before the clock; DESIGN 3.3.1) and
@@ -2168,6 +2170,7 @@ paths:
         '413': { $ref: '#/components/responses/Problem' }
         '422': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
   /decisions/{ruleSet}:evaluate-batch:
     post:
       tags: [decisions]
@@ -4633,7 +4636,7 @@ components:
             SELF_APPROVAL_FORBIDDEN, RULE_SET_NOT_FOUND, VERSION_NOT_FOUND, NO_EFFECTIVE_VERSION, DECISION_NOT_FOUND,
             VERSION_CONFLICT, CONTENT_CHANGED, CONTENT_HASH_REQUIRED, INVALID_STATE, IDEMPOTENCY_IN_FLIGHT, RULE_SET_EXISTS, VALIDATION_FAILED,
             IDEMPOTENCY_KEY_REUSE_MISMATCH, EVALUATION_ERROR, UNIQUE_HIT_VIOLATION, PAYLOAD_TOO_LARGE,
-            PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY,
+            PRECONDITION_REQUIRED, INTERNAL_ERROR, SCHEMA_NOT_READY, DECISION_LOG_BACKLOG,
             DRAFT_AUTHORING_DISABLED, RATE_LIMITED, CLOCK_NOT_ALLOWED, REPLAY_NOT_POSSIBLE, LAST_VERSION_IN_EFFECT,
             WARNINGS_NOT_ACKNOWLEDGED, AUTHOR_UNKNOWN, BATCH_TOO_LARGE, CMMN_UNSUPPORTED, DMN_UNSUPPORTED_ELEMENT,
             EXPRESSION_LANGUAGE_UNSUPPORTED, EVIDENCE_TOO_LARGE, HISTORY_TOO_LARGE, READINGS_TOO_LARGE,
