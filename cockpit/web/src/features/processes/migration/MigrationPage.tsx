@@ -34,7 +34,7 @@ const LOOK: Record<MigrationStatus, { glyph: string; tone: string }> = {
 function StatusPill({ status }: { status: MigrationStatus }) {
   const { t } = useI18n();
   const look = LOOK[status];
-  return <span className={`badge badge--${look.tone}`}><span aria-hidden="true">{look.glyph}</span> {t(`migration.status.${status}`)}</span>;
+  return <span className={`status status--${look.tone}`}><span aria-hidden="true">{look.glyph}</span> {t(`migration.status.${status}`)}</span>;
 }
 
 type Tab = 'diagrams' | 'steps' | 'notMoved';
@@ -145,8 +145,8 @@ function PlanView({ plan, pageLimit }: { plan: MigrationPlan; pageLimit: number 
           ) : tab === 'steps' ? <StepsList rows={rows} plan={plan} selected={selected} onSelect={setSelected} /> : (
             <>
               <ul className="pdiff__legend mdiagrams__legend" aria-label={t('migration.legend')}>
-                <li className="pdiff__key pdiff__key--changed"><span className="pdiff__swatch" aria-hidden="true">•</span>{t('migration.mark.changed')}</li>
-                {rows.some((row) => row.state === 'unmapped') ? <li className="pdiff__key pdiff__key--removed"><span className="pdiff__swatch" aria-hidden="true">−</span>{t('migration.mark.removed')}</li> : null}
+                <li className="pdiff__key pdiff__key--changed"><span className="pdiff__swatch" aria-hidden="true" />{t('migration.mark.changed')}</li>
+                {rows.some((row) => row.state === 'unmapped') ? <li className="pdiff__key pdiff__key--removed"><span className="pdiff__swatch" aria-hidden="true" />{t('migration.mark.removed')}</li> : null}
               </ul>
               <Suspense fallback={<LoadingRows rows={6} />}>
                 <MigrationDiagrams source={sourceGraph.data} target={targetGraph.data} sourceVersion={plan.sourceVersion} targetVersion={plan.targetVersion} rows={rows} selected={selected} onSelect={setSelected} />

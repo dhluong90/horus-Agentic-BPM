@@ -36,6 +36,8 @@ jobs:
         # The cockpit's licence script, run over this project's whole tree: every package ends up in the built pages.
         working-directory: site
         run: node ../cockpit/web/scripts/check-licences.mjs --include-dev --exceptions=licence-exceptions.json
+      - name: No chips in the site's stylesheets
+        run: node cockpit/web/scripts/check-no-chips.mjs
       - name: Tests of the generator
         working-directory: site
         run: npm test

@@ -36,8 +36,7 @@
 .dg-edge .dg-edge__default { stroke-width: 2; }
 .dg-edge .dg-edge__condition { fill: var(--canvas); stroke: var(--edge); stroke-width: 1.25; stroke-linejoin: round; }
 .dg-arrow { fill: var(--edge); stroke: none; }
-.dg-edge__label rect { fill: var(--canvas); stroke: var(--line); stroke-width: 1; }
-.dg-edge__label text { fill: var(--edge-label); font: var(--type-caption); }
+.dg-edge__label text { fill: var(--edge-label); font: var(--type-caption); paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; }
 
 .dg-node { color: var(--ink-2); outline: none; }
 .dg-node rect, .dg-node circle, .dg-node > path { fill: var(--node); stroke: var(--node-stroke); stroke-width: 1.5; }
@@ -102,8 +101,6 @@
 .step-list__type--agent { color: var(--violet); }
 
 /* ---------- Agent review ---------- */
-.badge--violet { background: var(--violet-soft); color: var(--violet); border-color: transparent; }
-.badge--bad { background: var(--bad-soft); color: var(--bad); border-color: transparent; }
 
 .review .page-head { margin-bottom: 4px; }
 .review__meta { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0 0 16px; color: var(--muted); font: var(--type-label); }
@@ -123,10 +120,11 @@
 .review-value__text { white-space: pre-wrap; }
 
 .masked { display: inline-flex; align-items: center; gap: 6px; }
-.masked__tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--ink-2); font: var(--type-caption); font-weight: 600; line-height: 20px; }
+.masked__label { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font: var(--type-caption); font-weight: 600; line-height: 20px; }
 
 .review-why__sentence { margin: 0; color: var(--ink); font-weight: 600; }
-.rule-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.rule-list { display: flex; flex-wrap: wrap; margin: 0; padding: 0; list-style: none; color: var(--muted); font: var(--type-label); font-weight: 600; }
+.rule-list__item + .rule-list__item::before { content: "·"; margin: 0 6px; font-weight: 400; }
 .review-reasons { margin: 0; padding-left: 18px; color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
 .review-why__facts { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 0; font: var(--type-label); }
 .review-why__facts > div { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
@@ -191,7 +189,7 @@
 .pdiff__bar { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 .pdiff__legend { display: flex; align-items: center; gap: 12px; margin: 0; padding: 0; list-style: none; font: var(--type-caption); color: var(--ink-2); }
 .pdiff__key { display: inline-flex; align-items: center; gap: 4px; }
-.pdiff__swatch { display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: var(--radius-pill); font: 700 11px/1 var(--font-ui); color: var(--surface); }
+.pdiff__swatch { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 2px; }
 .pdiff__key--added .pdiff__swatch { background: var(--ok); }
 .pdiff__key--changed .pdiff__swatch { background: var(--indigo); }
 .pdiff__key--removed .pdiff__swatch { background: var(--bad); }
@@ -229,10 +227,10 @@
 .pdiff__from { color: var(--ink-2); text-decoration: line-through; }
 .pdiff__to { font-weight: 600; background: var(--diff-mod); padding: 0 4px; border-radius: var(--radius-xs); }
 
-.diff-tag { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 600; white-space: nowrap; }
-.diff-tag--added { background: var(--ok-soft); color: var(--ok); }
-.diff-tag--changed { background: var(--indigo-soft); color: var(--indigo); }
-.diff-tag--removed { background: var(--bad-soft); color: var(--bad); }
+.diff-mark { display: inline-flex; align-items: center; gap: 4px; font: var(--type-caption); font-weight: 600; white-space: nowrap; }
+.diff-mark--added { color: var(--ok); }
+.diff-mark--changed { color: var(--accent); }
+.diff-mark--removed { color: var(--bad); }
 
 /* Marks on the diagram. */
 .dg-node--added > rect, .dg-node--added > circle, .dg-node--added > path { fill: var(--diff-add); stroke: var(--ok-fill); stroke-width: 2.5; }
@@ -267,22 +265,14 @@
 /* Badges: a token is the token blue with its numeral colour; an incident is the error hue; a completed step a small
  * check in the "passed" green. Each badge also carries a word or an accessible name, never colour alone. */
 .dg-badge { pointer-events: none; }
-.dg-badge text { font: var(--type-caption); font-weight: 600; }
-.dg-badge--token rect { fill: var(--token); }
-.dg-badge--token text { fill: var(--on-accent-fill); }
-.dg-badge--warn rect { fill: var(--warn-soft); stroke: var(--warn); stroke-width: 1; }
-.dg-badge--warn text { fill: var(--warn); }
-.dg-badge--incident rect { fill: var(--bad-soft); stroke: var(--bad-fill); stroke-width: 1; }
+/* A step's state on a case: an icon and words drawn as text, no box. A canvas-colour halo keeps it legible over lines. */
+.dg-badge text { font: var(--type-caption); font-weight: 600; paint-order: stroke; stroke: var(--canvas); stroke-width: 4px; stroke-linejoin: round; }
+.dg-badge--token text { fill: var(--accent); }
+.dg-badge--warn text, .dg-badge--undone text { fill: var(--warn); }
 .dg-badge--incident text { fill: var(--bad); }
-.dg-badge--undone rect { fill: var(--warn-soft); stroke: var(--warn-fill); stroke-width: 1; }
-.dg-badge--undone text { fill: var(--warn); }
-.dg-badge--cancelled rect, .dg-badge--terminated rect { fill: var(--surface-3); stroke: var(--line-strong); stroke-width: 1; }
-.dg-badge--cancelled text, .dg-badge--terminated text { fill: var(--ink-2); }
-.dg-badge--helper rect { fill: var(--surface-3); stroke: var(--line-strong); stroke-width: 1; }
-.dg-badge--helper text { fill: var(--ink-2); }
+.dg-badge--cancelled text, .dg-badge--terminated text, .dg-badge--helper text { fill: var(--ink-2); }
 .dg-badge--undone, .dg-badge--helper { pointer-events: bounding-box; }
-.dg-badge--done circle { fill: var(--ok-soft); stroke: var(--ok-fill); stroke-width: 1; }
-.dg-badge--done text { fill: var(--ok); font-size: 15px; font-weight: 700; }
+.dg-badge--done text { fill: var(--ok); font-size: 14px; font-weight: 700; }
 .dg-node--pick { cursor: pointer; }
 .dg-node--selected rect, .dg-node--selected circle, .dg-node--selected > path { stroke: var(--accent); stroke-width: 3; }
 

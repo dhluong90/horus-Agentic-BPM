@@ -6,7 +6,7 @@ export function InstanceStatusPill({ status }: { status: string }) {
   const { t } = useI18n();
   const look = instanceStatusLook(status);
   return (
-    <span className={`badge badge--${look.tone}`}>
+    <span className={`status status--${look.tone}`}>
       <span aria-hidden="true">{look.glyph}</span> {t(look.key)}
     </span>
   );

@@ -22,7 +22,7 @@ export function DefinitionStatusPill({ status }: { status: DefinitionStatus }) {
   const { t } = useI18n();
   const look = LOOK[status];
   return (
-    <span className={`badge badge--${look.tone}`}>
+    <span className={`status status--${look.tone}`}>
       <span aria-hidden="true">{look.glyph}</span> {t(`processStatus.${status}`)}
     </span>
   );

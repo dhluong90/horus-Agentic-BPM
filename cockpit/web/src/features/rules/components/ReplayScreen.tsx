@@ -122,8 +122,8 @@ function Results({ answer, definition, from, to }: { answer: HistoryReadings; de
                       <span className="tnum" title={result.decisionId}>{shortId(result.decisionId)}</span>
                       <span className="replay__when tnum">{formatDateTime(result.evalClock, locale, 'UTC')} · {t('replay.row.version', { version: String(result.loggedVersion) })}</span>
                       {group === 'changed' ? <span className="change-mark change-mark--changed"><span aria-hidden="true">✎</span> {t('replay.changed')}</span> : null}
-                      {group === 'unchanged' ? <span className="badge badge--neutral"><span aria-hidden="true">=</span> {t('replay.same')}</span> : null}
-                      {group === 'notReplayable' ? <span className="badge badge--warn"><span aria-hidden="true">◐</span> {t('replay.notPossible')}</span> : null}
+                      {group === 'unchanged' ? <span className="status status--neutral"><span aria-hidden="true">=</span> {t('replay.same')}</span> : null}
+                      {group === 'notReplayable' ? <span className="status status--warn"><span aria-hidden="true">◐</span> {t('replay.notPossible')}</span> : null}
                     </th>
                     {group === 'notReplayable' ? (
                       <td colSpan={2}><p className="reading__note replay__why">{reasonOf(result)}</p></td>

@@ -14,7 +14,7 @@ export function StatusBadge({ status }: { status: HistoryStatus }) {
   const { t } = useI18n();
   const look = LOOK[status];
   return (
-    <span className={`badge badge--${look.tone}`}>
+    <span className={`status status--${look.tone}`}>
       <span aria-hidden="true">{look.glyph}</span> {t(`status.${status}`)}
     </span>
   );

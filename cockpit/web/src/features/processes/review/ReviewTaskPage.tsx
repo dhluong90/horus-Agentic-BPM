@@ -118,12 +118,12 @@ function violationsOf(error: unknown): { byField: Record<string, string>; other:
 function TaskStatus({ task }: { task: Task }) {
   const { t } = useI18n();
   const { userId } = useProcessesSession();
-  if (task.status === 'COMPLETED') return <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('review.status.completed')}</span>;
-  if (task.status === 'CANCELLED') return <span className="badge badge--muted"><span aria-hidden="true">■</span> {t('review.status.cancelled')}</span>;
+  if (task.status === 'COMPLETED') return <span className="status status--ok"><span aria-hidden="true">✓</span> {t('review.status.completed')}</span>;
+  if (task.status === 'CANCELLED') return <span className="status status--muted"><span aria-hidden="true">■</span> {t('review.status.cancelled')}</span>;
   if (task.status === 'CLAIMED') {
-    return <span className="badge badge--accent"><span aria-hidden="true">◷</span> {task.claimedBy === userId ? t('review.status.yours') : t('review.status.claimed', { who: task.claimedBy ?? '' })}</span>;
+    return <span className="status status--accent"><span aria-hidden="true">◷</span> {task.claimedBy === userId ? t('review.status.yours') : t('review.status.claimed', { who: task.claimedBy ?? '' })}</span>;
   }
-  return <span className="badge badge--violet"><span aria-hidden="true">◇</span> {t('review.status.waiting')}</span>;
+  return <span className="status status--accent"><span aria-hidden="true">◷</span> {t('review.status.waiting')}</span>;
 }
 
 function FieldList({ values, empty }: { values: Readonly<Record<string, unknown>>; empty: string }) {
@@ -146,8 +146,8 @@ function SchemaVerdict({ code }: { code: string }) {
   const verdict = schemaVerdict(code);
   if (verdict === 'unknown') return null;
   return verdict === 'passed'
-    ? <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('review.schema.passed')}</span>
-    : <span className="badge badge--bad"><span aria-hidden="true">✕</span> {t('review.schema.failed')}</span>;
+    ? <span className="status status--ok"><span aria-hidden="true">✓</span> {t('review.schema.passed')}</span>
+    : <span className="status status--bad"><span aria-hidden="true">✕</span> {t('review.schema.failed')}</span>;
 }
 
 function Guardrail({ review }: { review: ReviewContext }) {
@@ -158,8 +158,8 @@ function Guardrail({ review }: { review: ReviewContext }) {
       <h2 id="review-why" className="card__title">{t('review.why')}</h2>
       <p className="review-why__sentence">{t(REFUSAL_KEY[refusalOf(review.code)])}</p>
       {review.ruleIds.length > 0 ? (
-        <ul className="rule-pills" aria-label={t('review.rules')}>
-          {review.ruleIds.map((id) => <li key={id} className="badge badge--violet">{t('review.rule', { id })}</li>)}
+        <ul className="rule-list" aria-label={t('review.rules')}>
+          {review.ruleIds.map((id) => <li key={id} className="rule-list__item">{t('review.rule', { id })}</li>)}
         </ul>
       ) : null}
       {review.reasons.length > 0 ? (

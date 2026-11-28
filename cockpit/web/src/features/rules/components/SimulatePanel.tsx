@@ -26,7 +26,7 @@ function Result({ answer, version, sample }: { answer: SimulationReadings; versi
   return (
     <div className="sim__result">
       <p className="sim__sample">{t('sim.sample', { sample: [result.reference, result.label ?? sample].filter((part) => part !== '').join(' · ') })}</p>
-      <p className={result.changed ? 'change-mark change-mark--changed sim__verdict' : 'badge sim__verdict'}>
+      <p className={result.changed ? 'change-mark change-mark--changed sim__verdict' : 'status sim__verdict'}>
         <span aria-hidden="true">{result.changed ? '✎' : '='}</span> {result.changed ? t('sim.changed') : t('sim.same')}
       </p>
       <Side title={t('sim.thisVersion', { version: String(answer.version) })} outcome={result.simulated} base={false} />

@@ -31,7 +31,7 @@ export function CellValue({ reading }: { reading: CellReading }) {
         <span className="cell-values">
           {reading.negated ? <span className="cell-op">{t('table.not')}</span> : null}
           {reading.values.map((value, index) => (
-            <span key={index} className="value-pill">
+            <span key={index} className="cell-value">
               <ValueText value={value} />
             </span>
           ))}
@@ -41,7 +41,7 @@ export function CellValue({ reading }: { reading: CellReading }) {
       return (
         <span className="cell-values cell-values--compare">
           <span className="cell-op">{reading.operator}</span>
-          <span className="value-pill tnum">
+          <span className="cell-value tnum">
             <ValueText value={reading.value} />
           </span>
         </span>

@@ -99,7 +99,7 @@ export function ChoiceEditor({ label, error, detail, errorId, model, options, on
           aria-haspopup="true" aria-expanded={open} aria-invalid={error !== undefined} {...(describedBy !== undefined ? { 'aria-describedby': describedBy } : {})}
           onClick={() => { setOpen((v) => !v); }}>
           {values.length === 0 ? <span aria-hidden="true">—</span> : negate ? <><span className="picker__not">{t('editor.notThese')}</span>{' '}</> : null}
-          {values.map((v) => <span key={v} className="value-pill">{valueLabel(v)}</span>)}
+          {values.map((v) => <span key={v} className="cell-value">{valueLabel(v)}</span>)}
           <span aria-hidden="true" className="picker__chevron">⌄</span>
         </button>
         {open ? (

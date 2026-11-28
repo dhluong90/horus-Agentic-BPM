@@ -117,7 +117,7 @@ onBeforeUnmount(() => watcher && watcher.disconnect());
               <figure ref="heroFrame" class="canvas-card hero-fig" :tabindex="heroScrolls ? 0 : undefined" :role="heroScrolls ? 'group' : undefined" :aria-label="heroScrolls ? 'Loan process diagram. Scroll sideways to see all of it.' : undefined" @scroll.passive="heroMoved = true">
                 <img :src="heroSrc(1579)" :srcset="heroSet" sizes="(max-width: 640px) 790px, (max-width: 1279px) min(880px, calc(100vw - 64px)), 812px" width="1579" height="1365" :alt="heroAlt" fetchpriority="high" decoding="async" />
               </figure>
-              <span v-if="heroScrolls && !heroMoved" class="hero-cue" aria-hidden="true">Swipe to see more</span>
+              <span v-if="heroScrolls && !heroMoved" class="hero-cue" aria-hidden="true">Swipe to see more →</span>
             </div>
           </div>
         </div>
@@ -221,15 +221,15 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
                 <rect class="nd" x="150" y="30" width="400" height="230" rx="16" />
                 <text class="tx" x="350" y="64" font-size="16" font-weight="650">Your Spring Boot service</text>
                 <g font-size="14" font-weight="500">
-                  <rect class="chip" x="176" y="96" width="106" height="48" rx="10" /><text class="chiptx" x="229" y="125">Rule Engine</text>
-                  <rect class="chip" x="297" y="96" width="106" height="48" rx="10" /><text class="chiptx" x="350" y="125">Process Engine</text>
-                  <rect class="chip" x="418" y="96" width="106" height="48" rx="10" /><text class="chiptx" x="471" y="125">Cockpit files</text>
+                  <rect class="comp" x="176" y="96" width="106" height="48" rx="10" /><text class="comptx" x="229" y="125">Rule Engine</text>
+                  <rect class="comp" x="297" y="96" width="106" height="48" rx="10" /><text class="comptx" x="350" y="125">Process Engine</text>
+                  <rect class="comp" x="418" y="96" width="106" height="48" rx="10" /><text class="comptx" x="471" y="125">Cockpit files</text>
                 </g>
                 <text class="tx2" x="350" y="206" font-size="14">Libraries, not a server. No cluster, no broker.</text>
                 <rect class="nd" x="690" y="80" width="190" height="130" rx="16" />
                 <text class="tx" x="785" y="134" font-size="16" font-weight="650">Your PostgreSQL</text><text class="tx2" x="785" y="162" font-size="14">rle_ and pre_ tables</text>
                 <path d="M550 145H688" style="stroke:var(--primary-fill)" stroke-width="2.5" fill="none" marker-start="url(#a2)" marker-end="url(#a2)" />
-                <text class="chiptx" x="620" y="132" font-size="14" font-weight="600">your transaction</text>
+                <text class="comptx" x="620" y="132" font-size="14" font-weight="600">your transaction</text>
                 <path class="ed" d="M350 322V262" marker-end="url(#a2)" />
                 <text class="tx3" x="350" y="334" font-size="13.5">Your identity provider: sign-in and tenant</text>
                 <path class="ed" d="M560 240H650" stroke-dasharray="5 4" marker-end="url(#a2)" />
@@ -244,12 +244,12 @@ curl -s -u hoa:$P -X POST $H/rule-sets/card-fee/versions/1:approve \
                 <path class="ed" d="M170 66V94" marker-end="url(#a3)" />
                 <rect class="nd" x="10" y="96" width="320" height="210" rx="14" />
                 <text class="tx" x="170" y="124" font-weight="650">Your Spring Boot service</text>
-                <rect class="chip" x="30" y="140" width="280" height="36" rx="9" /><text class="chiptx" x="170" y="163" font-weight="500">Rule Engine</text>
-                <rect class="chip" x="30" y="184" width="280" height="36" rx="9" /><text class="chiptx" x="170" y="207" font-weight="500">Process Engine</text>
-                <rect class="chip" x="30" y="228" width="280" height="36" rx="9" /><text class="chiptx" x="170" y="251" font-weight="500">Cockpit files</text>
+                <rect class="comp" x="30" y="140" width="280" height="36" rx="9" /><text class="comptx" x="170" y="163" font-weight="500">Rule Engine</text>
+                <rect class="comp" x="30" y="184" width="280" height="36" rx="9" /><text class="comptx" x="170" y="207" font-weight="500">Process Engine</text>
+                <rect class="comp" x="30" y="228" width="280" height="36" rx="9" /><text class="comptx" x="170" y="251" font-weight="500">Cockpit files</text>
                 <text class="tx2" x="170" y="290">Libraries, not a server. No cluster.</text>
                 <path d="M170 306V354" style="stroke:var(--primary-fill)" stroke-width="2.5" fill="none" marker-start="url(#a3)" marker-end="url(#a3)" />
-                <text class="chiptx" x="186" y="335" text-anchor="start" font-weight="600">your transaction</text>
+                <text class="comptx" x="186" y="335" text-anchor="start" font-weight="600">your transaction</text>
                 <rect class="nd" x="10" y="356" width="320" height="70" rx="14" />
                 <text class="tx" x="170" y="386" font-weight="650">Your PostgreSQL</text><text class="tx2" x="170" y="408">rle_ and pre_ tables</text>
                 <path class="ed" d="M170 426V468" stroke-dasharray="5 4" marker-end="url(#a3)" />

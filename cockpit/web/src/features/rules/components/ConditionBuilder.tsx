@@ -305,7 +305,7 @@ function NotCard({ node, ctx, siblings, index }: { node: Extract<Node, { kind: '
     <li>
       <div className={`cb-not${(messages?.length ?? 0) > 0 ? ' cb-not--bad' : ''}`} role="group" aria-label={t('builder.notLabel', { level: String(level) })} data-node={node.id}>
         <div className="cb-not__head">
-          <span className="cb-badge">{t('builder.not')}</span>
+          <span className="cb-not__label">{t('builder.not')}</span>
           <span className="cb-hint">{t('builder.notHint')}</span>
           <span className="cb-group__actions"><NodeMenu node={node} ctx={ctx} siblings={siblings} index={index} /></span>
         </div>

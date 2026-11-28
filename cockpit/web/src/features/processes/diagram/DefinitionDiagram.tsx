@@ -78,7 +78,7 @@ function doneRadius(scale: number): number {
 }
 
 function badgeWidth(badge: StepBadge): number {
-  return Math.ceil(badge.text.length * BADGE_CHAR) + 32;
+  return Math.ceil(badge.text.length * BADGE_CHAR) + 26;
 }
 
 /** A badge across the top edge of a box, or over the symbol of an event or gateway. */
@@ -90,7 +90,6 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
     const cy = node.y - radius - DONE_CLEARANCE;
     return (
       <g className="dg-badge dg-badge--done" aria-hidden="true" transform={`translate(${cx.toFixed(1)} ${cy.toFixed(1)}) scale(${(radius / DONE_MIN_RADIUS).toFixed(3)})`}>
-        <circle cx={0} cy={0} r={DONE_MIN_RADIUS} />
         <text x={0} y={5} textAnchor="middle">{badge.icon}</text>
       </g>
     );
@@ -102,9 +101,8 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
   return (
     <g className={`dg-badge dg-badge--${badge.tone}`} aria-hidden="true">
       {badge.hint !== undefined ? <title>{badge.hint}</title> : null}
-      <rect x={x} y={y} width={width} height={BADGE_HEIGHT} rx={BADGE_HEIGHT / 2} />
-      <text x={x + 10} y={y + 14}>{badge.icon}</text>
-      <text x={x + 24} y={y + 14}>{badge.text}</text>
+      <text x={x + 4} y={y + 14}>{badge.icon}</text>
+      <text x={x + 18} y={y + 14}>{badge.text}</text>
     </g>
   );
 }
@@ -112,7 +110,6 @@ function Badge({ node, badge, scale }: { node: PlacedNode; badge: StepBadge; sca
 /** Space kept under the canvas inside the viewport: the card's padding and the page's bottom margin (as in processes.css). */
 const BELOW_CANVAS = 52;
 const MIN_CANVAS_HEIGHT = 240;
-const LABEL_CHAR = 6.8;
 
 function path(points: readonly Point[]): string {
   return points.map((p, index) => `${index === 0 ? 'M' : 'L'}${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ');
@@ -181,13 +178,11 @@ function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
 
 /** A message flow: a dashed line with an arrow and, when it has one, a label (#497). */
 function MessageFlowLine({ flow, marker }: { flow: { id: string; label: string | undefined; points: readonly Point[]; labelAt: Point }; marker: string }) {
-  const pill = flow.label !== undefined ? Math.ceil(flow.label.length * LABEL_CHAR) + 14 : 0;
   return (
     <g className="dg-edge dg-edge--message" data-message-flow={flow.id}>
       <path d={path(flow.points)} markerEnd={`url(#${marker})`} />
       {flow.label !== undefined ? (
         <g className="dg-edge__label">
-          <rect x={flow.labelAt.x - pill / 2} y={flow.labelAt.y - 10} width={pill} height={20} rx={10} />
           <text x={flow.labelAt.x} y={flow.labelAt.y + 4} textAnchor="middle">{flow.label}</text>
         </g>
       ) : null}
@@ -199,7 +194,6 @@ function Edge({ edge, marker, defaultLabel, mark, fromGateway }: { edge: PlacedE
   const tick = edge.isDefault ? defaultMark(edge.points) : undefined;
   const condition = edge.conditional === true && !edge.isDefault && !fromGateway && edge.isLink !== true && edge.isAssociation !== true ? conditionMark(edge.points) : undefined;
   const at = edge.labelAt;
-  const pill = edge.label !== undefined ? Math.ceil(edge.label.length * LABEL_CHAR) + 14 : 0;
   return (
     <g className={`${mark !== undefined ? `dg-edge dg-edge--${mark}` : 'dg-edge'}${edge.isLink === true ? ' dg-edge--link' : ''}${edge.isAssociation === true ? ' dg-edge--association' : ''}`} data-edge={edge.id} {...(mark !== undefined ? { 'data-mark': mark } : {})}>
       <path d={path(edge.points)} markerEnd={`url(#${marker}${mark !== undefined ? `-${mark}` : ''})`} />
@@ -207,7 +201,6 @@ function Edge({ edge, marker, defaultLabel, mark, fromGateway }: { edge: PlacedE
       {tick !== undefined ? <path className="dg-edge__default" d={tick}><title>{defaultLabel}</title></path> : null}
       {edge.label !== undefined && at ? (
         <g className="dg-edge__label">
-          <rect x={at.x - pill / 2} y={at.y - 10} width={pill} height={20} rx={10} />
           <text x={at.x} y={at.y + 4} textAnchor="middle">{edge.label}</text>
         </g>
       ) : null}

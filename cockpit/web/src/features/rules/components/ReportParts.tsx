@@ -33,6 +33,6 @@ export function useRunText(report: SimulationReport): string {
 export function ReportStatus({ status }: { status: SimulationReport['status'] }) {
   const { t } = useI18n();
   return status === 'CURRENT'
-    ? <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('report.status.CURRENT')}</span>
-    : <span className="badge badge--warn"><span aria-hidden="true">▲</span> {t('report.status.OUT_OF_DATE')}</span>;
+    ? <span className="status status--ok"><span aria-hidden="true">✓</span> {t('report.status.CURRENT')}</span>
+    : <span className="status status--warn"><span aria-hidden="true">▲</span> {t('report.status.OUT_OF_DATE')}</span>;
 }

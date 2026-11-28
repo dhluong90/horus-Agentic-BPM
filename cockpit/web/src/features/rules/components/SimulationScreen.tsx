@@ -165,7 +165,7 @@ function Results({ answer, run, definition }: { answer: SimulationReadings; run:
                     {result.label !== null ? <span className="simrun__label">{result.label}</span> : null}
                   </span>
                   {said !== '' ? <span className="simrun__inputs tnum">{said}</span> : null}
-                  <span className={result.changed ? 'change-mark change-mark--changed simrun__verdict' : 'badge badge--neutral simrun__verdict'}>
+                  <span className={result.changed ? 'change-mark change-mark--changed simrun__verdict' : 'status status--neutral simrun__verdict'}>
                     <span aria-hidden="true">{result.changed ? '✎' : '='}</span> {result.changed ? t('sim.changed') : t('sim.same')}
                   </span>
                 </th>

@@ -13,7 +13,7 @@ export function ReviewValue({ value, copyable = false }: { value: unknown; copya
   if (isMasked(value)) {
     return (
       <span className="masked">
-        <span className="masked__tag"><span aria-hidden="true">◍</span> {t('review.masked')}</span>
+        <span className="masked__label"><span aria-hidden="true">◍</span> {t('review.masked')}</span>
         {copyable && value !== '***' ? <CopyButton value={String(value)} label={t('review.copyRef')} iconOnly /> : null}
       </span>
     );
