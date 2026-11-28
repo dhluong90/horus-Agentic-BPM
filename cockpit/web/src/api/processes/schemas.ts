@@ -293,6 +293,34 @@ export type CalendarChange = z.infer<typeof calendarChange>;
 export const calendarChangePage = page(calendarChange);
 export const pendingDefinitionApprovalPage = page(pendingDefinitionApproval);
 
+/** What one step did over the hours of the window, from the hourly rollup (getNodeStats, mode=window; PRE-029). */
+const stepWindowFigures = z
+  .object({
+    entered: z.number().int().min(0),
+    completed: z.number().int().min(0),
+    failed: z.number().int().min(0),
+    incidents: z.number().int().min(0),
+    slaBreaches: z.number().int().min(0),
+    meanMs: z.number().int().nullable().optional(),
+    p50Ms: z.number().int().nullable().optional(),
+    p95Ms: z.number().int().nullable().optional(),
+  })
+  .loose();
+export const nodeWindowStats = z
+  .object({
+    definitionKey: z.string(),
+    version: z.number().int().min(1),
+    mode: z.literal('window'),
+    from: z.string(),
+    to: z.string(),
+    asOf: nullableString,
+    lagSeconds: z.number().int().min(0).nullable().optional(),
+    nodes: z.record(z.string(), stepWindowFigures),
+  })
+  .loose();
+export type NodeWindowStats = z.infer<typeof nodeWindowStats>;
+export type StepWindowFigures = z.infer<typeof stepWindowFigures>;
+
 export const instanceSummary = z
   .object({
     id: z.string(),

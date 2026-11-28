@@ -21,7 +21,7 @@ tests:
             exp_annotations:
               summary: "More than 1% of rule evaluations end in an evaluation error"
               description: "Failed evaluations are logged as EVALUATION_ERROR decisions. Check horus_rle_evaluation_errors_total by code."
-              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusRuleEvaluationErrors"
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusruleevaluationerrors"
 
   - interval: 1m
     name: healthy evaluations raise nothing
@@ -49,7 +49,7 @@ tests:
             exp_annotations:
               summary: "The oldest due TIMER job has waited more than 2 minutes"
               description: "No replica claims due jobs fast enough, or none is running. Check the job runner and the replicas."
-              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusDueJobsBackedUp"
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusduejobsbackedup"
 
   - interval: 1m
     name: open incidents fire after 30 minutes
@@ -66,7 +66,7 @@ tests:
             exp_annotations:
               summary: "Process incidents stay open for 30 minutes"
               description: "Open incidents hold instances. Resolve or retry them in the cockpit."
-              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusOpenIncidents"
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusopenincidents"
 
   - interval: 1m
     name: a refused message burst fires
@@ -81,7 +81,7 @@ tests:
             exp_annotations:
               summary: "Messages were refused in the last 10 minutes: no instance waits, or two do"
               description: "Check the correlation key the sender uses, by reason (NOT_CORRELATED or AMBIGUOUS)."
-              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusMessageCorrelationRefusals"
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusmessagecorrelationrefusals"
 
   - interval: 1m
     name: a saturated pool and a lost host fire
@@ -100,7 +100,7 @@ tests:
             exp_annotations:
               summary: "The database connection pool is above 90% or has threads waiting"
               description: "Raise spring.datasource.hikari.maximum-pool-size only after checking the database's connection limit."
-              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusConnectionPoolSaturated"
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusconnectionpoolsaturated"
       - eval_time: 5m
         alertname: HorusHostDown
         exp_alerts:
@@ -108,4 +108,4 @@ tests:
             exp_annotations:
               summary: "Prometheus cannot scrape a Horus host"
               description: "The host is down or its management port is unreachable."
-              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#HorusHostDown"
+              runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horushostdown"
