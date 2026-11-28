@@ -261,6 +261,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-383 | `PRE_383_*` in `RefusalsLiftedTest` and `ConformanceSuiteTest` | A compensation activity may be any task type or a call activity: an operator does the undo through an incident; unused content is refused | M3 | `TR-STD-04` | Done (#632) |
 | PRE-384 | `PRE_384_*` in `RefusalsLiftedTest`, `ConformanceSuiteTest` and `DataStoreAndGatewayStartPostgresIT` | A receive task with `instantiate="true"` starts the process on the first message | M3 | `TR-STD-04` | Done (#632) |
 | PRE-385 | `PRE_385_*` in `RefusalsLiftedTest` | A service task names its handler with `implementation="urn:horus-bpm:handler:<name>"` | M3 | `TR-STD-16` | Done (#632) |
+| PRE-386 | `PRE_386_*` in `ModellerFileReadingTest`; `XmlHardeningTest` | A file may declare ISO-8859-n, windows-125n or US-ASCII | M3 | `TR-STD-04` | Done |
+| PRE-387 | `PRE_387_*` in `ModellerFileReadingTest` | A process id that is not a key, an unnamed message and an id-less lane set are read | M3 | `TR-STD-04` | Done |
+| PRE-388 | `PRE_388_*` in `ModellerFileReadingTest` | A process that does not say `isExecutable` is executable | M3 | `TR-STD-04` | Done |
+| PRE-389 | `PRE_389_*` in `ModellerFileReadingTest` | An import and an item definition are ignored with a warning | M3 | `TR-STD-04` | Done |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

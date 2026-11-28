@@ -8,7 +8,7 @@ This guide shows how to import a BPMN 2.0 file into the Process Engine, which el
 |---|---|
 | The example host with both engines, running on the `dev` profile | Follow [Run locally](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/examples/rule-and-process/README.md#run-locally). The log shows `Process definition card-fee-review v1 ACTIVE for tenant bank-a` |
 | A user with `processes:deploy` | On the example host, `lan` with the password in `HORUS_DEMO_PASSWORD` |
-| A `.bpmn` file, UTF-8, at most 1 MB | `file my-process.bpmn` says `UTF-8` or `ASCII`; `wc -c < my-process.bpmn` prints at most `1048576` |
+| A `.bpmn` file, UTF-8 or the encoding its XML declaration names (US-ASCII, ISO-8859-n, windows-125n), at most 1 MB | `file my-process.bpmn` names the encoding; `wc -c < my-process.bpmn` prints at most `1048576` |
 
 The commands below run from the repository root and use the demo password `demo-pass`.
 
@@ -44,7 +44,7 @@ This file is the one the host imported at start-up, so the engine returns versio
 
 | Field | Meaning |
 |---|---|
-| `key` | The `id` of the `process` element. It must be kebab-case, for example `card-fee-review` |
+| `key` | The `id` of the `process` element. Write it kebab-case, for example `card-fee-review`. An id that is not (`Loan_Review`, `_3d1ef204-...`) is mapped to one (`loan-review`, `p-3d1ef204-...`) and the export writes your id back; two ids that map to one key are `PROCESS_ID_COLLISION` |
 | `version` | The version number of this definition |
 | `status` | `ACTIVE` on `dev` with `horus.bpm.processes.definitions.auto-approve: true`; `DRAFT` everywhere else |
 | `sourceFormat` | `BPMN_XML`. The engine keeps the file as received and runs each version from it |
@@ -360,6 +360,8 @@ Every boundary event, sub-process, transaction, loop and multi-instance marker t
 | `receiveTask` with `instantiate="true"` | The receive task stands for the message start event: no flow in, the first message of its `messageRef` starts the process, the key becomes the business key and a repeat of the key returns the same instance | Supported |
 | `implementation="urn:horus-bpm:handler:<name>"` on a service task | The same as `horus:handler="<name>"`; the export writes `horus:handler`. Two different names are `IMPLEMENTATION_HANDLER_CONFLICT` | Supported |
 
+A modeller's `import` and `itemDefinition` do not refuse a file: they are listed as warnings (`BPMN_IMPORT_IGNORED`, `ITEM_DEFINITION_IGNORED`), kept in the stored source and not used to run a step.
+
 **Refused with `BPMN_UNSUPPORTED_ELEMENT` (`422`, listed in `unsupportedElements`)**
 
 | File has | Condition | Status |
@@ -406,7 +408,7 @@ A file whose root element is in a CMMN namespace, such as `http://www.omg.org/sp
 | Problem code | Fix |
 |---|---|
 | `KEY_INVALID` | Make the `process` id kebab-case, for example `card-fee-review` |
-| `NOT_EXECUTABLE` | Set `isExecutable="true"` on the process |
+| `NOT_EXECUTABLE` | The process says `isExecutable="false"`. Remove the attribute or set it to `true` (a process that does not say it is executable) |
 | `HANDLER_MISSING` | Add `horus:handler` to the `serviceTask` |
 | `SCRIPT_MISSING`, `SCRIPT_INVALID` | Give the `scriptTask` a `<bpmn:script>` with one valid expression of at most 1,000 characters; the message names the position |
 | `RESULT_VARIABLE_INVALID` | Name the `scriptTask`'s `horus:resultVariable` with letters, digits and `_` |
