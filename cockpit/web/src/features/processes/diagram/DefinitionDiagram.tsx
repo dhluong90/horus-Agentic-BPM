@@ -24,7 +24,7 @@ import {
 } from '../model/layout';
 import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
-import { badgeBox, drawingBounds, type Box } from '../model/bounds';
+import { badgeBox, drawingBounds, LABEL_CHAR, type Box } from '../model/bounds';
 import { placeCollaboration, POOL_BAND, LANE_BAND, type CollaborationDrawing } from '../model/collaborationLayout';
 import { attachPoint } from '../model/notes';
 import { Minimap, type View } from './Minimap';
