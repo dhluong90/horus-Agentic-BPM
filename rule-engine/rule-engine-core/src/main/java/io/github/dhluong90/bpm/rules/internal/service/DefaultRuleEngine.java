@@ -81,6 +81,8 @@ public final class DefaultRuleEngine implements RuleEngine {
 
     /** {@code error_code} of a decision refused because its tenant has no masking key. */
     static final String MASKING_KEY_MISSING = "MASKING_KEY_MISSING";
+    /** A masking key id first seen with other key bytes (TR-SEC-10, #340). */
+    static final String MASKING_KEY_MISMATCH = "MASKING_KEY_MISMATCH";
 
     /** {@code error_code} of a decision refused because an output reads an input that is masked for the tenant. */
     static final String MASKED_INPUT_IN_OUTPUT = "MASKED_INPUT_IN_OUTPUT";
@@ -97,6 +99,7 @@ public final class DefaultRuleEngine implements RuleEngine {
     private final EngineMeters meters;
     private final AtomicBoolean grantOpened = new AtomicBoolean();
     private final HistoryComparisons comparisons;
+    private final MaskingKeyFirstUse maskingKeys;
 
     /**
      * Creates the engine with a selection cache of its own.
@@ -132,6 +135,7 @@ public final class DefaultRuleEngine implements RuleEngine {
         this.querySettings = Objects.requireNonNull(querySettings, "querySettings must not be null");
         this.meters = Objects.requireNonNull(meters, "meters must not be null");
         this.comparisons = new HistoryComparisons(context, store, log, querySettings, this::validated);
+        this.maskingKeys = new MaskingKeyFirstUse(context.masking(), store, context.transactions(), context.clock());
     }
 
     /** @return true the first time only: at most one grant of the tenant-scoped entry point per engine (#336) */
@@ -879,6 +883,21 @@ public final class DefaultRuleEngine implements RuleEngine {
                     + " for this tenant, so the inputs of " + version.ruleSet() + " cannot be logged; set "
                     + EngineDefaults.MASKING_KEY_PROPERTY);
         }
+        if (key != null && rules.inputs().stream().anyMatch(clause -> clause.masked(maskByDefault))) {
+            // TR-SEC-10 (#340): the first use of a key in this process is checked against what was first recorded
+            // under its id, so a wrong secret restored under a known id never writes tokens no search finds.
+            String mismatched = maskingKeys.mismatchedKeyId(tenant, key);
+            if (mismatched != null) {
+                // The log names the tenant, rule set and key id; the check values are key-derived and stay out of it.
+                System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.ERROR,
+                        "Masking key id " + mismatched + " of tenant " + tenant + " does not match the key first"
+                                + " recorded under that id (check values withheld); the decision on "
+                                + version.ruleSet() + " is refused");
+                // The caller gets a code and the rule set, nothing derived from a key.
+                return refuse(tenant, caller, onBehalfOf, request, version, now, at, MASKING_KEY_MISMATCH,
+                        maskingKeyMismatchDetail(version.ruleSet()));
+            }
+        }
         String echoed = rules.inputs().stream()
                 .filter(clause -> clause.masked(maskByDefault) && rules.inputsInOutputs().contains(clause.name()))
                 .map(clause -> clause.name()).findFirst().orElse(null);
@@ -1052,6 +1071,18 @@ public final class DefaultRuleEngine implements RuleEngine {
             }
         }
         return masked;
+    }
+
+    /**
+     * Returns the text a caller gets when a masking key does not match the key first recorded under its id: the code
+     * and the rule set, nothing derived from a key (TR-SEC-10).
+     *
+     * @param ruleSet the rule set whose inputs cannot be logged
+     * @return the detail of the refusal
+     */
+    public static String maskingKeyMismatchDetail(String ruleSet) {
+        return MASKING_KEY_MISMATCH + ": the masking key in use does not match the key first recorded for it, so the"
+                + " inputs of " + ruleSet + " cannot be logged";
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {

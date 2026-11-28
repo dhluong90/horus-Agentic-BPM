@@ -228,7 +228,7 @@ class RuleEngineOnlyHostIT {
 
     private HttpResponse<String> get(String path) throws Exception {
         return HttpClient.newHttpClient().send(
-                HttpRequest.newBuilder(URI.create("http://localhost:" + environment.getProperty("local.server.port")
+                HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + environment.getProperty("local.server.port")
                         + path)).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
     }

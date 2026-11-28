@@ -281,7 +281,7 @@ class RuleAndProcessIT {
     }
 
     private HttpResponse<String> sendWithKey(String user, String path, String body, String key) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .header("Idempotency-Key", key).POST(HttpRequest.BodyPublishers.ofString(body)).build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -425,7 +425,7 @@ class RuleAndProcessIT {
     }
 
     private HttpResponse<String> send(String user, String path, String body, String ifMatch) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(body));
         // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
@@ -441,7 +441,7 @@ class RuleAndProcessIT {
     }
 
     private HttpResponse<String> claim(String user, String taskId, String ifMatch, int expected) throws Exception {
-        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port
                         + "/api/bpm/processes/v1/tasks/" + taskId + ":claim"))
                 .header("Authorization", basic(user)).header("If-Match", ifMatch)
                 .header("Idempotency-Key", "it-claim-" + java.util.UUID.randomUUID())
@@ -451,7 +451,7 @@ class RuleAndProcessIT {
     }
 
     private JsonNode get(String user, String path) throws Exception {
-        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).GET().build(), HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
         return JSON.readTree(response.body());
