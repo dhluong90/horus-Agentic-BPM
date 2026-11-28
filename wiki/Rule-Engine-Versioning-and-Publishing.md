@@ -62,6 +62,20 @@ effectiveFrom: 2027-01-01T00:00:00+07:00
 
 The date is stored with the version, not in its content: it is frozen at request-publish and shown to the approver, but it is not part of the content hash and is not exported, so the same rules scheduled for different dates in two environments keep one hash. After approval the version is published but not yet effective. Evaluation selects the highest approved version whose `effectiveFrom` is at or before the decision's clock, so the change takes effect at that instant on every replica without a wake-up. Selection does not read the status, and a version approved later with an earlier date wins from its own date (ADR-0025). The engine only records the change of status: a sweep every `lifecycle.sweep-interval` (1 minute by default) retires the superseded version once and emits `rules.version.retired` with reason `SUPERSEDED`. A decision made at 23:59 on 31 Dec 2026 logs version 2; one made at 00:00 on 1 Jan 2027 logs version 3.
 
+The approved date is protected as well. Approval writes a seal over the date, the content hash, the approver and the approval time, and the request and approval rows of the history record the date and hash. If the date of a published version is changed directly in the database, evaluation refuses that version (an `EVALUATION_ERROR` naming the failed integrity check, one decision row and an alert) and the other versions keep serving. The check runs when a version is loaded, so a replica that already holds it in its cache serves it until the cache epoch moves; tampering is found on a cold load. A seal is a plain hash by default, which stops a casual edit but not someone who also recomputes it. An approved version without a seal is always refused: versions approved before schema `V2` carry the marker `legacy:pre-seal`, written once by the migration, and clearing a seal does not turn a version into one of those.
+
+### Seal key and rotation
+
+A host that must also resist a database administrator registers an `ApprovalSealKey` bean. Each key has an id and at least 32 bytes held outside the database, and the seal becomes `hmac-sha256:<keyId>:<hex>`. To rotate the key:
+
+1. Make the new key `current()` and list the old key in `previous()`. Every approved version still verifies, so nothing is refused.
+2. Re-seal each approved version, published or retired, with `VersionService.reseal(ruleSet, version, options)`. A second approver does it: not the approver, author or requester of that version. The old seal must verify first, so a version whose date was changed is refused with `SEAL_MISMATCH` and is not blessed. Each re-seal adds one `RESEALED` entry to the history.
+3. When `SELECT DISTINCT split_part(approval_seal, ':', 2) FROM rle_version` no longer lists the old id, remove the old key from `previous()`.
+
+What the database cannot stop: the check constraint and the trigger that guard the `legacy:pre-seal` marker stop mistakes and casual edits, but a database administrator can drop them, or change the date of a version that already carries the marker, which has nothing to verify. Only keyed seals resist that, so use a key in production and re-seal the marked versions.
+
+To switch a key on after versions were approved, return `acceptUnkeyedSeals() = true` while you re-seal, then set it back to false. While the window is open the engine logs a WARN at start-up and for each version it serves on an unkeyed seal (never the seal value) and counts them in the `horus.rle.seal.unkeyed.accepted` meter; with a key set and the window closed, plain seals and the pre-`V2` marker are refused.
+
 ## Prove a past decision: clock, pin and replay
 
 Every decision row records the version it used and its clock, the instant it reasoned about. With them an auditor or a complaint handler can show months later what a customer was charged, after any number of newer versions.

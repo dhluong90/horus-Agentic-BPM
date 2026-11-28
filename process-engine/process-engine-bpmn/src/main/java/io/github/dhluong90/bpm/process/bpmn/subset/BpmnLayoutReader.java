@@ -64,7 +64,7 @@ public final class BpmnLayoutReader {
         }
         Map<String, BigDecimal[]> boxes = new LinkedHashMap<>();
         Map<String, List<BigDecimal[]>> edges = new LinkedHashMap<>();
-        String text = XmlHardening.utf8(source);
+        String text = XmlHardening.decode(source);
         XMLInputFactory factory = XmlHardening.newInputFactory(limits);
         try {
             XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));

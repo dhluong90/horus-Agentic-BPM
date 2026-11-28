@@ -172,7 +172,7 @@ final class TestEngine {
                 tx, new JdbcCalendarStore(ds), publisher, b.calendarApproval, EngineDefaults.IDEMPOTENCY_RETENTION,
                 EngineDefaults.MAX_PAGE_SIZE, b.strictApprovalHashes);
         this.strictApprovalHashes = b.strictApprovalHashes;
-        JdbcProcessStore processStore = new JdbcProcessStore(ds);
+        JdbcProcessStore processStore = new JdbcProcessStore(ds, b.idempotencyLockTimeout);
         this.services = new ProcessServices(() -> id.tenant, id, b.clock, tx, processStore,
                 Map.of(SourceFormat.BPMN_XML, reader),
                 Map.of(SourceFormat.BPMN_XML, new io.github.dhluong90.bpm.process.bpmn.subset.SubsetBpmnWriter()::write),
@@ -326,6 +326,7 @@ final class TestEngine {
         private int batchSize = 32;
         private Duration retryBackoff = Duration.ofSeconds(10);
         private boolean autoApprove = true;
+        private Duration idempotencyLockTimeout = JdbcProcessStore.DEFAULT_IDEMPOTENCY_LOCK_TIMEOUT;
         private boolean makerChecker = true;
         private boolean requireContentHash = true;
         private boolean strictApprovalHashes;
@@ -399,6 +400,12 @@ final class TestEngine {
 
         Builder retryBackoff(Duration value) {
             retryBackoff = value;
+            return this;
+        }
+
+        /** The longest a request waits on an idempotency key another request holds (#172). */
+        Builder idempotencyLockTimeout(Duration value) {
+            idempotencyLockTimeout = value;
             return this;
         }
 

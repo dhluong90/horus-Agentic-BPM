@@ -11,7 +11,7 @@ import { formatDateTime } from '../rules/model/dates';
 import { useDecisionSearch, type DecisionSearchKey } from './api/useAudit';
 import { AuditError, LockIcon, statusOf } from './components/AuditParts';
 import { MonthSelect } from './components/MonthSelect';
-import { OutcomeBadge } from './components/OutcomeBadge';
+import { OutcomeMark } from './components/OutcomeMark';
 import { rememberDecisionQuery } from './lastQuery';
 import { monthLabel, monthOf, shortId } from './model/references';
 
@@ -166,7 +166,7 @@ function Results({ search, results, decisions }: { search: DecisionSearchKey | u
                 </a>
               </td>
               <td>{decision.ruleSet} <span className="muted">· {t('rules.version', { version: String(decision.version) })}</span></td>
-              <td><OutcomeBadge outcome={knownOutcome(decision.outcome, decision.matchedRuleIds)} matched={decision.matchedRuleIds} /></td>
+              <td><OutcomeMark outcome={knownOutcome(decision.outcome, decision.matchedRuleIds)} matched={decision.matchedRuleIds} /></td>
               <td className="ref-text">{decision.correlationId ?? <span className="muted">—</span>}</td>
               <td className="ref-text">{shortId(decision.decisionId)}</td>
               <td className="qtable__chevron" aria-hidden="true">›</td>

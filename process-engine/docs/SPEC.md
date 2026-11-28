@@ -568,6 +568,16 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Example:** `formLink https://evil.example/t/{taskId} -> 422 FORM_LINK_NOT_ALLOWED; with the origin listed -> 201`.
 - **Test ID:** `PRE_219_an_unregistered_form_a_bad_schema_and_bad_hints_are_each_refused_with_their_code`, `PRE_219_a_task_declares_at_most_one_form_and_a_reference_stays_inside_the_form_folder`, `PRE_219_the_same_link_is_accepted_once_its_origin_is_listed`, `PRE_219_the_form_is_part_of_the_definition_hash_so_changing_it_needs_a_new_approval`, `PRE_219_request_approval_checks_the_registry_again_so_a_form_removed_since_import_blocks_it` (`TaskFormTest`), `PRE_219_a_link_is_relative_or_on_a_listed_origin_and_nothing_else`, `PRE_219_a_schema_outside_the_task_form_subset_is_named_by_path_and_rule` (`TaskFormsTest`), `PRE_219_a_schema_path_is_read_as_the_schema_without_hints`, `PRE_219_a_form_key_is_read_from_its_envelope_with_the_hints`, `PRE_219_a_name_outside_the_folder_or_not_plain_is_not_registered`, `PRE_219_the_settings_accept_relative_origins_and_a_relative_folder_only` (`ClasspathFormRegistryTest`)
 
+### PRE-393 Form hints carry option labels with consequences, unit suffixes and money formats
+- **Traces to:** `TR-UI-02`, `TR-STD-03`, #639
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan approval form with `decision` (`APPROVE`, `REJECT`), `termMonths`, `amount` and `currency`, and hints `options.decision.APPROVE = {label: {en: "Approve", vi: "Phê duyệt"}, consequence: {en: "The loan is disbursed.", vi: "Khoản vay được giải ngân."}}`, `units.termMonths = {en: "months", vi: "tháng"}`, `formats.amount = {currencyFrom: "currency", grouping: true}`.
+- **When:** The definition is imported; then variants are imported with an option for `MAYBE` (not in the enum), an option on a non-enum field, a unit for an undeclared field, a lower-case `currency`, a well-formed but unassigned code such as `ZZZ`, both `currency` and `currencyFrom`, a `currencyFrom` that names its own field or a masked field, and a member `palette`.
+- **Then:** The first is accepted and the form is returned with the hints as written; each variant is `422 VALIDATION_FAILED` with one `FORM_HINTS_INVALID` problem (the unknown member named). Completion validation is unchanged: the value sent is `APPROVE`, never its label. The hints are part of the form in the definition hash, as `labels` are.
+- **Example:** `options.decision.APPROVE.label.vi -> "Phê duyệt"; amount 250000000 + currency VND -> shown "250.000.000 ₫" in vi`.
+- **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named`, `PRE_393_a_currency_must_be_a_real_iso_4217_code`, `PRE_393_currency_from_must_name_another_field_that_is_not_masked` (`TaskFormsTest`)
+
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
 - **Milestone:** M2
@@ -1038,7 +1048,7 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Then:**
   - The answer is `422 BPMN_UNSUPPORTED_ELEMENT` with 4 entries in document order in `unsupportedElements`, each `{ element, elementId, line, stage, message }` (PD-141: the field and the item shape are the Rule Engine's, `RLE-061`; `problems` stays for `VALIDATION_FAILED` and `GUARDRAIL_CONTRACT_INVALID`). The XPath entry is the unsupported condition language, with the element `conditionExpression`. `message` is plain English that may change; the element and the stage are the contract.
   - `camunda:class` is a foreign extension and is not refused. It is listed under `warnings` as `FOREIGN_EXTENSION_IGNORED` with its namespace and line, and the stored source keeps it byte for byte. Warnings keep the item fields of a problem (`code`, `message`, `element`, `elementId`, `line`).
-  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` (`S2`), `isInterrupting="false"` (`S1`), `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` (`not planned`).
+  - An attribute that changes how a step runs is refused by name: `isForCompensation="true"` on a sub-process, transaction or ad-hoc sub-process, `isInterrupting="false"` on an element that is neither a start nor a boundary event, `startQuantity` or `completionQuantity` other than 1 and `implementation` other than `##unspecified` or `urn:horus-bpm:handler:<name>` on a service task (`not planned`). `PRE-382` to `PRE-385` lift the other refusals of this kind.
   - At most 100 entries are returned, with `violationsTruncated: true` beyond that.
   - Ids are printed safely: control characters are removed and ids are cut at 200 characters.
   - The stage is one of `S1`, `S2`, `S3`, `not planned` from the coverage table in section 6.1 of the standards page, or `S0` for an element the table lists for the current stage that this release has not finished (call activity, transaction, an intermediate throw event with no event definition). The stage of an intermediate throw event comes from its event definition: a `signalEventDefinition` throw is `S2` (a message throw is supported, `PRE-235`), an `escalationEventDefinition` throw `S1`, a `compensateEventDefinition` throw inside a `transaction` block is supported (`PRE-076`). No stage label names a sprint or a date.
@@ -2788,3 +2798,146 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** `escalated` is reached, the task stays open and the instance `RUNNING`; completing the task completes the instance.
 - **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
 - **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)
+
+### PRE-390 The history of a completed task records what was submitted, masked as the form says
+- **Traces to:** `TR-SEC-05`, `TR-AUD-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The credit review task `approve` has a form whose field `idNumber` is `mask: true`; the officer `an` has claimed it.
+- **When:** `an` completes it with `decision = REJECT`, `reason = income not verified` and `idNumber = 079012345678`, and the case's variables change afterwards.
+- **Then:** The `TASK_COMPLETED` row, written in the completing transaction, holds `submission` with the validated values and `idNumber` as the marker `{"masked": true}`, so an audit tells a masked value from the text `***`; the plain id number is in no history row. A submitted field the form does not declare (`note`) is not stored: its path only is in `unrecordedFields`. `GET /instances/{id}/activities` returns `submission` on that entry and it does not change when the variables change. A task without a form, a link task and a task completed before this was recorded have no `submission`. The kernel only copies the submission, so replaying a command gives the same state and the same hash as before; no migration is needed because `details` is JSONB.
+- **Example:** `submission = {decision: REJECT, reason: income not verified, idNumber: {masked: true}}`, `unrecordedFields = [note]`.
+- **Test ID:** `PRE_390_the_submission_is_recorded_masked_and_later_variable_changes_do_not_alter_it`, `PRE_390_a_field_the_form_does_not_declare_is_named_but_never_stored`, `PRE_390_a_task_without_a_form_records_no_submission` (`TaskFormTest`), `PRE_027_activities_body_matches_the_contract_and_a_matching_etag_gets_304` (`ProcessRestContractTest`)
+
+### PRE-377 Each undo step that finishes raises an event naming the handler, the step it undid and the outcome
+- **Traces to:** `TR-COMP-01`, `PRE-073`, `PRE-085`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The fund transfer of `PRE-073`: `hold-funds` (undone by `release-hold`), `debit-source` (undone by `credit-back`) and `credit-target`, which fails with `ACCOUNT_CLOSED`. `25,000,000 VND` is moved from `0011-223344`.
+- **When:** Both undo steps complete.
+- **Then:**
+  - `processes.compensation.step-completed.v1` is published twice, newest first: first `nodeId` `debit-source` with `handler` `credit-back`, then `nodeId` `hold-funds` with `handler` `release-hold`; each has `outcome` `COMPLETED`, the instance id, the saga `scopeId` and the undo `attemptId`.
+  - Each event is published in the transaction that writes the matching `COMPENSATION_STEP_COMPLETED` history entry, and carries no variable or output. An undo an approver marks done by hand has `outcome` `COMPLETED_MANUALLY` and no `attemptId`.
+  - A failed undo step publishes no such event.
+- **Example:** `credit-back undoes debit-source -> step-completed(nodeId=debit-source, handler=credit-back, COMPLETED)`.
+- **Test ID:** `PRE_377_each_finished_undo_step_raises_an_event_newest_first` (`SagaCompensationTest`)
+
+### PRE-378 A duplicate of a request that is still running waits at most the lock timeout, is then refused as IDEMPOTENCY_IN_FLIGHT, and never runs the work twice
+- **Traces to:** `TR-IDEM-01`, ADR-0006, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a the payment screening `PAY-2027-0412` was started with `Idempotency-Key: PAY-2027-0412` and its transaction is still open; `horus.bpm.processes.idempotency.lock-timeout` is `300ms` (the default is `2s`).
+- **When:** The client sends the same request again, then once more after the first has committed.
+- **Then:** The second request gives up within the lock timeout with `409 IDEMPOTENCY_IN_FLIGHT` and `Retry-After: 1`; it starts nothing and the screening has run once. The timeout covers the claim statement only, so the work after the claim keeps the database's own lock timeout. The third request returns the first answer, the same instance id.
+- **Example:** `POST /instances` with `Idempotency-Key: PAY-2027-0412` while the first runs -> `409 IDEMPOTENCY_IN_FLIGHT`; after it commits -> `200` with the first instance
+- **Test ID:** `PRE_378_a_duplicate_of_a_request_still_running_is_refused_within_the_lock_timeout_and_a_later_retry_replays` (`IdempotencyWaitPostgresIT`)
+
+### PRE-379 A duplicate that waits for the first request within the lock timeout returns the same result
+- **Traces to:** `TR-IDEM-01`, ADR-0006, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The screening of PRE-378 is running with `Idempotency-Key: PAY-2027-0413` and the lock timeout is `2s`; the same request arrives while it runs.
+- **When:** The first request commits 400 ms later.
+- **Then:** The duplicate was waiting, not refused, and now returns the instance the first created; one instance exists and the screening ran once.
+- **Example:** first commits after 0.4 s -> both answers carry instance `01J...` of `PAY-2027-0413`
+- **Test ID:** `PRE_379_a_duplicate_that_waits_for_the_first_within_the_timeout_returns_the_same_result_and_runs_nothing` (`IdempotencyWaitPostgresIT`)
+
+### PRE-380 A version is compiled only when its stored hashes equal the hashes recorded at its approval
+- **Traces to:** `TR-SEC-04`, ADR-0026 decision 4, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `payment-screening` v1 is approved. Someone who can update `pre_definition` replaces the source and rewrites `source_hash` and `definition_hash` of the row so that they agree with the new source.
+- **When:** Anyone starts, exports or diffs that version.
+- **Then:** The engine refuses it with `DEFINITION_INTEGRITY_FAILED`, "the stored hashes differ from the hashes approved", because `pre_definition_approval` holds the hashes written when the version was approved; nothing starts. A version with an approver and no approval record is refused the same way. The record is written in the transaction of the approval (and of a dev auto-approval) and the table refuses `UPDATE`, `DELETE` and `TRUNCATE`; versions approved before V2 are recorded with the hashes their row held when V2 ran. A writer who can also disable the table's triggers is outside this control.
+- **Example:** source `screen-payment` swapped to `skip-screening` with matching hashes -> `DEFINITION_INTEGRITY_FAILED`
+- **Test ID:** `PRE_380_a_version_whose_source_and_both_hashes_were_rewritten_is_refused_because_the_approval_record_disagrees` (`IdempotencyWaitPostgresIT`)
+
+### PRE-381 The approval record is written with the approval, cannot be changed, and the lock timeout may be lowered only
+- **Traces to:** `TR-SEC-04`, `TR-OPS-01`, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** An approved version at bank-a; `horus.bpm.processes.idempotency.lock-timeout` set by the host.
+- **When:** A row of `pre_definition_approval` is updated, deleted or truncated; the timeout is set to `5s` or `0s`.
+- **Then:** The row exists with the hashes of the version, and each change fails with "append-only". Start-up fails naming `idempotency.lock-timeout` for a value outside 1 millisecond to 2 seconds.
+- **Example:** `UPDATE pre_definition_approval SET source_hash = ...` -> `55000 append-only`; `lock-timeout=5s` -> start-up refused
+- **Test IDs:** `PRE_381_the_approval_record_is_written_with_the_approval_and_cannot_be_changed` (`IdempotencyWaitPostgresIT`), `PRE_381_the_idempotency_lock_timeout_defaults_to_2_seconds_and_may_be_lowered_only` (`IdempotencyLockTimeoutSettingsTest`)
+
+### PRE-382 A start event with isInterrupting="false" is read in every scope, and a boundary event may say it as cancelActivity="false"
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan review whose process and whose embedded sub-process `assess` each start on `<startEvent isInterrupting="false"/>`; a user task `approve` with a timer boundary event that says `isInterrupting="false"` instead of `cancelActivity="false"`.
+- **When:** The files are read, compiled, run and exported.
+- **Then:** The attribute is ignored outside an event sub-process, as BPMN says, because a process or sub-process has no other work to interrupt; the instance runs and completes as it does with a plain start. The canonical form keeps `interrupting: false`, so the hash covers it, and the export writes the attribute back. The import result carries the warning `INTERRUPTING_HAS_NO_EFFECT` naming the start event, so the user knows the attribute does nothing there; inside an event sub-process there is no warning. On a boundary event it means `cancelActivity="false"`; `isInterrupting="false"` with `cancelActivity="true"` is `422 VALIDATION_FAILED`, `BOUNDARY_INTERRUPTING_CONFLICT`. On any other element the attribute stays refused (`BPMN_UNSUPPORTED_ELEMENT`, `not planned`) because BPMN defines it on none. An event sub-process start keeps its behaviour (`PRE-320` to `PRE-326`).
+- **Example:** `<startEvent id="start" isInterrupting="false"/>` in process `loan-review-nonint` -> instance `COMPLETED`, import warning `INTERRUPTING_HAS_NO_EFFECT` naming `start`; `<task isInterrupting="false"/>` -> refused, element `isInterrupting`.
+- **Test ID:** `PRE_382_a_start_event_that_is_not_interrupting_runs_as_any_start_outside_an_event_sub_process` (`ConformanceSuiteTest`), `PRE_382_isInterrupting_false_on_a_start_event_outside_an_event_sub_process_is_read_and_kept`, `PRE_382_a_boundary_event_may_say_isInterrupting_false_for_cancelActivity_false_but_not_both_ways`, `PRE_382_isInterrupting_false_outside_an_event_sub_process_gives_an_import_warning_naming_the_element`, `PRE_382_isInterrupting_false_inside_an_event_sub_process_gives_no_warning`, `PRE_382_isInterrupting_false_on_an_element_that_is_neither_a_start_nor_a_boundary_event_stays_refused` (`RefusalsLiftedTest`)
+
+### PRE-383 A compensation activity may be a user, manual, script, send, receive, business rule or abstract task or a call activity: an operator does the undo through an incident
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan payout with the service task `disburse` (remote handler `core-banking`), a compensation boundary event on it and an association to the user task `reverse-by-operator` marked `isForCompensation="true"`, with no assignee, result variable or form. A second file gives the same user task `horus:assignee="role:OPS"`.
+- **When:** The disbursement completes with posting `FT26332001`; later the scope is undone.
+- **Then:** The stack holds one entry for `disburse` whose handler is `manual`: the walk raises the `COMPENSATION_MANUAL_REQUIRED` incident that names the step, as `horus:compensate="manual"` does, and an operator resolves it after the reversal, with the existing four-eyes resolution. A manual undo is an incident, never a task: no work item is created, nobody in a role is asked, no result variable is written, and nothing is run (no script, message or child process). Content that only a run would use is therefore refused at import with `422 VALIDATION_FAILED`, `COMPENSATION_ACTIVITY_CONTENT_UNUSED`, which names the element: `horus:assignee`, `horus:resultVariable` and a form on a user task, `calledElement` on a call activity, `messageRef` on a send or receive task and a script on a script task. Creating a real task for the undo is a later feature. A service task as compensation activity still runs its handler. The compensation activity keeps its rules for every type: no sequence flow (`COMPENSATION_ACTIVITY_HAS_FLOW`) and one boundary event that points at it (`COMPENSATION_ACTIVITY_UNATTACHED`, `COMPENSATION_ACTIVITY_MISSING`). The export writes `isForCompensation="true"` on the element and the canonical form keeps `forCompensation`. A sub-process, a transaction, an ad-hoc sub-process or an element that is not an activity stays refused.
+- **Example:** `userTask reverse-by-operator isForCompensation` on `disburse` -> `PushCompensation(disburse, handler "manual")`; `subProcess isForCompensation` -> refused.
+- **Test ID:** `PRE_383_a_user_task_compensation_activity_is_a_manual_undo_on_the_stack` (`ConformanceSuiteTest`), `PRE_383_every_task_type_and_the_call_activity_can_be_a_compensation_activity_and_exports_back`, `PRE_383_a_manual_undo_refuses_the_content_it_would_never_run_with_a_named_code`, `PRE_383_a_sub_process_or_a_gateway_is_not_a_compensation_activity`, `PRE_383_a_compensation_activity_keeps_its_rules_whatever_its_type` (`RefusalsLiftedTest`)
+
+### PRE-384 A receive task with instantiate="true" starts the process on the first matching message
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `loan-intake`: a receive task `receive-application` with `instantiate="true"` for the message `loan-application`, no start event and no flow in, then a review user task.
+- **When:** (a) `loan-application` is correlated for `APP-9001` with the applicant `Tran Thi Mai`, then again for `APP-9001`, then for `APP-9002`. (b) The process is started without a message. (c) A message that no process starts on arrives.
+- **Then:** (a) The first message creates one instance, with the key `APP-9001` as its business key and the payload as its variables; the token starts after the receive task, which never waits (no subscription), and parks at the review. The repeat returns the same instance and starts no second; another key starts another instance. This is the rule of a message start event. (b) `START_TRIGGER_REQUIRED`. (c) The message is not correlated. The compiler refuses a receive task that starts the process when the process has another start event (`START_EVENT_COUNT`), the task has a flow in (`RECEIVE_INSTANTIATE_INCOMING`), it stands in a sub-process or transaction (`RECEIVE_INSTANTIATE_SCOPE`), it names no message (`RECEIVE_INSTANTIATE_MESSAGE`), it has a boundary event (`RECEIVE_INSTANTIATE_BOUNDARY`) or a `horus:correlationKey` (`CORRELATION_KEY_UNEXPECTED`: the instance does not exist yet). `instantiate` on a send task is `INSTANTIATE_ON_SEND_TASK`. The canonical form and the export keep `instantiate`.
+- **Example:** `loan-application`, key `APP-9001` -> `STARTED`, instance waits at `review`; the same key again -> the same instance id.
+- **Test ID:** `PRE_384_a_receive_task_that_instantiates_starts_after_itself_and_waits_for_nothing` (`ConformanceSuiteTest`), `PRE_384_a_receive_task_that_instantiates_starts_the_process_on_the_first_message_and_a_repeat_starts_no_second` (`DataStoreAndGatewayStartPostgresIT`), `PRE_384_a_receive_task_with_instantiate_is_the_start_needs_no_key_and_exports_back`, `PRE_384_a_receive_task_that_starts_the_process_is_refused_with_a_start_a_flow_in_a_key_or_a_scope`, `PRE_384_instantiate_on_a_send_task_is_refused` (`RefusalsLiftedTest`)
+
+### PRE-385 A service task may name its handler with implementation="urn:horus-bpm:handler:<name>"
+- **Traces to:** `TR-STD-16`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A service task `kyc-check` with `implementation="urn:horus-bpm:handler:kyc.check"` and no `horus:handler`.
+- **When:** The file is read and exported, and the same task is written with `horus:handler="kyc.check"`.
+- **Then:** The reader binds the step to the handler `kyc.check` by name, as `horus:handler` does: the canonical form and the hash are equal for the two files, and the export writes `horus:handler` and no `implementation`. Naming the same handler in both is allowed; two different names are `IMPLEMENTATION_HANDLER_CONFLICT`; a name that is not a letter followed by letters, digits, `_`, `.` or `-` (at most 100) is `IMPLEMENTATION_HANDLER_INVALID`. The engine never loads a class or calls a service from this value. `##WebService`, any other URL or URN, and the urn form on a task that is not a service task stay refused (`BPMN_UNSUPPORTED_ELEMENT`, `not planned`).
+- **Example:** `urn:horus-bpm:handler:kyc.check` -> handler `kyc.check`; `##WebService` -> refused, element `implementation`.
+- **Test ID:** `PRE_385_implementation_urn_names_the_handler_and_gives_the_same_definition_as_horus_handler`, `PRE_385_two_different_names_or_an_invalid_name_are_refused`, `PRE_385_every_other_implementation_value_and_the_urn_on_other_tasks_stay_refused` (`RefusalsLiftedTest`)
+
+### PRE-386 A file may declare an encoding other than UTF-8: ISO-8859-n, windows-125n or US-ASCII
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process file whose declaration says `encoding="ISO-8859-1"` and whose task is named `Kiém tra ho so`, written in those bytes; the same with `windows-1252` and a euro sign; UTF-8 bytes under `US-ASCII`; a `UTF-16` declaration.
+- **When:** Each is imported.
+- **Then:** The bytes are decoded once, strictly, in the declared encoding and the parser reads that text, so the stored source and the parsed document never differ: the task name is `Kiém tra ho so`, and the export is UTF-8 with its own declaration. Bytes that are not valid in the declared encoding, an encoding the JVM does not know, UTF-16 and UTF-32 (which hide the markup from the declaration check), and a byte order mark with a non-UTF-8 declaration are refused with `BPMN_UNSAFE_XML`. A file with no declaration is UTF-8 as before.
+- **Example:** `encoding="ISO-8859-1"`, byte `0xE9` -> `é`; `encoding="UTF-16"` -> `422 BPMN_UNSAFE_XML`.
+- **Test ID:** `PRE_386_a_file_in_iso_8859_1_is_read_as_the_text_it_declares_and_exports_as_utf_8`, `PRE_386_windows_1252_and_us_ascii_declarations_are_read_and_a_mismatch_is_refused` (`ModellerFileReadingTest`), `the_declared_encoding_decides_how_the_bytes_are_read`, `an_encoding_that_hides_the_markup_or_does_not_match_the_bytes_is_refused` (`XmlHardeningTest`)
+
+### PRE-387 A process id that is not a key, a message with no name and a lane set with no id are read; the export restores the process id
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process `_3d1ef204-2d4c-4643-8fc5-c319cc032ec0` and a process `Loan_Review`; two processes `Loan_Review` and `loan-review` in one collaboration; messages `Message_1404332496319` and `_9f` with no name; a message `m1` named `Message_9` beside an unnamed `Message_9`; a `laneSet` with no id.
+- **When:** They are imported, and the first is exported.
+- **Then:** The definition key is the id in lower case with every run of other characters as one hyphen, `p-` in front when it would not start with a letter, at most 100 characters: `p-3d1ef204-2d4c-4643-8fc5-c319cc032ec0`, `loan-review`. The same id always gives the same key; a key that is already kebab-case is never changed. The reader keeps the original id with the process, the export writes it back (the process, its participant `processRef`, the diagram plane), and it is not in the canonical form, so the hash is the same. Two ids that map to one key are `422 VALIDATION_FAILED`, `PROCESS_ID_COLLISION`. A message with no `name` takes its id as the name, with other characters as `_` and `m` in front when it would not start with a letter; if another message has that name the file is refused with `MESSAGE_NAME_COLLISION`. The export writes the name it took; message ids are not restored, because the engine writes a message by its name. A lane set or lane with no id gets `laneSet_line<n>` or `lane_line<n>`.
+- **Example:** `_3d1ef204-...` -> key `p-3d1ef204-...`, export `<process id="_3d1ef204-...">`; `Loan_Review` + `loan-review` -> `PROCESS_ID_COLLISION`.
+- **Test ID:** `PRE_387_a_process_id_that_is_not_a_key_is_mapped_deterministically_and_the_export_restores_it`, `PRE_387_two_processes_that_map_to_one_key_are_refused_and_a_key_is_never_changed`, `PRE_387_a_message_with_no_name_takes_its_mapped_id_and_a_lane_set_without_an_id_is_read` (`ModellerFileReadingTest`)
+
+### PRE-388 A process that does not say isExecutable is executable
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A process with no `isExecutable` attribute, and one with `isExecutable="false"`.
+- **When:** Each is imported.
+- **Then:** BPMN leaves the attribute open when it is absent, and a modeller that never writes it is not saying "do not run": the first imports, and `warnings` lists `EXECUTABLE_ASSUMED` so the approver sees that the attribute was assumed. `isExecutable="false"` is the author's word and stays `NOT_EXECUTABLE`; in a collaboration it is a pool kept for display. `horus:resultVariable` on a user task and `horus:correlationKey` on a message wait stay required: a result with no variable would merge into every process variable, and a message with no key could reach any instance.
+- **Example:** `<process id="kyc-review">` -> imports; `isExecutable="false"` -> `NOT_EXECUTABLE`.
+- **Test ID:** `PRE_388_a_process_that_does_not_say_isExecutable_is_executable_and_false_stays_refused` (`ModellerFileReadingTest`)
+
+### PRE-389 An import and an item definition are ignored with a warning
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A file with `<import importType="http://www.w3.org/2001/XMLSchema" location="types.xsd"/>` and `<itemDefinition id="i1" structureRef="string"/>`.
+- **When:** It is imported.
+- **Then:** The file imports and `warnings` lists `BPMN_IMPORT_IGNORED` and `ITEM_DEFINITION_IGNORED`: the engine's variables are typed by their values and it fetches no other file. The stored source keeps both. `startQuantity` and `completionQuantity` of 1 (the default) were already accepted; any other value stays refused (a token carries no quantity).
+- **Example:** `import` -> warning `BPMN_IMPORT_IGNORED`, `201`.
+- **Test ID:** `PRE_389_an_import_and_an_item_definition_are_ignored_with_a_warning_and_not_refused` (`ModellerFileReadingTest`)

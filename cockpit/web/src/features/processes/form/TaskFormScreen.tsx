@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { Task, TaskForm } from '../../../api/processes/schemas';
+import type { ActivityEntry, Task, TaskForm } from '../../../api/processes/schemas';
 import { toHostError } from '../../../api/hostError';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../../components/PageParts';
 import { useI18n, type Locale } from '../../../i18n/I18nProvider';
@@ -9,9 +9,9 @@ import { StatusMark, taskTitle } from '../../tasks/parts';
 import { formatDateTime } from '../../rules/model/dates';
 import { groupWhileTyping } from '../../rules/model/money';
 import { useProcessesSession } from '../api/processesContext';
-import { useClaimTask, useCompleteForm, useTaskForm } from '../api/useProcesses';
+import { useClaimTask, useCompleteForm, useInstanceActivities, useTaskForm } from '../api/useProcesses';
 import { ReviewMeta, useReviewCrumbs } from '../review/ReviewParts';
-import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, recordedRows, type Drafts, type FormField, type Problem } from './model';
+import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, recordedRows, submissionRows, type Drafts, type FormField, type Problem } from './model';
 
 /*
  * A task completed through the form its process declares (CKP-021). The engine owns the form and checks the result;
@@ -103,32 +103,53 @@ function LinkOut({ task, link, title }: { task: Task; link: string; title: strin
   );
 }
 
-/** A completed task: what was submitted, by whom and when, read-only. The values are the engine's, masked fields stay masked. */
+/**
+ * The stored submission of a completed task, from the instance's history: the last `TASK_COMPLETED` of its step, the
+ * one nearest the task's own completion time. Undefined when the engine recorded none (a task completed before #663).
+ */
+function submissionOf(entries: readonly ActivityEntry[], task: Task): ActivityEntry | undefined {
+  const at = task.completedAt == null ? Number.NaN : Date.parse(task.completedAt);
+  const distance = (entry: ActivityEntry) => (Number.isNaN(at) ? 0 : Math.abs(Date.parse(entry.occurredAt) - at));
+  return entries
+    .filter((entry) => entry.type === 'TASK_COMPLETED' && entry.nodeId === task.nodeId && entry.submission !== undefined)
+    .reduce<ActivityEntry | undefined>((best, entry) => (best === undefined || distance(entry) <= distance(best) ? entry : best), undefined);
+}
+
+/** A completed task: the decision as it was recorded, by whom and when, read-only. Masked fields read "Hidden". */
 function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; title: string }) {
   const { t, locale } = useI18n();
   const hostLink = useHostLink();
+  const history = useInstanceActivities(task.instanceId, true);
   const content = form.form;
+  const stored = history.data === undefined ? undefined : submissionOf(history.data.entries, task);
+  const words = useMemo(() => ({ yes: t('review.yes'), no: t('review.no'), when: (iso: string) => formatDateTime(iso, locale) }), [t, locale]);
   const rows = useMemo(() => {
     if (content === undefined) return [];
-    return recordedRows(fieldsOf(content, locale), content.data, locale, { yes: t('review.yes'), no: t('review.no'), when: (iso) => formatDateTime(iso, locale) });
-  }, [content, locale, t]);
+    if (stored?.submission !== undefined) return submissionRows(content, stored.submission, locale, words);
+    return recordedRows(fieldsOf(content, locale), content.data, locale, words);
+  }, [content, stored, locale, words]);
+  if (history.isPending) return <article className="card"><LoadingRows rows={4} /></article>;
+  const recorded = stored?.submission !== undefined;
+  const left = stored?.submission !== undefined ? stored.unrecordedFields ?? [] : [];
   return (
     <article className="card taskform__card taskform__recorded" aria-labelledby="taskform-recorded">
-      <h2 id="taskform-recorded" className="card__title">{t('form.recorded')}</h2>
+      <h2 id="taskform-recorded" className="card__title">{t(recorded ? 'form.decision' : 'form.recorded')}</h2>
       <p className="taskform__signed">{t('form.completedAt', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
+      {recorded ? null : <p className="muted taskform__note">{t('form.noSubmission')}</p>}
       {rows.length === 0 ? <p className="muted">{t('form.noFields')}</p> : (
         <dl className="taskform__grid taskform__values" aria-label={title}>
           {rows.map((row) => (
             <div key={row.name} className={row.wide ? 'taskform__value taskform__field--wide' : 'taskform__value'}>
               <dt className="field__label">{row.label}</dt>
               <dd>
-                {row.masked ? <span className="masked__tag"><span aria-hidden="true">◍</span> {t('form.masked')}</span>
-                  : row.text !== undefined ? row.text : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t('form.notRecorded')}</span></span>}
+                {row.masked ? <span className="masked__tag"><span aria-hidden="true">◍</span> {t(recorded ? 'form.hidden' : 'form.masked')}</span>
+                  : row.text !== undefined ? row.text : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t(recorded ? 'form.notSubmitted' : 'form.notRecorded')}</span></span>}
               </dd>
             </div>
           ))}
         </dl>
       )}
+      {left.length > 0 ? <p className="muted taskform__note">{t('form.unrecorded', { fields: left.join(', ') })}</p> : null}
       <a className="link-action" href={hostLink({ name: 'tasks', view: 'mine' })}>{t('form.dock.back')} <span aria-hidden="true">→</span></a>
     </article>
   );
@@ -156,7 +177,7 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
   const built = useMemo(() => build(fields, drafts, data, locale, replaced), [fields, drafts, data, locale, replaced]);
   // What each choice leads to, beside the action: the chosen one stands out.
   const effectsOf = fields.flatMap((field) => Object.entries(field.effects).map(([code, text]) => ({
-    code, text, label: `${field.optionLabels[code] ?? code}:`, chosen: drafts[field.name] === code,
+    code, text, label: `${optionText(field, code)}:`, chosen: drafts[field.name] === code,
   })));
   const refused = complete.error === null ? undefined : toHostError(complete.error);
   const api = apiErrorsOf(refused?.kind === 'problem' ? refused.members?.['errors'] : undefined);
@@ -298,7 +319,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
           {options.map((option) => (
             <label key={option} className="taskform__option">
               <input type="radio" name={id} value={option} checked={value === option} aria-invalid={message !== undefined} onChange={() => { onChange(field.name, option); }} />
-              <span>{kind.kind === 'yesno' ? t(option === 'true' ? 'review.yes' : 'review.no') : field.optionLabels[option] ?? option}</span>
+              <span>{kind.kind === 'yesno' ? t(option === 'true' ? 'review.yes' : 'review.no') : optionText(field, option)}</span>
             </label>
           ))}
         </div>
@@ -309,7 +330,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
     control = (
       <select {...common} className="field__input" value={value} onChange={(e) => { onChange(field.name, e.target.value); }}>
         <option value="">{t('form.choose')}</option>
-        {kind.options.map((option) => <option key={option} value={option}>{field.optionLabels[option] ?? option}</option>)}
+        {kind.options.map((option) => <option key={option} value={option}>{optionText(field, option)}</option>)}
       </select>
     );
   } else if (kind.kind === 'text' && kind.multiline) {

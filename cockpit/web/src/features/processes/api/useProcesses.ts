@@ -65,7 +65,15 @@ export function useDefinitionGraph(key: string, version: number) {
   const keys = useKeys();
   return useQuery({
     queryKey: keys.graph(key, version),
-    queryFn: async ({ signal }) => readBpmnGraph(await client.exportBpmn(key, version, signal)),
+    queryFn: async ({ signal }) => {
+      // The stored layout is a nicety: a version without one, or a read that fails, is drawn with automatic layout.
+      const [xml, stored] = await Promise.all([client.exportBpmn(key, version, signal), client.getLayout(key, version, signal).catch((error: unknown) => {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error;
+        return undefined;
+      })]);
+      const graph = readBpmnGraph(xml);
+      return stored === undefined ? graph : { ...graph, stored };
+    },
     staleTime: Infinity,
   });
 }

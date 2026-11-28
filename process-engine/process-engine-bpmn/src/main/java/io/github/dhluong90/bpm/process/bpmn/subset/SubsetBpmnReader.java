@@ -91,6 +91,7 @@ import io.github.dhluong90.bpm.process.internal.model.foreign.ForeignFragment;
 import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
+import io.github.dhluong90.bpm.process.internal.model.horus.OriginalId;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HorusExtension;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalJson;
@@ -164,6 +165,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /** A {@code horus:compensate} value: a handler or adapter name, or {@code manual}. */
     /** The key of a called definition: lower-case words joined by hyphens, as every definition key. */
     private static final Pattern CALLED_ELEMENT = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
+    /** Problems that only a run of the activity would raise; a manual undo is not run (#632). */
+    private static final Set<String> RUN_ONLY_CODES = Set.of("ASSIGNEE_INVALID", "RESULT_VARIABLE_REQUIRED",
+            "SCRIPT_MISSING", "CALLED_ELEMENT_INVALID", "CORRELATION_KEY_REQUIRED", "MESSAGE_REF_UNRESOLVED");
+    /** The {@code implementation} form that names a registered handler (#632). */
+    private static final String HANDLER_URN = "urn:horus-bpm:handler:";
+    /** The activities that can be a compensation activity: a person or a handler undoes the step (#632). */
+    private static final Set<String> COMPENSATION_ACTIVITIES = Set.of("serviceTask", "userTask", "manualTask", "task",
+            "scriptTask", "sendTask", "receiveTask", "businessRuleTask", "callActivity");
     private static final Pattern COMPENSATE_HANDLER = Pattern.compile("^[A-Za-z][A-Za-z0-9_.-]{0,99}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
     /** The step id a {@code horus:memory} entry reads from: an id, never an expression or a variable path. */
@@ -248,12 +257,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
             throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
                     + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
         }
-        String text = XmlHardening.utf8(source);
+        String text = XmlHardening.decode(source);
         XMLInputFactory factory = XmlHardening.newInputFactory(limits);
         try {
             XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));
             try {
-                XmlHardening.requireUtf8Declaration(xml);
                 Pass pass = new Pass(xml);
                 List<Process> all = pass.document();
                 return new Result(all.get(0), all, pass.warnings);
@@ -330,6 +338,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     warn("CHOREOGRAPHY_KEPT_AS_RECEIVED", "A choreography is kept as received and is not run: model each"
                             + " participant as an executable process", local, attr("id"));
                     skip();
+                } else if (BPMN.equals(ns) && ("import".equals(local) || "itemDefinition".equals(local))) {
+                    // The type information of a data item is not used to run a step: the engine's variables are
+                    // typed by their values. Listed as a warning so the approver sees it, never refused.
+                    warn("IMPORT".equals(local.toUpperCase(java.util.Locale.ROOT)) ? "BPMN_IMPORT_IGNORED"
+                            : "ITEM_DEFINITION_IGNORED", "A " + local + " describes the type of data items or points to"
+                            + " another file; it is kept in the stored source and not used to run a step", local,
+                            attr("id"));
+                    skip();
                 } else if (BPMN.equals(ns) && "category".equals(local)) {
                     category();
                 } else if (BPMN.equals(ns) && "error".equals(local)) {
@@ -367,6 +383,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             ref.line()));
                 }
             }
+            checkKeyCollisions();
+            checkDerivedNames();
             List<Process> executable = executableProcesses();
             // #499: the catch events of an instantiating event-based gateway create the instance, so no variable can
             // carry a key for them; they need no horus:correlationKey.
@@ -378,6 +396,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         .forEach(e -> gateways.add(e.id()));
                 all.stream().filter(e -> e instanceof SequenceFlow f && gateways.contains(f.sourceRef()))
                         .forEach(e -> startingCatches.add(((SequenceFlow) e).targetRef()));
+                // #632: a receive task that starts the process is its start event; the message's key is the business key.
+                all.stream().filter(e -> e instanceof ReceiveTask r && r.instantiate())
+                        .forEach(e -> startingCatches.add(e.id()));
             }
             invalid.removeIf(p -> "CORRELATION_KEY_REQUIRED".equals(p.code()) && startingCatches.contains(p.elementId()));
             for (DefinitionProblem ref : unresolvedRefs) {
@@ -400,6 +421,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (resolved.isEmpty()) {
                 invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no executable process", null));
             }
+            // #632: a manual undo runs nothing, so it needs none of what a run would need (the content it carries is
+            // refused instead, COMPENSATION_ACTIVITY_CONTENT_UNUSED).
+            invalid.removeIf(p -> RUN_ONLY_CODES.contains(p.code()) && manualUndoIds.contains(p.elementId()));
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
@@ -419,7 +443,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         private static boolean ownsPool(Collaboration c, Process p) {
-            return c.participants().stream().anyMatch(x -> p.id().equals(x.processRef()));
+            return c.participants().stream().anyMatch(x -> p.id().equals(x.processRef())
+                    || p.info() != null && p.info().extensions().first(OriginalId.class)
+                    .filter(o -> o.id().equals(x.processRef())).isPresent());
         }
 
         /** A process as read: executable or not, with where its key was written. */
@@ -458,8 +484,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 if (participant.processRef() == null) {
                     continue;
                 }
-                pointed.add(participant.processRef());
-                if (processes.stream().noneMatch(r -> r.process().id().equals(participant.processRef()))) {
+                pointed.add(keyFor(participant.processRef()));
+                if (processes.stream().noneMatch(r -> r.process().id().equals(keyFor(participant.processRef())))) {
                     invalid.add(new DefinitionProblem("PARTICIPANT_PROCESS_MISSING", "The participant points to process '"
                             + safe(participant.processRef()) + "', which this file does not hold", "participant",
                             safe(participant.id()), 1));
@@ -601,6 +627,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String messageId = id();
             String messageName = attr("name");
             int at = line();
+            if (messageName == null && messageId != null && !messageId.startsWith("_missing_")) {
+                // A modeller may leave a message unnamed: its id stands for the name, mapped to the letters, digits
+                // and '_', '.', ':', '-' a message name has, starting with a letter. Two that map alike are refused.
+                messageName = nameOfId(messageId);
+                derivedMessageNames.add(messageName);
+            }
             if (messageName == null || !MESSAGE_NAME.matcher(messageName).matches()) {
                 invalid.add(new DefinitionProblem("MESSAGE_NAME_INVALID", "A message needs a name of 1 to 100"
                         + " letters, digits, '_', '.', ':' or '-', starting with a letter", "message",
@@ -609,6 +641,27 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 messageNames.put(messageId, messageName);
             }
             children("message", messageId, false);
+        }
+
+        private final List<String> derivedMessageNames = new ArrayList<>();
+
+        private static String nameOfId(String id) {
+            String name = id.replaceAll("[^A-Za-z0-9_.:-]", "_");
+            if (name.isEmpty() || !Character.isLetter(name.charAt(0))) {
+                name = "m" + name;
+            }
+            return name.length() > 100 ? name.substring(0, 100) : name;
+        }
+
+        /** A message name derived from an id that another message's name equals makes two messages one. */
+        private void checkDerivedNames() {
+            for (String derived : derivedMessageNames) {
+                if (messageNames.values().stream().filter(derived::equals).count() > 1) {
+                    invalid.add(new DefinitionProblem("MESSAGE_NAME_COLLISION", "The unnamed message that takes its name"
+                            + " '" + safe(derived) + "' from its id has the name of another message; name one of them",
+                            "message", safe(derived), 1));
+                }
+            }
         }
 
         /** Replaces the message reference of every message element by the message's name. */
@@ -717,10 +770,27 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         private Read process() throws XMLStreamException {
-            String key = attr("id");
+            String rawId = attr("id");
+            String key = rawId;
+            List<HorusExtension> processExt = new ArrayList<>();
+            if (rawId != null && !KEY.matcher(rawId).matches()) {
+                // Modellers write ids such as _3d1ef204-... or Process_1; the id is the definition key, so it is
+                // mapped to a kebab-case key, deterministically, and the export writes the original back.
+                String mapped = keyOf(rawId);
+                if (mapped != null) {
+                    key = mapped;
+                    processKeys.put(rawId, mapped);
+                    processExt.add(new OriginalId(rawId));
+                }
+            }
             String name = attr("name");
             int line = line();
-            boolean executable = "true".equals(attr("isExecutable"));
+            // BPMN leaves isExecutable open when it is absent; a process that does not say it is not executable is read as
+            // executable, so a file from a modeller that never writes the attribute imports.
+            boolean executable = !"false".equals(attr("isExecutable"));
+            if (attr("isExecutable") == null) {
+                warn("EXECUTABLE_ASSUMED", "has no isExecutable attribute and is read as executable", "process", rawId);
+            }
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
             laneSink = new ArrayList<>();
@@ -732,9 +802,49 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             + " take the group from", "userTask", safe(taskId), at)));
             pendingAssignee.clear();
             Process read = withRefs(new Process(key == null ? "_missing_" + line : key, name, ProcessType.NONE,
-                    executable, false, elements, artifacts, laneSink, null));
+                    executable, false, elements, artifacts, laneSink, processExt.isEmpty() ? null
+                    : info(processExt, List.of())));
             laneSink = null;
             return new Read(read, executable, line);
+        }
+
+        /** Process ids that were mapped to a definition key: original id to key (collisions are checked at the end). */
+        private final Map<String, String> processKeys = new HashMap<>();
+
+        /** @return the process key a modeller id maps to, or null when nothing of it is left */
+        private static String keyOf(String id) {
+            String key = id.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
+            if (key.isEmpty()) {
+                return null;
+            }
+            if (!Character.isLetter(key.charAt(0))) {
+                key = "p-" + key;
+            }
+            if (key.length() > 100) {
+                key = key.substring(0, 100).replaceAll("-+$", "");
+            }
+            return key;
+        }
+
+        /** The key a process reference (a participant's {@code processRef}) stands for. */
+        private String keyFor(String ref) {
+            return ref == null ? null : processKeys.getOrDefault(ref, ref);
+        }
+
+        /** Two processes that map to one key, or a mapped key that another process already has, are refused. */
+        private void checkKeyCollisions() {
+            Map<String, String> owner = new HashMap<>();
+            for (Read read : processes) {
+                String key = read.process().id();
+                String raw = read.process().info() == null ? null : read.process().info().extensions()
+                        .first(OriginalId.class).map(OriginalId::id).orElse(null);
+                String previous = owner.put(key, raw == null ? key : raw);
+                if (previous != null && (raw != null || !previous.equals(key))) {
+                    invalid.add(new DefinitionProblem("PROCESS_ID_COLLISION", "Process ids '" + safe(previous) + "' and '"
+                            + safe(raw == null ? key : raw) + "' both map to the definition key '" + safe(key)
+                            + "'; rename one of them", "process", safe(raw == null ? key : raw), read.line()));
+                }
+            }
         }
 
         /** User tasks of the process being read that name no assignee: id to line. */
@@ -789,7 +899,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /** A {@code laneSet}: kept for display and as a work group hint, never as an assignment (#497). */
         private LaneSet laneSet() throws XMLStreamException {
-            String id = id();
+            String id = optionalId("laneSet");
             String name = attr("name");
             List<Lane> lanes = new ArrayList<>();
             while (nextChild()) {
@@ -803,7 +913,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         private Lane lane() throws XMLStreamException {
-            String id = id();
+            String id = optionalId("lane");
             String name = attr("name");
             List<String> refs = new ArrayList<>();
             LaneSet child = null;
@@ -871,7 +981,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             Map<String, String> poolOfProcess = new HashMap<>();
             for (Participant participant : collaboration.participants()) {
                 if (participant.processRef() != null) {
-                    poolOfProcess.put(participant.processRef(), participant.id());
+                    poolOfProcess.put(keyFor(participant.processRef()), participant.id());
                 }
             }
             Map<String, FlowNode> nodes = new HashMap<>();
@@ -960,6 +1070,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
                 behaviourAttributes();
                 String activityDefault = attr("default");
+                boolean forCompensation = "true".equals(attr("isForCompensation"));
                 lastLoop = null;
                 lastIo = null;
                 lastIn = new ArrayList<>();
@@ -1084,6 +1195,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         skip();
                     }
                 }
+                if (forCompensation) {
+                    attachCompensation(elements, before);
+                }
                 if (lastLoop != null) {
                     attachLoop(elements, before, lastLoop);
                     lastLoop = null;
@@ -1207,6 +1321,55 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
         }
 
+        /**
+         * #632: marks the activity just read as a compensation activity. A service task reads the attribute itself; a
+         * user, manual, script, send, receive, business rule or abstract task and a call activity take it here.
+         */
+        private void attachCompensation(List<FlowElement> elements, int before) {
+            if (elements.size() > before && elements.get(elements.size() - 1) instanceof Activity activity
+                    && !activity.activity().isForCompensation()) {
+                if (!(activity instanceof ServiceTask)) {
+                    manualUndoIds.add(safe(activity.id()));
+                    refuseUnusedCompensationContent(activity);
+                }
+                ActivityAttributes a = activity.activity();
+                elements.set(elements.size() - 1, withAttributes(activity, new ActivityAttributes(true,
+                        a.startQuantity(), a.completionQuantity(), a.defaultFlow(), a.ioSpecification(),
+                        a.dataInputAssociations(), a.dataOutputAssociations(), a.resources(),
+                        a.loopCharacteristics())));
+            }
+        }
+
+        /**
+         * #632: a manual undo raises an incident; it never runs the activity. So content that only a run would use is
+         * refused with COMPENSATION_ACTIVITY_CONTENT_UNUSED, never dropped without a word.
+         */
+        private void refuseUnusedCompensationContent(Activity activity) {
+            List<String> unused = new ArrayList<>();
+            if (activity.extensions().first(TaskAssignment.class).isPresent()) {
+                unused.add("horus:assignee");
+            }
+            if (activity.extensions().first(ResultVariable.class).isPresent()) {
+                unused.add("horus:resultVariable");
+            }
+            if (activity.extensions().first(FormSpec.class).isPresent()) {
+                unused.add("form");
+            }
+            switch (activity) {
+                case CallActivity c when c.calledElement() != null -> unused.add("calledElement");
+                case SendTask t when t.messageRef() != null -> unused.add("messageRef");
+                case ReceiveTask t when t.messageRef() != null -> unused.add("messageRef");
+                case ScriptTask t when t.script() != null && !t.script().isBlank() -> unused.add("script");
+                default -> { }
+            }
+            if (!unused.isEmpty()) {
+                invalid.add(new DefinitionProblem("COMPENSATION_ACTIVITY_CONTENT_UNUSED", "a compensation activity that is"
+                        + " not a service task is a manual undo: the engine raises an incident and runs nothing, so "
+                        + String.join(", ", unused) + " would be ignored; remove it, or use a service task with a handler",
+                        activity.getClass().getSimpleName(), safe(activity.id()), line()));
+            }
+        }
+
         /** #499: puts the data read for the element just added on it; any other element refuses it. */
         private void attachData(List<FlowElement> elements, int before) {
             if (lastIo == null && lastIn.isEmpty() && lastOut.isEmpty()) {
@@ -1262,6 +1425,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         t.scriptFormat(), t.script(), t.info());
                 case CallActivity t -> new CallActivity(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
                         t.calledElement(), t.info());
+                case ReceiveTask t -> new ReceiveTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.instantiate(), t.messageRef(), t.operationRef(), t.info());
+                case SendTask t -> new SendTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.messageRef(), t.operationRef(), t.info());
                 case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
                         t.triggeredByEvent(), t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 default -> activity;
@@ -1474,13 +1641,26 @@ public final class SubsetBpmnReader implements DefinitionReader {
          * flow in or out: its own start event, which carries the trigger, starts it. A loop or multi-instance marker is
          * named as unsupported like on any other activity.
          */
+        /** Ids of the compensation activities that are not service tasks (#632). */
+        private final Set<String> manualUndoIds = new HashSet<>();
+
+        /** True while the direct container being read is an event sub-process (#632). */
+        private boolean inEventSubProcess;
+
         private FlowElement subProcess() throws XMLStreamException {
             String id = id();
             String name = attr("name");
             boolean byEvent = "true".equals(attr("triggeredByEvent"));
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            LoopCharacteristics own = container(elements, artifacts);
+            boolean outerScope = inEventSubProcess;
+            inEventSubProcess = byEvent;
+            LoopCharacteristics own;
+            try {
+                own = container(elements, artifacts);
+            } finally {
+                inEventSubProcess = outerScope;
+            }
             // Read after the nested steps, which reset it: the marker of this sub-process, if any, goes to its container.
             lastLoop = own;
             return new SubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), byEvent,
@@ -1580,9 +1760,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
          */
         private void behaviourAttributes() {
             String id = attr("id");
-            if ("true".equals(attr("isForCompensation")) && !"serviceTask".equals(xml.getLocalName())) {
-                unsupported("isForCompensation", id, BpmnStages.NOT_PLANNED, "applies to a service task: the undo of a"
-                        + " step is a handler");
+            String local = xml.getLocalName();
+            if ("true".equals(attr("isForCompensation")) && !COMPENSATION_ACTIVITIES.contains(local)) {
+                unsupported("isForCompensation", id, BpmnStages.NOT_PLANNED, "applies to a service, user, manual,"
+                        + " script, send, receive, business rule or abstract task or a call activity: the undo of a"
+                        + " step is one of them, not a sub-process");
             }
             for (String quantity : List.of("startQuantity", "completionQuantity")) {
                 String value = attr(quantity);
@@ -1590,19 +1772,30 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     unsupported(quantity, id, BpmnStages.NOT_PLANNED);
                 }
             }
-            if ("false".equals(attr("isInterrupting")) && !"startEvent".equals(xml.getLocalName())) {
-                unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to the start event of an event"
-                        + " sub-process; a boundary event uses cancelActivity");
+            if ("false".equals(attr("isInterrupting")) && !"startEvent".equals(local) && !"boundaryEvent".equals(local)) {
+                unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to a start event, or to a boundary"
+                        + " event as cancelActivity=\"false\"; BPMN defines it on no other element");
             }
-            if ("true".equals(attr("parallelMultiple")) && !xml.getLocalName().endsWith("Event")) {
+            if ("true".equals(attr("parallelMultiple")) && !local.endsWith("Event")) {
                 unsupported("parallelMultiple", id, BpmnStages.NOT_PLANNED, "applies to an event that has several event"
                         + " definitions");
             }
             String implementation = attr("implementation");
-            if (implementation != null && !"##unspecified".equals(implementation)) {
+            if (implementation != null && !"##unspecified".equals(implementation) && handlerOfUrn(implementation) == null) {
                 unsupported("implementation", id, BpmnStages.NOT_PLANNED,
-                        "is not supported; bind the step with horus:handler instead of a service implementation");
+                        "is not supported; bind the step with horus:handler or implementation=\""
+                        + HANDLER_URN + "<name>\" instead of a service implementation");
+            } else if (implementation != null && handlerOfUrn(implementation) != null && !"serviceTask".equals(local)) {
+                unsupported("implementation", id, BpmnStages.NOT_PLANNED, "names a handler on a service task only");
             }
+        }
+
+        /** The handler name of {@code urn:horus-bpm:handler:<name>}, or null when the text is not that form. */
+        private static String handlerOfUrn(String implementation) {
+            if (implementation == null || !implementation.startsWith(HANDLER_URN)) {
+                return null;
+            }
+            return implementation.substring(HANDLER_URN.length());
         }
 
         /** A note on the diagram: its {@code text} is kept exactly, nothing is executed. */
@@ -1652,6 +1845,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             int line = line();
             String key = horus("correlationKey");
             boolean interrupting = !"false".equals(attr("isInterrupting"));
+            if (start && !interrupting && !inEventSubProcess) {
+                warn("INTERRUPTING_HAS_NO_EFFECT", "isInterrupting=\"false\" is kept and exported, but only the start of an"
+                        + " event sub-process uses it; here the start event behaves the same either way", element, id);
+            }
             boolean parallel = "true".equals(attr("parallelMultiple"));
             List<EventDefinition> definitions = new ArrayList<>();
             List<HorusExtension> ext = new ArrayList<>();
@@ -1761,6 +1958,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             String attachedTo = attr("attachedToRef");
             boolean cancel = !"false".equals(attr("cancelActivity"));
+            if ("false".equals(attr("isInterrupting"))) {
+                // #632: the start-event spelling of the same thing; the two never disagree.
+                if ("true".equals(attr("cancelActivity"))) {
+                    invalid.add(new DefinitionProblem("BOUNDARY_INTERRUPTING_CONFLICT", "isInterrupting=\"false\" and"
+                            + " cancelActivity=\"true\" disagree; give cancelActivity alone", element, safe(id), line()));
+                }
+                cancel = false;
+            }
             String key = horus("correlationKey");
             boolean parallel = "true".equals(attr("parallelMultiple"));
             int line = line();
@@ -1774,8 +1979,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     definitions.add(timer);
                     if (timer.timeCycle() != null) {
                         addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                BpmnStages.S1));
+                                "is not supported on a catch or boundary event; use timeDuration or timeDate", "timeCycle",
+                                safe(id), line, BpmnStages.NOT_PLANNED));
                     } else {
                         TimerSchedule.problem(timer).ifPresent(problem ->
                                 invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
@@ -1969,9 +2174,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             String ref = attr("messageRef");
             String key = horus("correlationKey");
-            if (receive && "true".equals(attr("instantiate"))) {
-                unsupported("instantiate", id, BpmnStages.NOT_PLANNED, "is not supported; start a process with a message"
-                        + " start event");
+            boolean instantiate = receive && "true".equals(attr("instantiate"));
+            if (!receive && attr("instantiate") != null) {
+                invalid.add(new DefinitionProblem("INSTANTIATE_ON_SEND_TASK", "instantiate applies to a receiveTask",
+                        element, safe(id), line));
             }
             messageLines.putIfAbsent(id, line);
             Node children = children(element, id, true);
@@ -1979,7 +2185,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             correlation(element, id, line, key, receive, ext);
             ext.addAll(children.horus());
             return receive
-                    ? new ReceiveTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, false, ref,
+                    ? new ReceiveTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, instantiate, ref,
                             null, info(ext, children.foreign()))
                     : new SendTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, ref, null,
                             info(ext, children.foreign()));
@@ -2010,8 +2216,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     defs.add(timer);
                     if (timer.timeCycle() != null) {
                         addProblem(new DefinitionProblem("BPMN_UNSUPPORTED_ELEMENT",
-                                "is not supported in this release; stage S1 adds it", "timeCycle", safe(id), line,
-                                BpmnStages.S1));
+                                "is not supported on a catch or boundary event; use timeDuration or timeDate", "timeCycle",
+                                safe(id), line, BpmnStages.NOT_PLANNED));
                     } else {
                         TimerSchedule.problem(timer).ifPresent(problem ->
                                 invalid.add(new DefinitionProblem("TIMER_INVALID", problem, element, safe(id), line)));
@@ -2092,6 +2298,18 @@ public final class SubsetBpmnReader implements DefinitionReader {
             int line = line();
             ActivityAttributes activity = serviceTaskAttributes();
             String handler = horus("handler");
+            String urnHandler = handlerOfUrn(attr("implementation"));
+            if (urnHandler != null) {
+                if (!COMPENSATE_HANDLER.matcher(urnHandler).matches()) {
+                    invalid.add(new DefinitionProblem("IMPLEMENTATION_HANDLER_INVALID", "implementation=\"" + HANDLER_URN
+                            + "<name>\" names a handler: a letter, then letters, digits, '_', '.' or '-', at most 100",
+                            "serviceTask", safe(id), line));
+                } else if (handler != null && !handler.equals(urnHandler)) {
+                    invalid.add(new DefinitionProblem("IMPLEMENTATION_HANDLER_CONFLICT", "implementation and"
+                            + " horus:handler name different handlers; give one", "serviceTask", safe(id), line));
+                }
+                handler = handler == null ? urnHandler : handler;
+            }
             String mode = horus("mode");
             String type = horus("type");
             String name = attr("name");
@@ -2774,7 +2992,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         + " a completion result can never overwrite other process variables", "userTask", safe(id), line));
             }
             List<HorusExtension> ext = new ArrayList<>();
-            ext.add(new TaskAssignment(assignee, fourEyes));
+            if (assignee != null || !"true".equals(attr("isForCompensation"))) {
+                ext.add(new TaskAssignment(assignee, fourEyes));
+            }
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
@@ -3062,6 +3282,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     || event == XMLStreamConstants.ENTITY_DECLARATION) {
                 throw new BpmnUnsafeXmlException("DOCTYPE and entity declarations are not accepted (line " + line() + ")");
             }
+        }
+
+        /** An id that BPMN leaves optional (a lane set, a lane): when absent, one is made from the line. */
+        private String optionalId(String kind) {
+            String id = attr("id");
+            if (id == null) {
+                String made = kind + "_line" + line();
+                return ids.add(made) ? made : made + "_" + ids.size();
+            }
+            return id();
         }
 
         private String id() {

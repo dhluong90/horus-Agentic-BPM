@@ -139,7 +139,7 @@ public final class SubsetBpmnWriter {
         xml.line(0, "                  xmlns:di=\"" + BpmnNamespaces.DI + "\"");
         xml.line(0, "                  xmlns:xsi=\"" + BpmnNamespaces.XSI + "\"");
         xml.line(0, "                  xmlns:horus=\"" + BpmnNamespaces.HORUS + "\"");
-        xml.line(0, "                  id=" + attr("Definitions_" + process.id()));
+        xml.line(0, "                  id=" + attr("Definitions_" + shownId(process)));
         xml.line(0, "                  targetNamespace=\"urn:horus-bpm:definitions\"");
         xml.line(0, "                  expressionLanguage=\"" + BpmnNamespaces.EXPR_V1 + "\"");
         xml.line(0, "                  exporter=\"HORUS Process Engine\">");
@@ -176,7 +176,7 @@ public final class SubsetBpmnWriter {
         if (collaboration != null) {
             collaboration(xml, process, collaboration, messages, collaborationIds);
         }
-        xml.line(1, "<bpmn:process id=" + attr(process.id()) + optional("name", process.name())
+        xml.line(1, "<bpmn:process id=" + attr(shownId(process)) + optional("name", process.name())
                 + " isExecutable=\"true\">");
         process.laneSets().forEach(set -> laneSet(xml, set, 2, collaborationIds));
         for (FlowElement element : process.flowElements()) {
@@ -188,9 +188,10 @@ public final class SubsetBpmnWriter {
         process.allFlowElements().forEach(e -> ids.add(e.id()));
         process.artifacts().forEach(a -> ids.add(a.id()));
         ids.add(process.id());
+        ids.add(shownId(process));
         ids.addAll(signalIds.values());
         ids.addAll(messages.values());
-        ids.add("Definitions_" + process.id());
+        ids.add("Definitions_" + shownId(process));
         ids.addAll(collaborationIds);
         categories(xml, process, ids);
         diagram(xml, process, ids);
@@ -205,7 +206,8 @@ public final class SubsetBpmnWriter {
      */
     private static void collaboration(Xml xml, Process process, Collaboration c, Map<String, String> messages,
             Set<String> ids) {
-        String own = c.participants().stream().filter(x -> process.id().equals(x.processRef()))
+        String own = c.participants().stream().filter(x -> process.id().equals(x.processRef())
+                || shownId(process).equals(x.processRef()))
                 .map(Participant::id).findFirst().orElse(null);
         Set<String> pools = new HashSet<>();
         c.participants().forEach(x -> pools.add(x.id()));
@@ -214,7 +216,7 @@ public final class SubsetBpmnWriter {
         for (Participant participant : c.participants()) {
             ids.add(participant.id());
             xml.line(2, "<bpmn:participant id=" + attr(participant.id()) + optional("name", participant.name())
-                    + (participant.id().equals(own) ? " processRef=" + attr(process.id()) : "") + "/>");
+                    + (participant.id().equals(own) ? " processRef=" + attr(shownId(process)) : "") + "/>");
         }
         for (MessageFlow flow : c.messageFlows()) {
             ids.add(flow.id());
@@ -386,10 +388,12 @@ public final class SubsetBpmnWriter {
             }
             case ReceiveTask t -> {
                 tag = "bpmn:receiveTask";
+                attributes.append(forCompensation(t.activity())).append(t.instantiate() ? " instantiate=\"true\"" : "");
                 attributes.append(optional("messageRef", refs.messages().get(messageName)));
             }
             case SendTask t -> {
                 tag = "bpmn:sendTask";
+                attributes.append(forCompensation(t.activity()));
                 attributes.append(optional("messageRef", refs.messages().get(messageName)));
                 inputs = t.extensions().all(InputMapping.class);
             }
@@ -408,21 +412,30 @@ public final class SubsetBpmnWriter {
                         .append(optional("horus:timeout", h.timeout() == null ? null : h.timeout().toString())));
                 inputs = t.extensions().all(InputMapping.class);
             }
-            case Task t -> tag = "bpmn:task";
-            case ManualTask t -> tag = "bpmn:manualTask";
+            case Task t -> {
+                tag = "bpmn:task";
+                attributes.append(forCompensation(t.activity()));
+            }
+            case ManualTask t -> {
+                tag = "bpmn:manualTask";
+                attributes.append(forCompensation(t.activity()));
+            }
             case ScriptTask t -> {
                 tag = "bpmn:scriptTask";
+                attributes.append(forCompensation(t.activity()));
                 attributes.append(optional("scriptFormat", t.scriptFormat()));
                 script = t.script();
             }
             case BusinessRuleTask t -> {
                 tag = "bpmn:businessRuleTask";
+                attributes.append(forCompensation(t.activity()));
                 t.extensions().first(DecisionRef.class).ifPresent(d -> attributes.append(optional("horus:ruleSet",
                         d.ruleSet())));
                 inputs = t.extensions().all(InputMapping.class);
             }
             case UserTask t -> {
                 tag = "bpmn:userTask";
+                attributes.append(forCompensation(t.activity()));
                 t.extensions().first(TaskAssignment.class).ifPresent(a -> attributes.append(optional("horus:assignee",
                         a.assignee())).append(a.fourEyes() ? " horus:fourEyes=\"true\"" : ""));
                 t.extensions().first(SlaSpec.class).ifPresent(sla -> attributes
@@ -440,6 +453,7 @@ public final class SubsetBpmnWriter {
             }
             case CallActivity c -> {
                 tag = "bpmn:callActivity";
+                attributes.append(forCompensation(c.activity()));
                 attributes.append(optional("calledElement", c.calledElement()));
                 c.extensions().first(CalledVersion.class).ifPresent(v -> attributes.append(
                         optional("horus:calledVersion", String.valueOf(v.version()))));
@@ -796,9 +810,9 @@ public final class SubsetBpmnWriter {
                 artifactX += ARTIFACT_WIDTH + ARTIFACT_GAP;
             }
         }
-        xml.line(1, "<bpmndi:BPMNDiagram id=" + attr(unique(ids, "Diagram_" + process.id())) + ">");
-        xml.line(2, "<bpmndi:BPMNPlane id=" + attr(unique(ids, "Plane_" + process.id())) + " bpmnElement="
-                + attr(process.id()) + ">");
+        xml.line(1, "<bpmndi:BPMNDiagram id=" + attr(unique(ids, "Diagram_" + shownId(process))) + ">");
+        xml.line(2, "<bpmndi:BPMNPlane id=" + attr(unique(ids, "Plane_" + shownId(process))) + " bpmnElement="
+                + attr(shownId(process)) + ">");
         for (FlowNode node : nodes) {
             Box b = boxes.get(node.id());
             String marker = node instanceof ExclusiveGateway ? " isMarkerVisible=\"true\"" : "";
@@ -925,6 +939,18 @@ public final class SubsetBpmnWriter {
     }
 
     // ---- escaping -----------------------------------------------------------------------------------------
+
+    /** The id the process had in the file it was read from, or its key when it was never mapped. */
+    private static String shownId(Process process) {
+        return process.info() == null ? process.id() : process.info().extensions()
+                .first(io.github.dhluong90.bpm.process.internal.model.horus.OriginalId.class)
+                .map(io.github.dhluong90.bpm.process.internal.model.horus.OriginalId::id).orElse(process.id());
+    }
+
+    /** #632: the compensation marker of an activity, written the same on every activity type. */
+    private static String forCompensation(io.github.dhluong90.bpm.process.internal.model.bpmn.ActivityAttributes a) {
+        return a.isForCompensation() ? " isForCompensation=\"true\"" : "";
+    }
 
     private static String optional(String name, String value) {
         return value == null ? "" : " " + name + "=" + attr(value);

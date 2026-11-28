@@ -59,6 +59,20 @@ public final class RuleEngineTransactions implements TransactionRunner {
     }
 
     /**
+     * Runs work in a new transaction ({@code REQUIRES_NEW}), whatever the caller's transaction: used for the one
+     * short insert-or-read of the first-use masking key check.
+     *
+     * @param work the work to run
+     * @param <T> the result type
+     * @return the work's result
+     */
+    @Override
+    public <T> T inIndependentTransaction(Supplier<T> work) {
+        Objects.requireNonNull(work, "work must not be null");
+        return newTransaction.execute(status -> work.get());
+    }
+
+    /**
      * Runs a read in a read-only transaction ({@code REQUIRED}: it joins a caller's transaction when there is one,
      * which never happens on the scheduler thread that uses it). Never suspends a transaction or takes a second
      * connection.

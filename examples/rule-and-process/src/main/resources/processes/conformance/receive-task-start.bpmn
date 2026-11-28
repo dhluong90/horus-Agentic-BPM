@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:message id="m-application" name="loan-intake-request"/>
+  <bpmn:process id="loan-intake-receive" isExecutable="true">
+    <bpmn:receiveTask id="receive-application" instantiate="true" messageRef="m-application"/>
+    <bpmn:scriptTask id="route" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="route"><bpmn:script>'online'</bpmn:script></bpmn:scriptTask>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="receive-application" targetRef="route"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="route" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

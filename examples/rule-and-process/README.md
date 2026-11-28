@@ -132,14 +132,14 @@ At start-up the log shows, in order: the host's own migration, the Rule Engine s
 
 ```
 Rule Engine schema at version 1 (1 migration(s) applied)
-Process Engine schema at version 1 (1 migration(s) applied)
+Process Engine schema at version 2 (2 migration(s) applied)
 Process definition card-fee-review v1 ACTIVE for tenant bank-a from classpath:processes/card-fee-review.bpmn (hash 3fa54143...)
 Rule set card-fee v1 PUBLISHED (requested by seed-author, approved by seed-approver)
 ```
 
 ### Showcase: loan origination, three scenarios
 
-`loan-origination` is the larger model: 30 steps plus a disbursement sub-process, five lanes and a customer pool. An AI agent screens KYC and AML behind a guardrail rule set, credit grades the risk, a four-eyes approval escalates on an SLA timer, the offer is prepared in parallel with collateral registration, the customer's reply or a timer decides the next step, and a failed pay-out reverses the booking newest first. Its four rule sets (`kyc-loan-guardrails`, `credit-risk-grade`, `approval-authority`, `loan-pricing`) are in [`rules/`](src/main/resources/rules), its steps in [`LoanOriginationSteps`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/LoanOriginationSteps.java). On the `dev` profile [`DevLoanOriginationSeeder`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/DevLoanOriginationSeeder.java) publishes the rule sets (one identity requests, another approves) and then imports the process, because a process whose guardrail rule set is not published is refused.
+`loan-origination` is the larger model: 30 steps plus a disbursement sub-process, five lanes and a customer pool. An AI agent screens KYC and AML behind a guardrail rule set, credit grades the risk, a four-eyes approval escalates on an SLA timer, the offer is prepared in parallel with collateral registration, the customer's reply or a timer decides the next step, and a failed pay-out reverses the booking newest first. Its four rule sets (`kyc-loan-guardrails`, `credit-risk-grade`, `approval-authority`, `loan-pricing`) are in [`rules/`](src/main/resources/rules), its steps and a stub `kyc.screen` agent in [`LoanOriginationSteps`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/LoanOriginationSteps.java). On the `dev` profile [`DevLoanOriginationSeeder`](src/main/java/io/github/dhluong90/bpm/examples/ruleandprocess/DevLoanOriginationSeeder.java) publishes the rule sets (one identity requests, another approves) and then imports the process, because a process whose guardrail rule set is not published is refused. The stub `kyc.screen` agent loads on the `dev` profile only, so a production host must register its own `AgentAdapter` named `kyc.screen` before it imports this model.
 
 Two things to know before a demo:
 
@@ -396,5 +396,7 @@ Each version runs from its stored source document. Before a version is compiled,
 ```bash
 mvn -B -pl examples/rule-and-process -am verify
 ```
+
+Use `verify`, not `test -Dtest=<name>IT`: the integration tests need the engines as sealed jars, and `test` leaves them as class directories, which the embedded entry point refuses with `TENANT_NOT_ALLOWED` (see [`examples/README.md`](../README.md)). `mvn test` alone runs the unit tests.
 
 `RuleAndProcessIT` runs on PostgreSQL in Testcontainers: the start-up import, the automatic and the officer path over HTTP, a stale completion (`PRE-003`), four-eyes over REST and Java (`PRE-007`), two concurrent starts with one idempotency key doing the work once, the rollback of host and engine rows with no event emitted, a decision the caller may not evaluate, a tampered stored definition refused, `413` and `428`, and tenant isolation (a second tenant cannot read the instance, complete its task, or start the process it has not imported).

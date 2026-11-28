@@ -18,14 +18,8 @@
     },
     "options": {
       "decision": {
-        "APPROVED": { "en": "Approve", "vi": "Phê duyệt" },
-        "REJECTED": { "en": "Reject", "vi": "Từ chối" }
-      }
-    },
-    "effects": {
-      "decision": {
-        "APPROVED": { "en": "The loan is priced and the offer is sent.", "vi": "Khoản vay được định giá và gửi đề nghị." },
-        "REJECTED": { "en": "The customer is told it is declined.", "vi": "Khách hàng được báo bị từ chối." }
+        "APPROVED": { "label": { "en": "Approve", "vi": "Phê duyệt" }, "consequence": { "en": "The loan is priced and the offer is sent.", "vi": "Khoản vay được định giá và gửi đề nghị." } },
+        "REJECTED": { "label": { "en": "Reject", "vi": "Từ chối" }, "consequence": { "en": "The customer is told it is declined.", "vi": "Khách hàng được báo bị từ chối." } }
       }
     }
   }

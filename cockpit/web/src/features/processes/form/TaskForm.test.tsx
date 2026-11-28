@@ -6,7 +6,7 @@ import { currentProcessEngine } from '../../../mocks/handlers';
 import { mockHost, setScenario } from '../../../mocks/node';
 import { QUEUE_TASKS } from '../../../mocks/taskQueueDemo';
 import { FORM_TASK_ID } from '../../../mocks/processDemo';
-import { build, fieldsOf, initialDrafts, recordedRows } from './model';
+import { build, fieldsOf, initialDrafts, recordedRows, submissionRows } from './model';
 import { en } from '../../../i18n/en';
 import { vi } from '../../../i18n/vi';
 import { format } from '../../../i18n/I18nProvider';
@@ -22,18 +22,18 @@ const completions = () => currentProcessEngine().completions;
 
 describe('CKP-021 a task is completed through its declared form', () => {
   it('CKP_021_task_form_completion_and_link', async () => {
-    setScenario('tasks-operator');
+    setScenario('tasks-operator-reader');
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
     // Every kind of field the engine declares is drawn with the label of the language.
-    expect(within(form).getByRole('radio', { name: 'APPROVE' })).toBeInTheDocument();
+    expect(within(form).getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
     expect(within(form).getByLabelText(/^Approved limit/)).toHaveValue('250,000,000');
     expect(within(form).getByLabelText(/^Review date/)).toHaveAttribute('type', 'date');
     expect(within(form).getByLabelText(/^Dependants/)).toHaveValue('2');
     expect(within(form).getByRole('radio', { name: 'Yes' })).toBeInTheDocument();
 
-    await userEvent.click(within(form).getByRole('radio', { name: 'REJECT' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -49,16 +49,18 @@ describe('CKP-021 a task is completed through its declared form', () => {
 
     expect(await screen.findByText(/^Completed by an at /)).toBeInTheDocument();
     expect(completions()).toHaveLength(1);
-    // A completed task shows the values now on the case, read-only, with an honest note and no form or action.
-    const recorded = await screen.findByRole('article', { name: 'Current values' });
+    // A completed task shows the decision as the engine recorded it, read-only, with no form or action.
+    const recorded = await screen.findByRole('article', { name: 'Recorded decision' });
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
-    expect(screen.getByText('Values now on the case, not as submitted.')).toBeInTheDocument();
+    expect(screen.queryByText(/now on the case/)).not.toBeInTheDocument();
     expect(within(recorded).getByText('Decision')).toBeInTheDocument();
-    expect(within(recorded).getByText('REJECT')).toBeInTheDocument();
+    expect(within(recorded).getByText('Reject')).toBeInTheDocument();
+    expect(within(recorded).queryByText('REJECT')).not.toBeInTheDocument();
     expect(within(recorded).getByText('250,000,000 VND')).toBeInTheDocument();
     expect(within(recorded).getByText('Income is not verified')).toBeInTheDocument();
-    expect(within(recorded).getByText('Masked')).toBeInTheDocument();
+    expect(within(recorded).getByText('Hidden')).toBeInTheDocument();
     expect(recorded).not.toHaveTextContent('***');
+    expect(recorded).not.toHaveTextContent('Not recorded:');
     expect(screen.queryByRole('button', { name: 'Complete task' })).not.toBeInTheDocument();
     const sent = completions()[0];
     expect(sent?.result).toEqual({
@@ -66,6 +68,21 @@ describe('CKP-021 a task is completed through its declared form', () => {
     });
     expect(sent?.ifMatch).toBe('"1"');
     expect(sent?.idempotencyKey).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('TR_UI_663_without_a_readable_record_the_view_falls_back_to_current_values_with_one_plain_note', async () => {
+    setScenario('tasks-operator');
+    open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
+    const form = await screen.findByRole('form', { name: 'Credit review' });
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
+    await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
+    await userEvent.type(within(form).getByLabelText(/^Reason/), 'Income is not verified');
+    await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
+
+    const current = await screen.findByRole('article', { name: 'Current values' });
+    expect(within(current).getByText('The submitted values are not available. These are the values now on the case.')).toBeInTheDocument();
+    expect(within(current).queryByText('Not recorded:', { exact: false })).not.toBeInTheDocument();
+    expect(screen.queryByRole('article', { name: 'Recorded decision' })).not.toBeInTheDocument();
   });
 
   it('CKP_021_a_task_declared_with_a_link_opens_the_hosts_screen_and_shows_no_form', async () => {
@@ -134,6 +151,30 @@ describe('the recorded decision of a completed task', () => {
   });
 });
 
+describe('the decision as the engine recorded it (#663)', () => {
+  const form = { schema: { type: 'object', properties: {
+    decision: { enum: ['APPROVED', 'REJECTED'] }, amount: { type: 'object', properties: { currency: { const: 'USD' }, amount: { type: 'integer' } } },
+    term: { type: 'integer' }, idNumber: { type: 'string', mask: true }, note: { type: 'string' },
+  } }, hints: { options: { decision: { REJECTED: { en: 'Rejected' } } }, units: { term: 'months' } } };
+  const stored = { decision: 'REJECTED', amount: { currency: 'USD', amount: 123456 }, term: 24, idNumber: { masked: true } };
+  const words = { yes: 'Yes', no: 'No', when: () => undefined };
+
+  it('TR_UI_663_the_stored_values_read_with_labels_units_and_the_money_format', () => {
+    const rows = submissionRows(form, stored, 'en', words);
+    expect(rows.map((row) => [row.name, row.text])).toEqual([
+      ['decision', 'Rejected'], ['amount', '1,234.56 USD'], ['term', '24 months'], ['idNumber', undefined], ['note', undefined],
+    ]);
+  });
+
+  it('TR_SEC_05_a_stored_masked_marker_reads_as_masked_and_never_as_text', () => {
+    expect(submissionRows(form, stored, 'en', words).find((row) => row.name === 'idNumber')).toMatchObject({ masked: true, text: undefined });
+  });
+
+  it('TR_UI_663_a_choice_without_a_label_reads_as_words_never_as_its_code', () => {
+    expect(submissionRows(form, { decision: 'NEEDS_REVIEW' }, 'en', words)[0]?.text).toBe('Needs review');
+  });
+});
+
 describe('control: masked fields stay masked', () => {
   it('TR_SEC_05_a_masked_field_is_never_shown_or_sent_unless_the_operator_replaces_it', async () => {
     setScenario('tasks-operator');
@@ -145,7 +186,7 @@ describe('control: masked fields stay masked', () => {
     expect(document.body).not.toHaveTextContent('***');
     expect(within(form).queryByDisplayValue('***')).not.toBeInTheDocument();
 
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
     await waitFor(() => { expect(completions()).toHaveLength(1); });
@@ -163,7 +204,7 @@ describe('control: masked fields stay masked', () => {
     const field = within(form).getByLabelText(/^National ID number/);
     expect(field).toHaveValue('');
     await userEvent.type(field, '079012345678');
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -193,7 +234,7 @@ describe('control: completing is idempotent', () => {
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
     // The engine did not answer; the operator tries again with the same form.
@@ -217,11 +258,11 @@ describe('control: completing is idempotent', () => {
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
     await within(dock()).findByRole('alert');
-    await userEvent.click(within(form).getByRole('radio', { name: 'REJECT' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
     await userEvent.type(within(form).getByLabelText(/^Reason/), 'Not enough income');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -236,7 +277,7 @@ describe('control: validation is enforced by the engine, not the screen', () => 
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
-    await userEvent.click(within(form).getByRole('radio', { name: 'REJECT' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -244,7 +285,7 @@ describe('control: validation is enforced by the engine, not the screen', () => 
     await waitFor(() => { expect(reason).toHaveAttribute('aria-invalid', 'true'); });
     expect(reason).toHaveAccessibleDescription('Fill in this field.');
     // The decision the operator chose is still chosen; nothing was cleared or completed.
-    expect(within(form).getByRole('radio', { name: 'REJECT' })).toBeChecked();
+    expect(within(form).getByRole('radio', { name: 'Reject' })).toBeChecked();
     expect(completions()).toHaveLength(0);
     // Editing the field clears the engine's old sentence about it.
     await userEvent.type(reason, 'x');

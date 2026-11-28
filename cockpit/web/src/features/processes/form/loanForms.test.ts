@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { build, fieldsOf, initialDrafts } from './model';
+import { build, fieldsOf, initialDrafts, optionText } from './model';
 
 /** The two forms of the loan showcase (#623) are read as the host serves them: schema and hints from the example's files. */
 const root = resolve(__dirname, '../../../../../../examples/rule-and-process/src/main/resources');
@@ -30,6 +30,13 @@ describe('#623 loan showcase forms', () => {
       expect(Object.keys(field?.effects ?? {})).toEqual(['APPROVED', 'REJECTED']);
     }
     expect(fieldsOf(form, 'vi')[0]?.optionLabels['REJECTED']).toBe('Từ chối');
+  });
+
+  it('a host that sends no option hints still shows words, never raw codes', () => {
+    const bare = { ...load('loan-approval'), hints: { order: ['decision', 'reason'] }, data: {} };
+    const [field] = fieldsOf(bare, 'en');
+    expect(field ? optionText(field, 'APPROVED') : '').toBe('Approved');
+    expect(field ? optionText(field, 'NEEDS_REVIEW') : '').toBe('Needs review');
   });
 
   it('a rejection needs a reason, and an approval does not', () => {

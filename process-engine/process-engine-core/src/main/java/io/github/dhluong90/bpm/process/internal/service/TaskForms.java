@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.spi.FormRegistry;
+import io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import java.net.URI;
@@ -44,7 +45,9 @@ public final class TaskForms {
     private static final Pattern REFERENCE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}(/[A-Za-z0-9][A-Za-z0-9_.-]{0,99}){0,9}$");
     private static final Pattern PLACEHOLDER = Pattern.compile("\\{(taskId|instanceId)}");
     private static final Pattern LOCALE = Pattern.compile("^[a-z]{2}(-[A-Z]{2})?$");
-    private static final Set<String> HINT_KEYS = Set.of("order", "widgets", "labels", "readOnly");
+    private static final Pattern CURRENCY = Pattern.compile("^[A-Z]{3}$");
+    private static final Set<String> HINT_KEYS = Set.of("order", "widgets", "labels", "readOnly", "options",
+            "units", "formats");
     private static final Set<String> WIDGETS = Set.of("text", "textarea", "select", "radio", "checkbox", "date",
             "datetime", "money", "readonly");
     private static final Set<String> FIELD_TYPES = Set.of("string", "integer", "number", "boolean", "object");
@@ -262,6 +265,60 @@ public final class TaskForms {
         return value;
     }
 
+    /** Most unrecorded field paths named in one entry, and the longest one. */
+    private static final int MAX_UNRECORDED = 50;
+    private static final int MAX_UNRECORDED_PATH = 120;
+
+    /**
+     * What history keeps of a validated submission (#663): the fields the schema declares, every part it marks
+     * {@code "mask": true} replaced by {@link RecordedSubmission#MASKED}, at any depth; a field the schema does not
+     * declare is not stored, only its path is named.
+     *
+     * @param schema the form schema
+     * @param submission the validated values
+     * @return the values to store and the paths of the fields left out
+     */
+    @SuppressWarnings("unchecked")
+    static RecordedSubmission record(Map<String, Object> schema, Map<String, Object> submission) {
+        List<String> dropped = new ArrayList<>();
+        Object values = recordValue(schema, submission, "", 0, dropped);
+        return new RecordedSubmission((Map<String, Object>) values,
+                dropped.size() > MAX_UNRECORDED ? dropped.subList(0, MAX_UNRECORDED) : dropped);
+    }
+
+    private static Object recordValue(Object schema, Object value, String path, int depth, List<String> dropped) {
+        if (value == null) {
+            return null;
+        }
+        if (!(schema instanceof Map<?, ?> node)) {
+            return value;
+        }
+        if (Boolean.TRUE.equals(node.get("mask")) || depth > MASK_MAX_DEPTH) {
+            return RecordedSubmission.MASKED;
+        }
+        if (value instanceof Map<?, ?> map && node.get("properties") instanceof Map<?, ?> properties) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                String at = path.isEmpty() ? name : path + "." + name;
+                if (!properties.containsKey(entry.getKey())) {
+                    dropped.add(at.length() > MAX_UNRECORDED_PATH ? at.substring(0, MAX_UNRECORDED_PATH) : at);
+                    continue;
+                }
+                out.put(name, recordValue(properties.get(entry.getKey()), entry.getValue(), at, depth + 1, dropped));
+            }
+            return out;
+        }
+        if (value instanceof java.util.Collection<?> items && node.get("items") instanceof Map<?, ?> itemSchema) {
+            List<Object> out = new ArrayList<>();
+            for (Object item : items) {
+                out.add(recordValue(itemSchema, item, path + "[]", depth + 1, dropped));
+            }
+            return out;
+        }
+        return value;
+    }
+
     /**
      * The variables with the parts the schema marks {@code "mask": true} masked, at any depth.
      *
@@ -450,7 +507,7 @@ public final class TaskForms {
         return out;
     }
 
-    private static List<String> checkHints(Map<String, Object> hints, Map<String, Object> schema) {
+    static List<String> checkHints(Map<String, Object> hints, Map<String, Object> schema) {
         List<String> problems = new ArrayList<>();
         Set<String> fields = schema.get("properties") instanceof Map<?, ?> p
                 ? p.keySet().stream().map(String::valueOf).collect(java.util.stream.Collectors.toSet()) : Set.of();
@@ -488,7 +545,113 @@ public final class TaskForms {
         } else if (hints.containsKey("labels")) {
             problems.add("labels is not an object");
         }
+        checkOptions(hints, schema, fields, problems);
+        checkUnits(hints, fields, problems);
+        checkFormats(hints, schema, fields, problems);
         return problems;
+    }
+
+    private static boolean isCurrency(String code) {
+        if (!CURRENCY.matcher(code).matches()) {
+            return false;
+        }
+        try {
+            java.util.Currency.getInstance(code);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /** Texts per locale, each at most {@code max} characters. */
+    private static boolean textsOk(Object byLocale, int max) {
+        return byLocale instanceof Map<?, ?> texts && !texts.isEmpty()
+                && texts.entrySet().stream().allMatch(t -> LOCALE.matcher(String.valueOf(t.getKey())).matches()
+                        && t.getValue() instanceof String s && !s.isBlank() && s.length() <= max);
+    }
+
+    /** {@code options}: field, then enum value, then {@code label} and optional {@code consequence} per locale. */
+    private static void checkOptions(Map<String, Object> hints, Map<String, Object> schema, Set<String> fields,
+            List<String> problems) {
+        if (!hints.containsKey("options")) {
+            return;
+        }
+        if (!(hints.get("options") instanceof Map<?, ?> options)) {
+            problems.add("options is not an object");
+            return;
+        }
+        Map<?, ?> properties = schema.get("properties") instanceof Map<?, ?> p ? p : Map.of();
+        options.forEach((field, values) -> {
+            String name = String.valueOf(field);
+            List<?> allowed = properties.get(name) instanceof Map<?, ?> def && def.get("enum") instanceof List<?> e
+                    ? e : null;
+            if (!fields.contains(name) || allowed == null || !(values instanceof Map<?, ?> byValue)) {
+                problems.add("options: " + safe(name) + " is not a declared enum field with a map of values");
+                return;
+            }
+            byValue.forEach((value, entry) -> {
+                boolean ok = allowed.stream().anyMatch(a -> String.valueOf(a).equals(String.valueOf(value)))
+                        && entry instanceof Map<?, ?> m && m.keySet().stream().allMatch(
+                                k -> "label".equals(k) || "consequence".equals(k))
+                        && textsOk(((Map<?, ?>) entry).get("label"), 200)
+                        && (!((Map<?, ?>) entry).containsKey("consequence")
+                                || textsOk(((Map<?, ?>) entry).get("consequence"), 300));
+                if (!ok) {
+                    problems.add("options: " + safe(name) + "." + safe(String.valueOf(value)) + " is not an enum value"
+                            + " of the field with a label per locale (200 characters) and an optional consequence"
+                            + " per locale (300 characters)");
+                }
+            });
+        });
+    }
+
+    /** {@code units}: field, then a short suffix per locale such as {@code months}. */
+    private static void checkUnits(Map<String, Object> hints, Set<String> fields, List<String> problems) {
+        if (!hints.containsKey("units")) {
+            return;
+        }
+        if (!(hints.get("units") instanceof Map<?, ?> units)) {
+            problems.add("units is not an object");
+            return;
+        }
+        units.forEach((field, byLocale) -> {
+            if (!fields.contains(String.valueOf(field)) || !textsOk(byLocale, 30)) {
+                problems.add("units: " + safe(String.valueOf(field)) + " is not a declared field with a suffix per"
+                        + " locale of at most 30 characters");
+            }
+        });
+    }
+
+    /**
+     * {@code formats}: field, then {@code {grouping, currency | currencyFrom}}. A fixed ISO 4217 {@code currency}, or
+     * {@code currencyFrom}, a declared field that holds the code. Display only.
+     */
+    private static void checkFormats(Map<String, Object> hints, Map<String, Object> schema, Set<String> fields,
+            List<String> problems) {
+        Map<?, ?> properties = schema.get("properties") instanceof Map<?, ?> p ? p : Map.of();
+        if (!hints.containsKey("formats")) {
+            return;
+        }
+        if (!(hints.get("formats") instanceof Map<?, ?> formats)) {
+            problems.add("formats is not an object");
+            return;
+        }
+        formats.forEach((field, format) -> {
+            boolean ok = fields.contains(String.valueOf(field)) && format instanceof Map<?, ?> f && !f.isEmpty()
+                    && f.keySet().stream().allMatch(k -> Set.of("grouping", "currency", "currencyFrom").contains(k))
+                    && (!f.containsKey("grouping") || f.get("grouping") instanceof Boolean)
+                    && !(f.containsKey("currency") && f.containsKey("currencyFrom"))
+                    && (!f.containsKey("currency") || f.get("currency") instanceof String c
+                            && isCurrency(c))
+                    && (!f.containsKey("currencyFrom") || f.get("currencyFrom") instanceof String from
+                            && fields.contains(from) && !from.equals(String.valueOf(field))
+                            && !(properties.get(from) instanceof Map<?, ?> def && Boolean.TRUE.equals(def.get("mask"))));
+            if (!ok) {
+                problems.add("formats: " + safe(String.valueOf(field)) + " is not a declared field with grouping"
+                        + " (true or false) and at most one of currency (three capital letters) and currencyFrom"
+                        + " (a declared field)");
+            }
+        });
     }
 
     private static Map<String, Object> hintsOf(FormSpec form) {

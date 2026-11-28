@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, test, type Page } from '@playwright/test';
-import { meAn, metaWithProcesses } from '../src/mocks/fixtures';
+import { meAnReader, metaWithProcesses } from '../src/mocks/fixtures';
 import { createFakeProcessEngine } from '../src/mocks/processEngine';
 import { QUEUE_FORMS, QUEUE_TASKS, type QueueForm } from '../src/mocks/taskQueueDemo';
 import { mockHost, rememberLocale } from './mockHost';
@@ -30,7 +30,7 @@ const mutableForms = QUEUE_FORMS as Record<string, QueueForm>;
 const original = QUEUE_FORMS[QUEUE_TASKS.myCreditReview];
 test.afterEach(() => { if (original !== undefined) mutableForms[QUEUE_TASKS.myCreditReview] = original; });
 
-async function openLoanTask(page: Page, which: keyof typeof TASKS, size: { width: number; height: number }, locale: Locale = 'en', patch?: (task: Record<string, unknown>) => Record<string, unknown>) {
+async function openLoanTask(page: Page, which: keyof typeof TASKS, size: { width: number; height: number }, locale: Locale = 'en', patch?: (task: Record<string, unknown>) => Record<string, unknown>, history?: (entry: Record<string, unknown>) => Record<string, unknown>) {
   const task = TASKS[which];
   await page.setViewportSize(size);
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
@@ -40,15 +40,18 @@ async function openLoanTask(page: Page, which: keyof typeof TASKS, size: { width
   const engine = createFakeProcessEngine({ locale });
   await mockHost(page, 'ready');
   await page.route('**/api/bpm/meta', (route) => route.fulfill({ json: metaWithProcesses }));
-  await page.route('**/api/bpm/me', (route) => route.fulfill({ json: meAn }));
+  await page.route('**/api/bpm/me', (route) => route.fulfill({ json: meAnReader }));
   await page.route('**/api/bpm/rules/v1/**', (route) => route.fulfill({ status: 403, contentType: 'application/problem+json', body: JSON.stringify({ status: 403, code: 'PERMISSION_DENIED' }) }));
   await page.route('**/api/bpm/processes/v1/**', async (route) => {
     const request = route.request();
     const url = request.url();
-    const answer = engine.handle({ method: request.method(), path: url, headers: request.headers(), body: request.postData() ?? '', user: meAn.user.id, permissions: meAn.permissions });
+    const answer = engine.handle({ method: request.method(), path: url, headers: request.headers(), body: request.postData() ?? '', user: meAnReader.user.id, permissions: meAnReader.permissions });
     const isTask = request.method() === 'GET' && url.endsWith(`/tasks/${QUEUE_TASKS.myCreditReview}`);
     const named = isTask ? { ...(JSON.parse(answer.body) as Record<string, unknown>), name: task.title[locale], nodeId: task.node, assignee: 'role:CREDIT_MANAGER' } : undefined;
-    const body = named !== undefined ? JSON.stringify(patch !== undefined ? patch(named) : named) : answer.body;
+    // The history names the step the task sits on; the e2e task wears the loan step's id.
+    const entries = url.endsWith('/activities') ? JSON.parse(answer.body) as { entries: Record<string, unknown>[] } : undefined;
+    const aged = entries === undefined ? undefined : { ...entries, entries: entries.entries.map((entry) => (entry['type'] === 'TASK_COMPLETED' ? (history ?? ((e) => e))({ ...entry, nodeId: task.node }) : entry)) };
+    const body = aged !== undefined ? JSON.stringify(aged) : named !== undefined ? JSON.stringify(patch !== undefined ? patch(named) : named) : answer.body;
     await route.fulfill({ status: answer.status, headers: { ...answer.headers, 'content-length': String(Buffer.byteLength(body)) }, body });
   });
   await page.goto(`./#/tasks/${QUEUE_TASKS.myCreditReview}`);
@@ -96,7 +99,7 @@ for (const locale of ['en', 'vi'] as const) {
           // On a phone the action card follows the fields: it never floats over one.
           expect(await page.locator('.review-dock').evaluate((dock) => getComputedStyle(dock).position)).toBe('static');
         }
-        await page.screenshot({ path: `${SHOTS}/loan-${which}-${String(size.width)}-${locale}-v2.png`, fullPage: false });
+        await page.screenshot({ path: `${SHOTS}/loan-${which}-${String(size.width)}-${locale}-v3.png`, fullPage: false });
       });
     }
   }
@@ -109,7 +112,7 @@ test('TR_UI_623_rejecting_needs_a_reason', async ({ page }) => {
   await page.getByRole('button', { name: 'Complete task' }).click();
   await expect(page.getByText('Fill in this field.')).toBeVisible();
   await expect(page.getByLabel(L.en.reasonStar)).toHaveAttribute('aria-invalid', 'true');
-  await page.screenshot({ path: `${SHOTS}/loan-approval-reject-1440-en-v2.png`, fullPage: false });
+  await page.screenshot({ path: `${SHOTS}/loan-approval-reject-1440-en-v3.png`, fullPage: false });
   // Approving needs no reason.
   await page.getByRole('radio', { name: 'Approve', exact: true }).check();
   await expect(page.getByText('Fill in this field.')).toHaveCount(0);
@@ -122,7 +125,7 @@ test('TR_UI_623_the_proposer_sees_a_calm_four_eyes_notice', async ({ page }) => 
   await expect(note).toContainText('You worked on this case');
   await expect(note).toContainText('credit manager');
   await expect(page.getByRole('alert')).toHaveCount(0);
-  await page.screenshot({ path: `${SHOTS}/loan-approval-foureyes-1440-en-v2.png`, fullPage: false });
+  await page.screenshot({ path: `${SHOTS}/loan-approval-foureyes-1440-en-v3.png`, fullPage: false });
 });
 
 test('TR_UI_623_after_approval_the_result_is_shown', async ({ page }) => {
@@ -131,35 +134,70 @@ test('TR_UI_623_after_approval_the_result_is_shown', async ({ page }) => {
   await page.getByRole('button', { name: 'Complete task' }).click();
   await expect(page.getByText(L.en.done)).toBeVisible();
   await expect(page.getByRole('link', { name: /Back to/ })).toBeVisible();
-  await page.screenshot({ path: `${SHOTS}/loan-approval-result-1440-en-v2.png`, fullPage: false });
+  await page.screenshot({ path: `${SHOTS}/loan-approval-result-1440-en-v3.png`, fullPage: false });
 });
 
 
 for (const size of SIZES) {
-  test(`TR_UI_623_a_completed_task_shows_the_recorded_decision_${String(size.width)}`, async ({ page }) => {
+  test(`TR_UI_663_a_completed_task_shows_the_recorded_decision_${String(size.width)}`, async ({ page }) => {
     await openLoanTask(page, 'approval', size, 'en');
     await page.getByRole('radio', { name: 'Approve', exact: true }).check();
     await page.getByRole('button', { name: 'Complete task' }).click();
-    const record = page.getByRole('article', { name: 'Current values' });
+    const record = page.getByRole('article', { name: 'Recorded decision' });
     await expect(record).toBeVisible();
-    // Who and when, then the decision as submitted, with no form and no action to take.
+    // Who and when, then the decision as the engine recorded it, with no form and no action to take.
     await expect(record).toContainText(/Completed by an at /);
     await expect(record.locator('dt', { hasText: 'Your decision' })).toBeVisible();
     await expect(record.locator('dd').first()).toHaveText('Approve');
-    await expect(page.getByText('Values now on the case, not as submitted.')).toBeVisible();
+    await expect(page.getByText('now on the case')).toHaveCount(0);
     await expect(page.getByRole('form')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Complete task' })).toHaveCount(0);
     await expect(record.getByText('APPROVED', { exact: true })).toHaveCount(0);
     await expect(record.getByText('***')).toHaveCount(0);
+    await expect(record.getByText('Not recorded:', { exact: false })).toHaveCount(0);
     expect(await noHorizontalScroll(page)).toBe(true);
-    await page.screenshot({ path: `${SHOTS}/completed-${String(size.width)}-v2.png`, fullPage: false });
+    await page.screenshot({ path: `${SHOTS}/recorded-${String(size.width)}.png`, fullPage: false });
   });
 }
 
-test('TR_UI_623_a_completed_task_reads_in_vietnamese', async ({ page }) => {
+test('TR_UI_663_hidden_fields_and_paths_not_recorded_read_in_plain_text', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'en', undefined, (entry) => ({
+    ...entry, submission: { ...(entry['submission'] as object), applicantId: { masked: true } }, unrecordedFields: ['note', 'address.floor'],
+  }));
+  await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+  await page.getByRole('button', { name: 'Complete task' }).click();
+  const record = page.getByRole('article', { name: 'Recorded decision' });
+  await expect(record.getByText('Not recorded: note, address.floor')).toBeVisible();
+  await expect(record.getByText('Not recorded: note, address.floor')).toHaveCSS('border-top-width', '0px');
+  await page.screenshot({ path: `${SHOTS}/recorded-notes-1440.png`, fullPage: false });
+});
+
+test('TR_UI_663_a_task_completed_before_it_was_recorded_falls_back_to_current_values', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'en', undefined, (entry) => Object.fromEntries(Object.entries(entry).filter(([key]) => key !== 'submission')));
+  await page.getByRole('radio', { name: 'Approve', exact: true }).check();
+  await page.getByRole('button', { name: 'Complete task' }).click();
+  const record = page.getByRole('article', { name: 'Current values' });
+  await expect(record).toBeVisible();
+  await expect(record.getByText('The submitted values are not available. These are the values now on the case.')).toBeVisible();
+  await expect(page.getByRole('article', { name: 'Recorded decision' })).toHaveCount(0);
+  await page.screenshot({ path: `${SHOTS}/recorded-fallback-1440.png`, fullPage: false });
+});
+
+test('TR_UI_663_a_completed_task_reads_in_vietnamese', async ({ page }) => {
   await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'vi', (task) => ({ ...task, status: 'COMPLETED', completedBy: 'an', completedAt: '2026-11-20T03:20:00Z', allowedActions: [] }));
+  // The history holds no record of this task (it was not completed here), so the view says so in words.
   const record = page.getByRole('article', { name: 'Giá trị hiện tại' });
   await expect(record).toBeVisible();
   await expect(record).toContainText('an đã hoàn thành lúc');
   await expect(page.getByRole('form')).toHaveCount(0);
+});
+
+test('TR_UI_663_the_recorded_decision_reads_in_vietnamese', async ({ page }) => {
+  await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'vi');
+  await page.getByRole('radio', { name: 'Phê duyệt', exact: true }).check();
+  await page.getByRole('button', { name: 'Hoàn thành tác vụ' }).click();
+  const record = page.getByRole('article', { name: 'Quyết định đã ghi nhận' });
+  await expect(record).toBeVisible();
+  await expect(record.locator('dd').first()).toHaveText('Phê duyệt');
+  await page.screenshot({ path: `${SHOTS}/recorded-1440-vi.png`, fullPage: false });
 });

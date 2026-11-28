@@ -17,5 +17,7 @@ public enum LifecycleAction {
     /** A pending retirement request was withdrawn with a reason; the version stays published (RLE-038). */
     RETIRE_CANCELLED,
     /** The author discarded a draft that was no longer wanted (RLE-098); the version stays in the history. */
-    DISCARDED
+    DISCARDED,
+    /** A second person re-wrote the approval seal of an approved version under the current key (RLE-223). */
+    RESEALED
 }

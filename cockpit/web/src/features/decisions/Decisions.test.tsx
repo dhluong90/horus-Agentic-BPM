@@ -138,7 +138,7 @@ describe('one decision', () => {
     const crumbs = screen.getByRole('navigation', { name: 'Breadcrumb' });
     expect(within(crumbs).getByRole('link', { name: 'Decisions' })).toBeInTheDocument();
     expect(crumbs).not.toHaveTextContent(/01KF/);
-    expect(screen.getByText('Rule R2 matched', { selector: '.why .badge' })).toBeInTheDocument();
+    expect(screen.getByText('Rule R2 matched', { selector: '.why .status' })).toBeInTheDocument();
     const explain = calls.find((call) => call.path.endsWith('/explain'));
     expect(explain?.path).toBe(`/decisions/${NAMED}/explain`);
     expect(explain?.query.get('lang')).toBe('en');
@@ -186,7 +186,7 @@ describe('one decision', () => {
     const user = userEvent.setup();
     open('#/decisions/01KF2Q8Z0RQ6V2Y8M1C4N5P7TC');
     expect(await screen.findByText('The decision failed, so nothing was produced.')).toBeInTheDocument();
-    expect(screen.getByText('Failed', { selector: '.why .badge' })).toBeInTheDocument();
+    expect(screen.getByText('Failed', { selector: '.why .status' })).toBeInTheDocument();
     const why = screen.getByRole('article', { name: 'Why' });
     expect(why).toHaveClass('why--failed');
     expect(within(why).getByText('The rule set could not be evaluated, so no result was produced.')).toBeVisible();

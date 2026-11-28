@@ -102,6 +102,8 @@ export interface ProcessSeed {
   definitions?: readonly DemoDefinition[];
   /** The change list of the pending onboarding version is cut off at the engine's limit. */
   truncatedDiff?: boolean;
+  /** Stored layouts (the diagram of an imported BPMN file) by `<key>:<version>`; a version not listed has none (204). */
+  layouts?: Readonly<Record<string, unknown>>;
   startedBy?: string;
   reportedBy?: string;
   /** The tenant's language of the demo data: names, reasons and answer words. */
@@ -183,6 +185,8 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const overrides: RecordedOverride[] = [];
   const completions: RecordedCompletion[] = [];
   const submittedData = new Map<string, Record<string, unknown>>();
+  /** What the engine's history keeps of a completed form task (#663): the stored submission and the paths it did not store. */
+  const recordedSubmissions = new Map<string, { instanceId: string; nodeId: string; actor: string; submission: Record<string, unknown>; unrecordedFields: string[] }>();
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
   const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
   const incidentCommands: RecordedIncidentCommand[] = [];
@@ -591,6 +595,13 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     }
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject|:withdraw)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
+    const layoutRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/layout$/.exec(path);
+    if (layoutRoute && request.method === 'GET') {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      const stored = seed.layouts?.[`${layoutRoute[1] ?? ''}:${layoutRoute[2] ?? ''}`];
+      if (stored === undefined) return { status: 204, headers: { ETag: '"0"' }, body: '' };
+      return json(200, { revision: 1, layoutHash: '0'.repeat(64), definitionHash: '0'.repeat(64), source: 'BPMN', createdBy: 'import', createdAt: '2026-11-19T09:00:00Z', layout: stored }, { ETag: '"1"' });
+    }
     const version = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/export)?$/.exec(path);
     if (request.method === 'GET' && version) {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
@@ -620,8 +631,14 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       if (instanceMatch[2] === undefined) return json(200, found.instance, { ETag: `"${String(found.instance['lockVersion'])}"` });
       if (seed.activities === 'missing') return problem(404, 'INPUT_INVALID');
       if (seed.activities === 'failing') return problem(500, 'INTERNAL');
-      if (!found.activities) return problem(404, 'INSTANCE_NOT_FOUND');
-      return json(200, found.activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
+      const added = [...recordedSubmissions.values()].filter((item) => item.instanceId === id).map((item) => ({
+        id: `H-${item.nodeId}-done`, type: 'TASK_COMPLETED', nodeId: item.nodeId, actor: item.actor, occurredAt: '2026-11-20T03:20:00Z',
+        submission: item.submission, ...(item.unrecordedFields.length > 0 ? { unrecordedFields: item.unrecordedFields } : {}),
+      }));
+      const base = found.activities ?? (added.length === 0 ? undefined : { instanceId: id, startedAt: NOW, endedAt: null, nodes: [], entries: [], hasMore: false });
+      if (base === undefined) return problem(404, 'INSTANCE_NOT_FOUND');
+      const activities = added.length === 0 ? base : { ...base, entries: [...base.entries, ...added] };
+      return json(200, activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
     }
     if (request.method === 'GET' && path === `${BASE}/incidents`) return listIncidents(url, request);
     const incidentMatch = /^\/api\/bpm\/processes\/v1\/incidents\/([^/:]+)(?::(retry|resolve|approve-resolution|reject-resolution))?$/.exec(path);
@@ -709,6 +726,14 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         if (errors.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations: errors.map((e) => `$.${e.pointer.slice(1)}: ${e.rule}`), errors });
         completions.push({ taskId: task.id, actor: request.user, result, ifMatch, idempotencyKey });
         const properties = (declared.schema['properties'] ?? {}) as Record<string, { mask?: boolean }>;
+        // A masked field the operator left alone still holds its value on the case, so it is recorded as the marker.
+        const untouched: [string, unknown][] = Object.keys(declared.data).filter((name) => properties[name]?.mask === true && !(name in result)).map((name) => [name, { masked: true }]);
+        const sent: [string, unknown][] = Object.entries(result).filter(([name]) => name in properties).map(([name, value]) => [name, properties[name]?.mask === true ? { masked: true } : value]);
+        recordedSubmissions.set(task.id, {
+          instanceId: INSTANCE_ID, nodeId: task.nodeId, actor: request.user,
+          submission: Object.fromEntries([...untouched, ...sent]),
+          unrecordedFields: Object.keys(result).filter((name) => !(name in properties)),
+        });
         submittedData.set(task.id, Object.fromEntries(Object.entries(result).map(([name, value]) => [name, properties[name]?.mask === true ? '***' : value])));
       }
       Object.assign(task, { status: 'COMPLETED', completedBy: request.user, completedAt: '2026-11-20T03:20:00Z', lockVersion: task.lockVersion + 1 });

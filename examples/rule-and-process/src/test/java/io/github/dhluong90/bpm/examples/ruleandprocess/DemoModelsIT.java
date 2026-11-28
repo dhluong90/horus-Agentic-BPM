@@ -72,7 +72,7 @@ class DemoModelsIT {
             Map.entry("loan-data", Map.of("creditScore", 0, "profile", Map.of("name", "Nguyen Van An"))));
 
     /** Processes a plain start refuses because only a message or a signal starts them; each has its own test below. */
-    static final List<String> TRIGGERED = List.of("loan-intake", "onboarding");
+    static final List<String> TRIGGERED = List.of("loan-intake", "loan-intake-receive", "onboarding");
 
     @Container
     static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer(TestImages.postgres());
@@ -183,7 +183,7 @@ class DemoModelsIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, Map<String, String> headers)
             throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
         headers.forEach(request::header);
@@ -328,12 +328,12 @@ class DemoModelsIT {
         assertThat(task).as("an open task on " + nodeId + " in " + instance).isNotNull();
         String path = "/api/bpm/processes/v1/tasks/" + task.get("id").stringValue();
         int lock = task.get("lockVersion").intValue();
-        HttpResponse<String> claim = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path + ":claim"))
+        HttpResponse<String> claim = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path + ":claim"))
                 .header("Authorization", basic(user)).header("If-Match", "\"" + lock + "\"")
                 .header("Idempotency-Key", "claim-" + instanceId).POST(HttpRequest.BodyPublishers.noBody()).build(),
                 HttpResponse.BodyHandlers.ofString());
         assertThat(claim.statusCode()).as(claim.body()).isEqualTo(200);
-        HttpResponse<String> complete = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path + ":complete"))
+        HttpResponse<String> complete = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path + ":complete"))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .header("If-Match", "\"" + (lock + 1) + "\"").header("Idempotency-Key", "complete-" + instanceId)
                 .POST(HttpRequest.BodyPublishers.ofString("{\"result\":{\"upheld\":true}}")).build(),
@@ -398,7 +398,7 @@ class DemoModelsIT {
     }
 
     private HttpResponse<String> post(String user, String path, String body, String idempotencyKey) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .header("Idempotency-Key", idempotencyKey)
                 .POST(HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
@@ -418,12 +418,12 @@ class DemoModelsIT {
     }
 
     private HttpResponse<String> get(String user, String path) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> send(String user, String method, String path, String body) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", "application/json")
                 .method(method, HttpRequest.BodyPublishers.ofString(body)).build(), HttpResponse.BodyHandlers.ofString());
     }

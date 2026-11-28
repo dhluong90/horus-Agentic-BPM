@@ -244,6 +244,15 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
             startOnGateway(gateway, start, root, ctx);
             return;
         }
+        io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask receive = process.process().flowElements()
+                .stream().filter(io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask.class::isInstance)
+                .map(io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask.class::cast)
+                .filter(io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask::instantiate).findFirst()
+                .orElse(null);
+        if (receive != null) {
+            startOnReceiveTask(receive, start, root, ctx);
+            return;
+        }
         // A process has exactly one start event of its own scope (the compiler checks): a none, signal, message or
         // conditional one. A none start event wins if a process also has an event start.
         StartEvent startEvent = process.process().flowElements().stream().filter(StartEvent.class::isInstance)
@@ -254,6 +263,31 @@ public final class DefaultExecutionKernel implements ExecutionKernel {
         armEventSubProcesses(ctx, root);
         Token flow = ctx.createToken(TokenKind.FLOW, startEvent.id(), root.id());
         ctx.enqueue(flow);
+    }
+
+    /**
+     * #632: a receive task with {@code instantiate="true"}. The message that created the instance is the one the task
+     * waits for, so the token starts after it: the task never waits. A start with no message is refused.
+     */
+    private void startOnReceiveTask(io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask receive,
+            Command.Start start, Token root, WorkingContext ctx) {
+        if (!receive.id().equals(start.catchNodeId())) {
+            throw new ExecutionException("START_TRIGGER_REQUIRED", receive.id(), "The process starts on the message"
+                    + " that receive task " + receive.id() + " waits for; none was given");
+        }
+        for (io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping out
+                : receive.extensions().all(io.github.dhluong90.bpm.process.internal.model.horus.OutputMapping.class)) {
+            if (!start.variables().containsKey(out.from())) {
+                throw new ExecutionException("MESSAGE_FIELD_MISSING", receive.id(), "The message has no field "
+                        + out.from());
+            }
+            ctx.variables().set(out.name(), start.variables().get(out.from()));
+        }
+        armEventSubProcesses(ctx, root);
+        Token flow = ctx.createToken(TokenKind.FLOW, receive.id(), root.id());
+        ctx.history("RECEIVE_TASK_STARTED", flow, Map.of("task", receive.id()));
+        ctx.history("NODE_COMPLETED", flow, Map.of());
+        ctx.takeOutgoing(flow, receive);
     }
 
     /**

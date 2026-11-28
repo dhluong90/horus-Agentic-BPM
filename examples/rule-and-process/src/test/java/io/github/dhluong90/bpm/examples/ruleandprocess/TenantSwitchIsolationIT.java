@@ -159,7 +159,7 @@ class TenantSwitchIsolationIT {
     }
 
     private String submit(String applicationId) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/cards/applications"))
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/cards/applications"))
                 .header("Authorization", "Basic " + Base64.getEncoder()
                         .encodeToString("tuan:it-pass".getBytes(StandardCharsets.UTF_8)))
                 .header("Content-Type", "application/json")
@@ -172,7 +172,7 @@ class TenantSwitchIsolationIT {
     }
 
     private HttpResponse<String> lan(String path, String tenant) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Bearer " + LAN_TOKEN).GET();
         if (tenant != null) {
             request.header("X-Tenant-Id", tenant);

@@ -185,6 +185,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-336 | `PRE_336_*` in `AdHocPostgresIT` | Integration on PostgreSQL, permission, idempotent replay, cancel of the remaining task | M3 | `TR-SEC-02`, `TR-IDEM-01` | Done (#500) |
 | PRE-252 | `PRE_252_*` in `TaskElementsImportTest` | Import of a bad script, a missing script, FEEL and JavaScript | M3 | `TR-STD-04` | Done (#485) |
 | PRE-253 | `PRE_253_*` in `TaskElementsTest` | Hostile script bodies, the step budget and the size limit | M3 | `TR-SEC-01` | Done (#485) |
+| PRE-393 | `PRE_393_*` in `TaskFormsTest` | Unit | M3 | `TR-UI-02`, `TR-STD-03` | Done |
 | PRE-219 | `PRE_219_*` in `TaskFormTest`, `TaskFormsTest` and `ClasspathFormRegistryTest` | Testcontainers (imports and request-approval), unit | M2 | `TR-UI-02`, `TR-SEC-01`, `TR-STD-03` | Done (#79) |
 | PRE-220 | `PRE_220_*` in `TaskFormsTest`; `PRE_031_*` in `TaskFormTest` and `ProcessRestContractTest` | Unit, Testcontainers, WebMvC against `openapi.yaml` | M2 | `TR-SEC-05`, `TR-UI-02` | Done (#79) |
 | PRE-254 | `PRE_254_*` in `ExclusiveGatewayTest` and `ExpressionLanguagesTest` | Gold loan over 1,000 in FEEL; lists and dates | M3 | `TR-STD-04` | Done (#498) |
@@ -250,6 +251,20 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-374 | `PRE_374_*` in `ActivityDefaultFlowAndTerminateTest` and `BoundaryEventsPostgresIT` | A terminate reached from an error boundary ends the instance with every other branch | M3 | `TR-STD-04` | Done |
 | PRE-375 | `PRE_375_*` in `ActivityDefaultFlowAndTerminateTest` | A flow condition reads a field of a rule task result | M3 | `TR-STD-04` | Done |
 | PRE-376 | `PRE_376_*` in `ActivityDefaultFlowAndTerminateTest` | Two boundary paths share one end event | M3 | `TR-STD-04` | Done |
+| PRE-390 | `PRE_390_*` in `TaskFormTest`; `PRE_027_activities_body_*` in `ProcessRestContractTest` | A completed task's history records the submission, masked fields masked | M3 | `TR-SEC-05`, `TR-AUD-01` | Done |
+| PRE-377 | `PRE_377_*` in `SagaCompensationTest` | Each finished undo step raises `processes.compensation.step-completed.v1` | M3 | `TR-COMP-01` | Done |
+| PRE-378 | `PRE_378_*` in `IdempotencyWaitPostgresIT` | A running duplicate is refused within the lock timeout; a later retry replays | M3 | `TR-IDEM-01` | Done |
+| PRE-379 | `PRE_379_*` in `IdempotencyWaitPostgresIT` | A duplicate that waits within the timeout returns the first result | M3 | `TR-IDEM-01` | Done |
+| PRE-380 | `PRE_380_*` in `IdempotencyWaitPostgresIT` | Rewritten source and hashes are refused against the approval record | M3 | `TR-SEC-04` | Done |
+| PRE-381 | `PRE_381_*` in `IdempotencyWaitPostgresIT`, `IdempotencyLockTimeoutSettingsTest` | The approval record is append-only; the lock timeout is lowered only | M3 | `TR-SEC-04` | Done |
+| PRE-382 | `PRE_382_*` in `RefusalsLiftedTest` and `ConformanceSuiteTest` | A start event with `isInterrupting="false"` is read in every scope | M3 | `TR-STD-04` | Done (#632) |
+| PRE-383 | `PRE_383_*` in `RefusalsLiftedTest` and `ConformanceSuiteTest` | A compensation activity may be any task type or a call activity: an operator does the undo through an incident; unused content is refused | M3 | `TR-STD-04` | Done (#632) |
+| PRE-384 | `PRE_384_*` in `RefusalsLiftedTest`, `ConformanceSuiteTest` and `DataStoreAndGatewayStartPostgresIT` | A receive task with `instantiate="true"` starts the process on the first message | M3 | `TR-STD-04` | Done (#632) |
+| PRE-385 | `PRE_385_*` in `RefusalsLiftedTest` | A service task names its handler with `implementation="urn:horus-bpm:handler:<name>"` | M3 | `TR-STD-16` | Done (#632) |
+| PRE-386 | `PRE_386_*` in `ModellerFileReadingTest`; `XmlHardeningTest` | A file may declare ISO-8859-n, windows-125n or US-ASCII | M3 | `TR-STD-04` | Done |
+| PRE-387 | `PRE_387_*` in `ModellerFileReadingTest` | A process id that is not a key, an unnamed message and an id-less lane set are read | M3 | `TR-STD-04` | Done |
+| PRE-388 | `PRE_388_*` in `ModellerFileReadingTest` | A process that does not say `isExecutable` is executable | M3 | `TR-STD-04` | Done |
+| PRE-389 | `PRE_389_*` in `ModellerFileReadingTest` | An import and an item definition are ignored with a warning | M3 | `TR-STD-04` | Done |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 
