@@ -895,8 +895,7 @@ public final class DefaultRuleEngine implements RuleEngine {
                                 + version.ruleSet() + " is refused");
                 // The caller gets a code and the rule set, nothing derived from a key.
                 return refuse(tenant, caller, onBehalfOf, request, version, now, at, MASKING_KEY_MISMATCH,
-                        MASKING_KEY_MISMATCH + ": the masking key in use does not match the key first recorded for it,"
-                                + " so the inputs of " + version.ruleSet() + " cannot be logged");
+                        maskingKeyMismatchDetail(version.ruleSet()));
             }
         }
         String echoed = rules.inputs().stream()
@@ -1072,6 +1071,18 @@ public final class DefaultRuleEngine implements RuleEngine {
             }
         }
         return masked;
+    }
+
+    /**
+     * Returns the text a caller gets when a masking key does not match the key first recorded under its id: the code
+     * and the rule set, nothing derived from a key (TR-SEC-10).
+     *
+     * @param ruleSet the rule set whose inputs cannot be logged
+     * @return the detail of the refusal
+     */
+    public static String maskingKeyMismatchDetail(String ruleSet) {
+        return MASKING_KEY_MISMATCH + ": the masking key in use does not match the key first recorded for it, so the"
+                + " inputs of " + ruleSet + " cannot be logged";
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
