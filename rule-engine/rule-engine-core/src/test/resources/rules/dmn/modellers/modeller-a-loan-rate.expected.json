@@ -1,0 +1,7 @@
+[
+  {"inputs": {"score": 599, "product": "PERSONAL"}, "rules": ["r_D1"], "outputs": {"rate": 18.5}},
+  {"inputs": {"score": 600, "product": "PERSONAL"}, "rules": ["r_E1"], "outputs": {"rate": 12.25}},
+  {"inputs": {"score": 750, "product": "PERSONAL"}, "rules": ["r_F1"], "outputs": {"rate": 9.9}},
+  {"inputs": {"score": 299, "product": "PERSONAL"}, "rules": [], "outputs": null},
+  {"inputs": {"score": 700, "product": "AUTO"}, "rules": [], "outputs": null}
+]
