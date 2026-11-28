@@ -27,6 +27,25 @@
       <artifactId>rule-engine-core</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- TracingOverheadBenchmark (#114): the two tracing bindings of the starters, on a real OpenTelemetry tracer. -->
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>rule-engine-spring-boot-starter</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.github.dhluong90.bpm</groupId>
+      <artifactId>process-engine-spring-boot-starter</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-bridge-otel</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>io.opentelemetry</groupId>
+      <artifactId>opentelemetry-sdk</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.openjdk.jmh</groupId>
       <artifactId>jmh-core</artifactId>

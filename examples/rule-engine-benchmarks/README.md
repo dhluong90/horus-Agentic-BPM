@@ -6,6 +6,7 @@ JMH benchmarks of the Rule Engine evaluator. Built and run in CI on every build 
 |---|---|---|
 | `EvaluationBenchmark.evaluateFirstHit200Rows` | `TR-PERF-01`: one evaluation of a cached 200-row `first` table, input reaching the default row, no decision log write | p99 under 100 us, fails the build |
 | `CompileBenchmark.readAndCompile1000Rows` | `TR-PERF-02`: reading and compiling a 1,000-row table from YAML | p99 under 500 ms, reported |
+| `TracingOverheadBenchmark.*` | `TR-OBS-03`: the same evaluation, and one Process Engine step span, with tracing off, with the sampler off and with every span recorded | reported, no budget; figures in the wiki page Tracing |
 
 ## Run
 

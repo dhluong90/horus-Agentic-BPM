@@ -8,6 +8,11 @@ package io.github.dhluong90.bpm.process.spi;
  * (TR-SEC-05). Implementations must not throw; one that does is ignored. The default does nothing.
  *
  * <p>The starter binds an implementation to the host's Micrometer {@code Tracer} when the host has one.
+ *
+ * <p>An async step crosses transactions and often threads and processes: the step that schedules the call ends, and
+ * the result is applied later, in a trace of its own. The engine keeps the scheduling span's {@link Span#link()} in the
+ * job and hands it back as {@code linkedFrom} when it starts the span that applies the result, so the tracer can draw a
+ * span link between the two. The link names ids only: a trace id and a span id.
  */
 public interface ProcessTracing {
 
@@ -31,6 +36,23 @@ public interface ProcessTracing {
      */
     Span startStep(String tenantId, String definitionKey, int definitionVersion, String stepKind);
 
+    /**
+     * A step is about to run, as the continuation of an earlier span: the result of an async service or agent call.
+     * The default ignores the link and starts a plain step span, so an implementation written before links existed
+     * keeps working.
+     *
+     * @param tenantId the tenant
+     * @param definitionKey the process key
+     * @param definitionVersion the definition version
+     * @param stepKind the command kind, for example {@code ASYNC_RESULT}
+     * @param linkedFrom the {@link Span#link()} of the span that scheduled the call, never null here
+     * @return the span; {@link Span#end} is called exactly once
+     */
+    default Span startStep(String tenantId, String definitionKey, int definitionVersion, String stepKind,
+            String linkedFrom) {
+        return startStep(tenantId, definitionKey, definitionVersion, stepKind);
+    }
+
     /** One step span. */
     interface Span {
 
@@ -40,6 +62,17 @@ public interface ProcessTracing {
             public void end(String outcome, String errorCode, Throwable failure) {
             }
         };
+
+        /**
+         * Names this span so that a later span can link to it: its trace id and span id, as an opaque string made of
+         * ids only. The engine stores it in the async job and returns it to
+         * {@link ProcessTracing#startStep(String, String, int, String, String)}. Valid after {@link #end} too.
+         *
+         * @return the reference, or null when the span cannot be linked to (the default)
+         */
+        default String link() {
+            return null;
+        }
 
         /**
          * The step ended.

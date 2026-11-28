@@ -2772,7 +2772,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             "ASYNC_RESULT_ACCEPTED", job.nodeId(), job.tokenId(), attemptId, reportedBy, clock.instant(),
                             details)));
                     run(definition, row, state, new Command.AsyncResult(job.tokenId(), job.id(), completed),
-                            new RunAs.EngineWork(tenant, ASYNC_ACTOR));
+                            new RunAs.EngineWork(tenant, ASYNC_ACTOR), traceLinkOf(job));
                 } catch (RuntimeException e) {
                     throw new AttemptRunFailed(e);
                 }
@@ -2851,7 +2851,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 // Always four eyes: the reviewer is never the reporter of the result (participants) or the starter.
                 run(definition, row, state, new Command.RouteToReview(job.tokenId(), job.id(), refused.reviewer(),
                         true, refused.code(), refused.reasons(), reviewContext(job, attemptId, reportedBy, details)),
-                        new RunAs.EngineWork(tenant, ASYNC_ACTOR));
+                        new RunAs.EngineWork(tenant, ASYNC_ACTOR), traceLinkOf(job));
             } catch (RuntimeException e) {
                 throw new RefusalNotRouted(e, details);
             }
@@ -5211,14 +5211,33 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     }
 
     private io.github.dhluong90.bpm.process.spi.ProcessTracing.Span startStepSpan(StoredDefinition definition,
-            String stepKind) {
+            String stepKind, String linkedFrom) {
         try {
-            io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span = tracing.startStep(definition.tenantId(),
-                    definition.key(), definition.version(), stepKind);
+            io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span = linkedFrom == null
+                    ? tracing.startStep(definition.tenantId(), definition.key(), definition.version(), stepKind)
+                    : tracing.startStep(definition.tenantId(), definition.key(), definition.version(), stepKind,
+                            linkedFrom);
             return span == null ? io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE : span;
         } catch (RuntimeException ignored) {
             return io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE;
         }
+    }
+
+    /** The reference a later span links to, or null; a tracer that throws never fails a step. */
+    private static String spanLink(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span) {
+        try {
+            return span.link();
+        } catch (RuntimeException ignored) {
+            return null;
+        }
+    }
+
+    /** The scheduling span's reference kept in an async job's payload; ids only, never a value of the request. */
+    static final String TRACE_LINK = "traceLink";
+
+    /** What the job's payload holds as the link to the span that scheduled it, or null. */
+    private static String traceLinkOf(JobRow job) {
+        return Values.readMap(job.payloadJson()).get(TRACE_LINK) instanceof String link ? link : null;
     }
 
     private static void endStepSpan(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span, String outcome,
@@ -5536,6 +5555,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
 
     private List<IncidentSite> run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first,
             RunAs as) {
+        return run(definition, row, initial, first, as, null);
+    }
+
+    /**
+     * Runs the command and everything it queues. {@code firstLinkedFrom}, when not null, is the span reference of the
+     * step that scheduled an async call whose result is the first command: its span is linked to that one.
+     */
+    private List<IncidentSite> run(StoredDefinition definition, InstanceRow row, InstanceState initial, Command first,
+            RunAs as, String firstLinkedFrom) {
         Compiled compiled = compiled(definition);
         InstanceState state = initial;
         List<HistoryEntry> history = new ArrayList<>();
@@ -5570,7 +5598,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }
                 Queued item = queue.poll();
                 Command command = item.command();
-                var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command));
+                var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command),
+                        applied == 1 ? firstLinkedFrom : null);
+                String scheduledBy = spanLink(span);
                 String spanOutcome = "OK";
                 Throwable spanFailure = null;
                 Transition t;
@@ -5682,6 +5712,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                                 payload.put("businessKey", state.businessKey());
                             }
                             payload.put("inputs", call.inputs());
+                            if (scheduledBy != null) {
+                                payload.put(TRACE_LINK, scheduledBy);
+                            }
                             Duration lease = timeout.plus(async.leaseMargin());
                             newJobs.add(JobRow.due(state.tenantId(), call.attemptId(), state.instanceId(),
                                     definition.id(), call.tokenId(), kind, call.nodeId(),
@@ -5710,6 +5743,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                             payload.put(AUDIT_INPUTS, AgentAudit.maskInputs(state.tenantId(), node, call.inputs(),
                                     inputMasker));
                             payload.put("guard", AgentGuardSpecs.payload(node));
+                            if (scheduledBy != null) {
+                                payload.put(TRACE_LINK, scheduledBy);
+                            }
                             // The step's own retry policy, from the approved definition, or the runner's (#58).
                             RetryPolicy retry = node.extensions().first(RetryPolicy.class).orElse(null);
                             int attempts = retry == null ? runner.maxAttempts() : retry.attempts();
