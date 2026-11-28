@@ -559,7 +559,7 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 
 ## Definition Diagram, First Slice (Cockpit 0.2)
 
-These two statements are the part of `CKP-016` and `CKP-029` that ships before stored layouts (slice 8.8) and the host details page: every definition is laid out by the cockpit, and the graph is read from the version's BPMN export (`exportDefinition`, `format=bpmn`), whose generated BPMNDI is not a stored layout and is not read.
+These two statements are the part of `CKP-016` and `CKP-029` that ships before stored layouts (slice 8.8) and the host details page: every definition is laid out by the cockpit, and the graph is read from the version's BPMN export (`exportDefinition`, `format=bpmn`), whose generated BPMNDI is not a stored layout and is not read. Since #209 the stored layout (`GET .../layout`, the imported file's own BPMNDI as revision 1) is read as well: a step it lists is drawn at its bounds, a flow it lists through its waypoints, a flow it does not route between the moved steps with at most one bend, and everything it leaves out where automatic layout puts it. A version with no layout, or a read that fails, is laid out automatically as before (`CKP_209_*` in `storedLayout.test.ts`, `TR_UI_209_*` in `bpmn-di.spec.ts`).
 
 ### CKP-069 A definition without a stored layout is drawn left to right with no overlapping nodes, each with its type and name
 - **Traces to:** `TR-UI-07`, `TR-DEF-02`, `TR-UI-03`, `TR-UI-06`

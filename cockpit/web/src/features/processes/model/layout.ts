@@ -1,4 +1,5 @@
 import dagre from '@dagrejs/dagre';
+import { applyStoredLayout } from './storedLayout';
 import { isKnownNodeType, type DiagramGraph, type DiagramNode } from './bpmnGraph';
 
 /*
@@ -151,7 +152,7 @@ export const TASK_TEXT = { padX: TASK_PAD_X, padY: TASK_PAD_Y, nameLine: NAME_LI
 export const CAPTION_LINE_HEIGHT = CAPTION_LINE;
 
 /** Moves an edge end from the box edge onto the symbol's outline, so the arrow touches the circle or diamond. */
-function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
+export function onOutline(end: Point, toward: Point, node: PlacedNode): Point {
   if (node.shape === 'task') return end;
   const centre = symbolCentre(node);
   const dx = toward.x - centre.x;
@@ -323,7 +324,9 @@ function layoutLevel(graph: DiagramGraph, scope: string | undefined, typeLabel: 
  */
 export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => string = (type) => type, options: LayoutOptions = {}): Layout {
   const level = layoutLevel(graph, undefined, typeLabel, options);
-  const base: Layout = { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
+  const placed: Layout = { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
+  // The model's own diagram wins where it has coordinates; automatic layout stands for the rest.
+  const base = graph.stored === undefined ? placed : applyStoredLayout(placed, graph.stored);
   return graph.data === undefined ? base : placeData(graph.data, base);
 }
 

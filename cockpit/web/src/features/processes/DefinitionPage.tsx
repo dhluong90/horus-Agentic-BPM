@@ -62,7 +62,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
   useWantNames({ users: requester ? [requester] : [] });
   const subtitle = pending && requester !== null && requester !== undefined
     ? t('definition.subtitlePending', { version: String(version), who: personName(requester, suppliedName(details.data, 'requestedBy')) })
-    : t('definition.subtitle', { version: String(version) });
+    : t(graph.data?.stored === undefined ? 'definition.subtitle' : 'definition.subtitleStored', { version: String(version) });
   const docked = pending || decided !== undefined;
   const pendingOrDraft = pending || details.data?.status === 'DRAFT';
   // Fields whose masking nobody set (PD-146): a calm note, apart from the decision; it never blocks approval.

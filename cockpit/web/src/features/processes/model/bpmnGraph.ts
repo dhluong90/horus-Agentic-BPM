@@ -1,3 +1,4 @@
+import type { DefinitionLayout } from '../../../api/processes/schemas';
 /*
  * The graph of a definition version, read from the engine's BPMN export (exportDefinition, format=bpmn). Nodes are
  * keyed by BPMN element type plus the HORUS subtype (cockpit DESIGN section 10, ADR-0017 DN-11): `serviceTask` with
@@ -152,6 +153,8 @@ export interface DiagramGraph {
   collaboration?: DiagramCollaboration;
   /** Data objects, data stores and their associations, read only (#499); absent for a process with none. */
   data?: DiagramData;
+  /** The layout the model's own diagram stored (BPMNDI, layout revision 1); absent when the version has none, and the cockpit lays the graph out itself. */
+  stored?: DefinitionLayout;
 }
 
 /** Children of a process that are not steps: flows, artefacts, data and lanes. */
