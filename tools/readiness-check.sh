@@ -115,11 +115,18 @@ MISSING=""; S=$(prs_state "704")
 if ! have_files examples/rule-and-process/src/test/java/io/github/dhluong90/bpm/examples/ruleandprocess/TwoRoleDatabaseIT.java deploy/postgres/app-role-grants.sql; then row R11 pending "DB app role does not own the tables (#700, PR 704)" "missing:$MISSING"
 else row R11 "$([ "$S" = "PRs merged" ] && echo pass || echo pending)" "DB app role does not own the tables (#700, PR 704)" "$S; TwoRoleDatabaseIT and app-role-grants.sql exist"; fi
 
-# R12 to R15 pilot-scope gaps: pending until the owner or architect marks each covered elsewhere or out of scope
-row R12 pending "Secrets and key rotation" "no evidence; state covered elsewhere or out of scope"
+# R12 Secrets and key rotation: one page that links the runbook sections
+if have_files docs/SECRETS-AND-KEY-ROTATION.md wiki/Operations-Runbook.md && grep -q "Variable-encryption keyring" docs/SECRETS-AND-KEY-ROTATION.md; then
+  row R12 pass "Secrets and key rotation" "docs/SECRETS-AND-KEY-ROTATION.md: seal and variable keyrings, database credentials, OTLP"
+else row R12 pending "Secrets and key rotation" "missing:$MISSING docs/SECRETS-AND-KEY-ROTATION.md"; fi
+
+# R13 and R14 pilot-scope gaps: pending until the owner or architect marks each covered elsewhere or out of scope
 row R13 pending "Rollback of a bad release" "beyond the 1.0.0 upgrade test; no evidence"
 row R14 pending "Multi-tenant isolation test result" "no evidence linked; state covered elsewhere or out of scope"
-row R15 pending "Audit and retention configuration" "no evidence; tied to D2 (retention)"
+
+# R15 Audit and retention configuration: documented, but the retention figures are the owner's decision D2
+if have_files docs/AUDIT-AND-RETENTION.md; then row R15 decision "Audit and retention configuration" "docs/AUDIT-AND-RETENTION.md written; retention figures wait for D2"
+else row R15 pending "Audit and retention configuration" "missing:$MISSING; tied to D2 (retention)"; fi
 
 # Owner decisions that are not an item above (D3 is R10 and is not counted twice)
 row D1 decision "Pilot infrastructure (D1)" "owner chooses the environment (gates R6)"

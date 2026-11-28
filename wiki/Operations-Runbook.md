@@ -15,6 +15,8 @@ The engines are libraries, not servers. Everything they keep is in your PostgreS
 | Back up, rotate or recover the seal key | [Seal key custody](#seal-key-custody) |
 | Move from 1.0.0 to a later release | [Upgrade to a later release](#upgrade-to-a-later-release) |
 | Size a deployment | [Load baselines](#load-baselines) |
+| Find every secret and how it rotates | [Secrets and key rotation](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/SECRETS-AND-KEY-ROTATION.md) |
+| Set retention and drop old decision log months | [Audit and retention configuration](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/AUDIT-AND-RETENTION.md) |
 | Send traces to a collector | [Traces](#traces-opentelemetry) |
 | Check that a downloaded jar is the one we built | [Verify a release artifact](#verify-a-release-artifact) |
 
@@ -438,15 +440,15 @@ It takes about 6 minutes the first time and 2 minutes after, and writes `dr-repo
 
 ### What was measured
 
-Two drills on a laptop (Docker Desktop, PostgreSQL 16, a dump of about 230 KB), 28 November 2026, backup taken 10 seconds before the failure.
+Three drills on a laptop (Docker Desktop, PostgreSQL 16, a dump of about 230 KB), 28 November 2026, backup taken 10 seconds before the failure. The table shows the latest, the re-run after the restore role change (#704).
 
-| Measure | Result (drill 2) |
+| Measure | Result (drill 3) |
 |---|---|
-| Recovery point (RPO): failure minus the last decision that survived | 11.6 s; the 5 decisions written after the backup were lost, as designed |
-| Fresh PostgreSQL up | 5.7 s |
-| `pg_restore` | 0.3 s |
-| Host start until healthy | 6.2 s |
-| Recovery time (RTO): first decision served after the failure | 14.6 s |
+| Recovery point (RPO): failure minus the last decision that survived | 11.3 s; the 5 decisions written after the backup were lost, as designed |
+| Fresh PostgreSQL up | 5.8 s |
+| `pg_restore` | 0.4 s |
+| Host start until healthy | 6.3 s |
+| Recovery time (RTO): first decision served after the failure | 14.9 s |
 | Seals, audit trail, in-flight instances, timers | all matched |
 
 These numbers are for a tiny database. They show what the engines add, not what your restore costs.
@@ -458,12 +460,12 @@ Recovery time is the sum of five steps. Only the middle one depends on your data
 | Step | Drill figure | How to get yours |
 |---|---|---|
 | 1. Detect and decide | not measured | Your alerting delay plus the time to decide to restore |
-| 2. Provision a database server | 5.7 s | Time a new instance in your platform |
-| 3. Restore the data | 0.3 s for 230 KB | **Measure it, see below** |
-| 4. Start one host until healthy | 6.2 s | Time it on your platform |
-| 5. First decision served | about 2.4 s after the host is healthy (14.6 s total minus steps 2 to 4) | Evaluate one decision |
+| 2. Provision a database server | 5.8 s | Time a new instance in your platform |
+| 3. Restore the data | 0.4 s for 230 KB | **Measure it, see below** |
+| 4. Start one host until healthy | 6.3 s | Time it on your platform |
+| 5. First decision served | about 0.6 s after the host is healthy (14.9 s total minus steps 2 to 4) | Evaluate one decision |
 
-Steps 2, 4 and 5 add up to about 14 seconds in the drill. Step 3 grows with the database.
+Steps 2, 4 and 5 add up to about 13 seconds in the drill. Step 3 grows with the database.
 
 **Method for step 3.**
 
@@ -487,7 +489,7 @@ For base backup plus WAL, time unpacking the base backup, then add the replay ti
 4. Estimate step 3 for any size as size divided by that throughput. Add 20% for growth since the test.
 5. RTO is steps 1 to 5 added up. Compare it with the target the bank has set. If it is over, move to base backup with WAL archiving and replicas, or shorten the data to restore with retention.
 
-Worked illustration, with invented figures: if your scratch restore of a 100 GB database took 30 minutes, throughput is about 3.3 GB per minute. At 150 GB the restore takes about 45 minutes; with 20% growth margin, 54 minutes. Add 14 seconds for steps 2, 4 and 5, plus your detection time.
+Worked illustration, with invented figures: if your scratch restore of a 100 GB database took 30 minutes, throughput is about 3.3 GB per minute. At 150 GB the restore takes about 45 minutes; with 20% growth margin, 54 minutes. Add 13 seconds for steps 2, 4 and 5, plus your detection time.
 
 Repeat the test after the database has grown by half, and after a change of storage or instance size. Record the date and result in the [rehearsal log](#rehearsal-log).
 
