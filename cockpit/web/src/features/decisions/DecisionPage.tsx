@@ -15,7 +15,7 @@ import { formatDateTime } from '../rules/model/dates';
 import { columnLabel, readCondition } from '../rules/model/reading';
 import { useDecision, useExplanation } from './api/useAudit';
 import { AuditError, LoggedValue, statusOf } from './components/AuditParts';
-import { OutcomeBadge } from './components/OutcomeBadge';
+import { OutcomeMark } from './components/OutcomeMark';
 import { DecisionLogLocked, isFailedOutcome, knownOutcome } from './DecisionsPage';
 import { lastDecisionQuery } from './lastQuery';
 
@@ -95,7 +95,7 @@ function Explanation({ decision, explanation }: { decision: LoggedDecision; expl
     <article className={failed ? 'card why why--failed' : 'card why'} aria-labelledby="why-title">
       <div className="why__head">
         <h2 id="why-title" className="card__title">{t('dlog.why')}</h2>
-        <OutcomeBadge outcome={outcome} matched={decision.matchedRuleIds} />
+        <OutcomeMark outcome={outcome} matched={decision.matchedRuleIds} />
       </div>
       {failed ? (
         <>
@@ -128,7 +128,7 @@ function Facts({ decision }: { decision: LoggedDecision }) {
         </dd>
       </div>
       <div><dt>{t('dlog.fact.case')}</dt><dd className="ref-text">{decision.correlationId ?? <span className="muted">—</span>}</dd></div>
-      <div><dt>{t('dlog.fact.clock')}</dt><dd className="tnum">{formatDateTime(decision.evalClock, locale)}{decision.clockChosen ? <span className="badge badge--warn dlog-facts__note">{t('dlog.clockChosen')}</span> : null}{decision.pinned ? <span className="badge badge--neutral dlog-facts__note">{t('dlog.pinned')}</span> : null}</dd></div>
+      <div><dt>{t('dlog.fact.clock')}</dt><dd className="tnum">{formatDateTime(decision.evalClock, locale)}{decision.clockChosen ? <span className="muted dlog-facts__note">· {t('dlog.clockChosen')}</span> : null}{decision.pinned ? <span className="muted dlog-facts__note">· {t('dlog.pinned')}</span> : null}</dd></div>
       <div>
         <dt>{t('dlog.fact.id')}</dt>
         <dd className="dlog-facts__ref"><span className="ref-text" data-testid="decision-id">{decision.decisionId}</span><CopyButton value={decision.decisionId} label={t('dlog.copyId')} copiedLabel={t('dlog.idCopied')} /></dd>

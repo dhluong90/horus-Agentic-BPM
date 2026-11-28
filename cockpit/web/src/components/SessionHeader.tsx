@@ -43,7 +43,7 @@ export function capabilities(permissions: readonly string[]): MessageKey[] {
 
 /**
  * The top bar (styleguide section 8): product mark over the menu column, the breadcrumb over the content, then
- * one service pill, the language and theme switches and the account menu.
+ * one service line, the language and theme switches and the account menu.
  */
 export function SessionHeader({ session, banner, breadcrumb, service }: {
   session: SessionSummary | undefined;
@@ -68,14 +68,14 @@ export function SessionHeader({ session, banner, breadcrumb, service }: {
           {banner}
         </span>
       ) : null}
-      {service ?? (session ? <ServicePill session={session} /> : null)}
+      {service ?? (session ? <ServiceLine session={session} /> : null)}
       <PreferenceControls />
       {session ? <AccountMenu session={session} /> : null}
     </header>
   );
 }
 
-function ServicePill({ session }: { session: SessionSummary }) {
+function ServiceLine({ session }: { session: SessionSummary }) {
   const { t, locale } = useI18n();
   const name = [
     `${t('header.service')}: ${session.hostLabel}`,
@@ -83,11 +83,11 @@ function ServicePill({ session }: { session: SessionSummary }) {
     ...(session.environment !== undefined ? [`${t('header.environment')}: ${environmentLabel(session.environment, locale)}`] : []),
   ].join(', ');
   return (
-    <p className="service-pill" title={name}>
+    <p className="service" title={name}>
       <span className="sr-only">{name}</span>
-      <span className="service-pill__dot" aria-hidden="true" />
-      <span className="service-pill__name" data-testid="header-host" title={session.hostLabel} aria-hidden="true">{session.hostLabel}</span>
-      <span className="service-pill__tenant" data-testid="header-tenant" aria-hidden="true">{session.tenant}</span>
+      <span className="service__dot" aria-hidden="true" />
+      <span className="service__name" data-testid="header-host" title={session.hostLabel} aria-hidden="true">{session.hostLabel}</span>
+      <span className="service__tenant" data-testid="header-tenant" aria-hidden="true">{session.tenant}</span>
       {session.environment !== undefined ? <EnvironmentTag environment={session.environment} /> : null}
     </p>
   );

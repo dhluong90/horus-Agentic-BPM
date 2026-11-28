@@ -75,9 +75,9 @@ export function TasksCard({ tasks, now, onRetry }: { tasks: Loadable<TaskSummary
                   {task.businessKey ? <span className="hrow__meta tnum">{t('tasks.case', { key: task.businessKey })}</span> : null}
                 </div>
                 {late ? (
-                  <span className="pill pill--late"><span aria-hidden="true">▲</span> {lateText !== undefined ? t('tasks.sla.overdueBy', { time: lateText }) : t('tasks.sla.overdue')}</span>
+                  <span className="status status--warn"><span aria-hidden="true">▲</span> {lateText !== undefined ? t('tasks.sla.overdueBy', { time: lateText }) : t('tasks.sla.overdue')}</span>
                 ) : task.dueAt != null ? (
-                  <span className={isToday(task.dueAt, now) ? 'pill pill--today' : 'pill'}>
+                  <span className={isToday(task.dueAt, now) ? 'status status--ok' : 'status status--muted'}>
                     <span aria-hidden="true">◷</span> {isToday(task.dueAt, now) ? t('home.due.today', { time: shortWhen(task.dueAt, now, locale) }) : shortWhen(task.dueAt, now, locale)}
                   </span>
                 ) : null}
@@ -102,7 +102,7 @@ export function ApprovalsCard({ items, now, onRetry }: { items: Loadable<Approva
     <article className="card card--list home__approvals" aria-labelledby="home-approvals">
       <div className="card__head">
         <h2 id="home-approvals" className="card__title">{t('home.approvals.title')}</h2>
-        {items.status === 'ready' && items.data.length > 0 ? <span className="badge badge--accent tnum">{t('home.approvals.count', { count: String(items.data.length) })}</span> : null}
+        {items.status === 'ready' && items.data.length > 0 ? <span className="count tnum">{t('home.approvals.count', { count: String(items.data.length) })}</span> : null}
       </div>
       {items.status === 'loading' ? <LoadingRows rows={3} /> : items.status === 'error' ? <AreaError error={items.error} onRetry={onRetry} /> : items.data.length === 0 ? (
         <EmptyState icon="approvals" text={t('home.noReviews')} action={{ label: t('menu.approvals'), href: formatRoute({ name: 'approvals' }) }} />
@@ -164,7 +164,7 @@ export function DecisionsCard({ hourly }: { hourly: HourlyDecisions }) {
           <h2 id="home-chart" className="card__title">{t('home.chart.title')}</h2>
           <p className="card__sub">{t('home.chart.sub')}</p>
         </div>
-        {peak !== undefined ? <span className="badge badge--accent tnum">{t('home.chart.peak', { hour: hourLabel(peak, locale), count: String(counts[peak] ?? 0) })}</span> : null}
+        {peak !== undefined ? <span className="count tnum">{t('home.chart.peak', { hour: hourLabel(peak, locale), count: String(counts[peak] ?? 0) })}</span> : null}
       </div>
       {hourly.status === 'loading' ? <LoadingRows rows={2} /> : peak === undefined ? <EmptyState icon="decisions" text={t('home.chart.empty')} /> : (
         <ul className="bars">

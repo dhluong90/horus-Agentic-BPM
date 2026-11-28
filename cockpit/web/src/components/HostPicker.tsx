@@ -21,8 +21,8 @@ export function hostSwitchHref(hash: string, hostId: string): string {
 }
 
 /**
- * The service pill of the top bar (styleguide section 8). With several hosts it opens the list of services;
- * choosing one shows that service alone. One host: the plain pill.
+ * The service line of the top bar (styleguide section 8). With several hosts it opens the list of services;
+ * choosing one shows that service alone. One host: the plain line.
  */
 export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
   const { t, locale } = useI18n();
@@ -56,20 +56,20 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
     };
   }, [open]);
 
-  const pill = (
+  const line = (
     <>
-      <span className={ready ? 'service-pill__dot' : 'service-pill__dot service-pill__dot--idle'} aria-hidden="true" />
-      <span className="service-pill__name" data-testid="header-host" aria-hidden="true">{label}</span>
-      {tenant !== undefined ? <span className="service-pill__tenant" data-testid="header-tenant" aria-hidden="true">{tenant}</span> : null}
+      <span className={ready ? 'service__dot' : 'service__dot service__dot--idle'} aria-hidden="true" />
+      <span className="service__name" data-testid="header-host" aria-hidden="true">{label}</span>
+      {tenant !== undefined ? <span className="service__tenant" data-testid="header-tenant" aria-hidden="true">{tenant}</span> : null}
       {current?.environment !== undefined ? <EnvironmentTag environment={current.environment} /> : null}
     </>
   );
 
   if (hosts.length < 2) {
     return (
-      <p className="service-pill" title={name}>
+      <p className="service" title={name}>
         <span className="sr-only">{name}</span>
-        {pill}
+        {line}
       </p>
     );
   }
@@ -79,7 +79,7 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
       <button
         ref={button}
         type="button"
-        className="service-pill service-pill--button"
+        className="service service--button"
         aria-expanded={open}
         aria-controls={menuId}
         data-testid="host-picker"
@@ -89,8 +89,8 @@ export function HostPicker({ hosts, current, tenant, ready }: HostPickerProps) {
         }}
       >
         <span className="sr-only">{`${name}, ${t('host.switch')}`}</span>
-        {pill}
-        <svg className="service-pill__caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
+        {line}
+        <svg className="service__caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
       </button>
       <div className="host-picker__menu" id={menuId} hidden={!open}>
         <p className="host-picker__title" id={`${menuId}-title`}>{t('host.menuTitle')}</p>

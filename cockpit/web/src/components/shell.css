@@ -27,19 +27,19 @@ body { background: var(--bg); background-image: none; }
   background: var(--warn-soft); color: var(--warn); border: 1px solid var(--warn-fill);
 }
 
-/* One service pill: green dot, service, tenant, environment tag. */
-.service-pill {
-  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 420px; height: 36px; padding: 0 12px 0 14px;
-  border: 1px solid var(--line); border-radius: var(--radius-pill); background: var(--surface); white-space: nowrap;
-}
-.service-pill__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok-fill); flex: none; }
-.service-pill__name { font: var(--type-label); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
-.service-pill__tenant { font: var(--type-label); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
-/* Several hosts: the pill opens the list of services (CKP-015). */
-.service-pill__dot--idle { background: var(--line-strong); }
-.service-pill--button { cursor: pointer; font: inherit; color: inherit; height: 36px; }
-.service-pill--button:hover { background: var(--surface-2); border-color: var(--control); }
-.service-pill__caret { color: var(--muted); flex: none; margin-left: 2px; }
+/* The service line: dot, service, tenant and environment as text separated by middots. No box. */
+.service { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 420px; height: 36px; margin: 0; padding: 0 8px; white-space: nowrap; }
+.service__dot { width: 6px; height: 6px; border-radius: 50%; background: var(--ok-fill); flex: none; }
+.service__name { font: var(--type-label); font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.service__tenant, .env { font: var(--type-label); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.service__tenant::before, .env::before { content: "·" / ""; margin-right: 8px; color: var(--muted); }
+/* Amber is the Demo word only; any other environment reads muted (styleguide section 2). */
+.env--demo { color: var(--warn); font-weight: 600; }
+/* Several hosts: the line opens the list of services (CKP-015); a hover fill and the caret show it is a button. */
+.service__dot--idle { background: var(--line-strong); }
+.service--button { border: 0; border-radius: var(--radius-m); background: transparent; cursor: pointer; font: inherit; color: inherit; }
+.service--button:hover { background: var(--surface-3); }
+.service__caret { color: var(--muted); flex: none; margin-left: 2px; }
 .host-picker { position: relative; min-width: 0; flex: 0 1 auto; display: flex; }
 .host-picker__menu[hidden] { display: none; }
 .host-picker__menu {
@@ -57,11 +57,9 @@ body { background: var(--bg); background-image: none; }
 .host-picker__label { flex: 1; min-width: 0; }
 .host-picker__env { font: var(--type-caption); color: var(--muted); }
 .host-picker__check { display: inline-flex; color: var(--accent); }
+/* Kept only for the kind tag on the approvals list; removed with it in the second pass. */
 .tag { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 600; letter-spacing: 0; vertical-align: middle; white-space: nowrap; }
-/* Amber is the Demo tag only; any other environment is neutral (styleguide section 2). */
-.tag--demo { background: var(--warn-soft); color: var(--warn); }
-.tag--env { background: var(--env-tag); color: var(--env-tag-ink); box-shadow: inset 0 0 0 1px var(--env-tag-line); }
-.tag--preview { border: 1px solid var(--line-strong); color: var(--muted); font-weight: 500; }
+.preview-note { margin-left: 8px; font: var(--type-caption); font-weight: 500; color: var(--muted); vertical-align: middle; }
 
 .account { position: relative; flex: none; }
 .avatar-btn {
@@ -136,12 +134,6 @@ body { background: var(--bg); background-image: none; }
 .engine__meta { color: var(--muted); margin-left: auto; }
 .status-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--control); }
 
-.pill-list { display: flex; flex-wrap: wrap; gap: 8px; }
-.pill {
-  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
-  background: var(--surface-3); border: 1px solid var(--line); color: var(--ink-2); font-size: 13px; line-height: 1.4;
-}
-.pill span { color: var(--ok); font-weight: 700; }
 .empty { color: var(--muted); }
 
 /* ---------- Loading and error panels ---------- */
@@ -206,9 +198,10 @@ body { background: var(--bg); background-image: none; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Tenant switcher (CKP-022): the tenant as its own pill beside the service; the menu reuses the host picker's. */
+/* Tenant switcher (CKP-022): the tenant beside the service; the menu reuses the host picker's. */
 .tenant-switcher__button { gap: 6px; padding: 0 10px 0 12px; }
-.tenant-switcher__button .service-pill__tenant { color: var(--ink-2); }
+.tenant-switcher__button .service__tenant { color: var(--ink-2); }
+.tenant-switcher__button .service__tenant::before { content: none; }
 .tenant-switcher__item { width: 100%; border: 0; background: transparent; cursor: pointer; text-align: left; }
 /* A refused tenant: a level-4 notice at the bottom right, above the page, until dismissed. */
 .tenant-refusal { position: fixed; right: 24px; bottom: 24px; z-index: 60; max-width: 440px; box-shadow: var(--sh-pop); background: var(--surface); }
