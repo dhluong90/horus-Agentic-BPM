@@ -321,4 +321,11 @@
 .hx .row.tall .shot{max-width:100%}
 /* The fixed "Return to top" bar sits over the page's first lines; the home pages are short enough not to need it. */
 body:has(.hx) .VPLocalNav{display:none}
+/* The zoom control has a strip of its own under the picture, so it never covers the text of a screenshot or of the diagram. */
+.hx button.zoom{padding-bottom:48px}
+}
+
+/* Under 960px the page's bar (Menu, On this page) is fixed over the top 48px: a link to a heading, or a heading opened by its address, stops below it. */
+@media (max-width:959px){
+html{scroll-padding-top:64px}
 }
