@@ -132,7 +132,7 @@ At start-up the log shows, in order: the host's own migration, the Rule Engine s
 
 ```
 Rule Engine schema at version 1 (1 migration(s) applied)
-Process Engine schema at version 1 (1 migration(s) applied)
+Process Engine schema at version 2 (2 migration(s) applied)
 Process definition card-fee-review v1 ACTIVE for tenant bank-a from classpath:processes/card-fee-review.bpmn (hash 3fa54143...)
 Rule set card-fee v1 PUBLISHED (requested by seed-author, approved by seed-approver)
 ```

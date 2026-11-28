@@ -629,6 +629,18 @@ class ProcessServicesQaTest {
                     new IdempotencyRecord(tenant, operation, key, requestHash, null, expiresAt)) == null;
         }
 
+        private final Map<String, DefinitionApproval> approvals = new java.util.HashMap<>();
+
+        @Override
+        public void recordApproval(DefinitionApproval approval) {
+            approvals.putIfAbsent(approval.tenantId() + "/" + approval.definitionId(), approval);
+        }
+
+        @Override
+        public Optional<DefinitionApproval> approval(String tenant, String definitionId) {
+            return Optional.ofNullable(approvals.get(tenant + "/" + definitionId));
+        }
+
         @Override
         public byte[] engineKey(String name, byte[] candidate, Instant now) {
             return candidate;

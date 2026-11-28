@@ -2788,3 +2788,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** `escalated` is reached, the task stays open and the instance `RUNNING`; completing the task completes the instance.
 - **Example:** `manager-sla` fires -> `escalated` reached, `approve-manager` still `WAITING_USER`.
 - **Test ID:** `PRE_376_two_tasks_whose_escalation_boundaries_share_one_end_event_each_reach_it_and_stay_open` (`ActivityDefaultFlowAndTerminateTest`)
+
+### PRE-377 A duplicate of a request that is still running waits at most the lock timeout, is then refused as IDEMPOTENCY_IN_FLIGHT, and never runs the work twice
+- **Traces to:** `TR-IDEM-01`, ADR-0006, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** At bank-a the payment screening `PAY-2027-0412` was started with `Idempotency-Key: PAY-2027-0412` and its transaction is still open; `horus.bpm.processes.idempotency.lock-timeout` is `300ms` (the default is `2s`).
+- **When:** The client sends the same request again, then once more after the first has committed.
+- **Then:** The second request gives up within the lock timeout with `409 IDEMPOTENCY_IN_FLIGHT` and `Retry-After: 1`; it starts nothing and the screening has run once. The timeout covers the claim statement only, so the work after the claim keeps the database's own lock timeout. The third request returns the first answer, the same instance id.
+- **Example:** `POST /instances` with `Idempotency-Key: PAY-2027-0412` while the first runs -> `409 IDEMPOTENCY_IN_FLIGHT`; after it commits -> `200` with the first instance
+- **Test ID:** `PRE_377_a_duplicate_of_a_request_still_running_is_refused_within_the_lock_timeout_and_a_later_retry_replays` (`IdempotencyWaitPostgresIT`)
+
+### PRE-378 A duplicate that waits for the first request within the lock timeout returns the same result
+- **Traces to:** `TR-IDEM-01`, ADR-0006, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The screening of PRE-377 is running with `Idempotency-Key: PAY-2027-0413` and the lock timeout is `2s`; the same request arrives while it runs.
+- **When:** The first request commits 400 ms later.
+- **Then:** The duplicate was waiting, not refused, and now returns the instance the first created; one instance exists and the screening ran once.
+- **Example:** first commits after 0.4 s -> both answers carry instance `01J...` of `PAY-2027-0413`
+- **Test ID:** `PRE_378_a_duplicate_that_waits_for_the_first_within_the_timeout_returns_the_same_result_and_runs_nothing` (`IdempotencyWaitPostgresIT`)
+
+### PRE-379 A version is compiled only when its stored hashes equal the hashes recorded at its approval
+- **Traces to:** `TR-SEC-04`, ADR-0026 decision 4, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `payment-screening` v1 is approved. Someone who can update `pre_definition` replaces the source and rewrites `source_hash` and `definition_hash` of the row so that they agree with the new source.
+- **When:** Anyone starts, exports or diffs that version.
+- **Then:** The engine refuses it with `DEFINITION_INTEGRITY_FAILED`, "the stored hashes differ from the hashes approved", because `pre_definition_approval` holds the hashes written when the version was approved; nothing starts. A version with an approver and no approval record is refused the same way. The record is written in the transaction of the approval (and of a dev auto-approval) and the table refuses `UPDATE`, `DELETE` and `TRUNCATE`; versions approved before V2 are recorded with the hashes their row held when V2 ran. A writer who can also disable the table's triggers is outside this control.
+- **Example:** source `screen-payment` swapped to `skip-screening` with matching hashes -> `DEFINITION_INTEGRITY_FAILED`
+- **Test ID:** `PRE_379_a_version_whose_source_and_both_hashes_were_rewritten_is_refused_because_the_approval_record_disagrees` (`IdempotencyWaitPostgresIT`)
+
+### PRE-380 The approval record is written with the approval, cannot be changed, and the lock timeout may be lowered only
+- **Traces to:** `TR-SEC-04`, `TR-OPS-01`, #172
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** An approved version at bank-a; `horus.bpm.processes.idempotency.lock-timeout` set by the host.
+- **When:** A row of `pre_definition_approval` is updated, deleted or truncated; the timeout is set to `5s` or `0s`.
+- **Then:** The row exists with the hashes of the version, and each change fails with "append-only". Start-up fails naming `idempotency.lock-timeout` for a value outside 1 millisecond to 2 seconds.
+- **Example:** `UPDATE pre_definition_approval SET source_hash = ...` -> `55000 append-only`; `lock-timeout=5s` -> start-up refused
+- **Test IDs:** `PRE_380_the_approval_record_is_written_with_the_approval_and_cannot_be_changed` (`IdempotencyWaitPostgresIT`), `PRE_380_the_idempotency_lock_timeout_defaults_to_2_seconds_and_may_be_lowered_only` (`IdempotencyLockTimeoutSettingsTest`)
