@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
 
-/** PRE-521 and PRE-523: variable encryption is configured, and a half-configured host stops at start-up. */
+/** PRE-525 and PRE-527: variable encryption is configured, and a half-configured host stops at start-up. */
 class VariableEncryptionPropertiesTest {
 
     private static final String P = "horus.bpm.processes.variable-encryption.";
@@ -24,7 +24,7 @@ class VariableEncryptionPropertiesTest {
     }
 
     @Test
-    void PRE_521_nothing_is_encrypted_until_a_variable_is_named() {
+    void PRE_525_nothing_is_encrypted_until_a_variable_is_named() {
         ProcessEngineProperties properties = bind(Map.of());
 
         assertThat(properties.variableEncryption().rules().isEmpty()).isTrue();
@@ -32,7 +32,7 @@ class VariableEncryptionPropertiesTest {
     }
 
     @Test
-    void PRE_521_variables_definitions_and_keys_bind_from_configuration_and_the_active_key_writes() {
+    void PRE_525_variables_definitions_and_keys_bind_from_configuration_and_the_active_key_writes() {
         Map<String, String> source = new HashMap<>();
         source.put(P + "variables[0]", "idNumber");
         source.put(P + "definitions.payroll[0]", "*");
@@ -52,7 +52,7 @@ class VariableEncryptionPropertiesTest {
     }
 
     @Test
-    void PRE_523_a_key_that_is_not_32_bytes_or_an_active_id_that_is_missing_names_the_property() {
+    void PRE_527_a_key_that_is_not_32_bytes_or_an_active_id_that_is_missing_names_the_property() {
         assertThatThrownBy(() -> bind(Map.of(P + "active-key-id", "k1", P + "keys.k1", "AAAA")).variableEncryption()
                 .keyring()).hasMessageContaining("variable-encryption.keys.k1");
         assertThatThrownBy(() -> bind(Map.of(P + "active-key-id", "k9", P + "keys.k1", K1)).variableEncryption()
@@ -60,7 +60,7 @@ class VariableEncryptionPropertiesTest {
     }
 
     @Test
-    void PRE_523_naming_a_variable_without_a_key_stops_start_up_and_never_falls_back_to_the_clear() {
+    void PRE_527_naming_a_variable_without_a_key_stops_start_up_and_never_falls_back_to_the_clear() {
         ProcessEngineProperties properties = bind(Map.of(P + "variables[0]", "idNumber"));
 
         assertThatThrownBy(() -> new ProcessEngineAutoConfiguration().processEngineVariableVault(
@@ -69,7 +69,7 @@ class VariableEncryptionPropertiesTest {
     }
 
     @Test
-    void PRE_523_keys_without_rules_start_a_vault_that_only_opens_what_it_finds() {
+    void PRE_527_keys_without_rules_start_a_vault_that_only_opens_what_it_finds() {
         ProcessEngineProperties properties = bind(Map.of(P + "active-key-id", "k1", P + "keys.k1", K1));
 
         VariableVault vault = new ProcessEngineAutoConfiguration()

@@ -18,7 +18,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * PRE-524: what history keeps of a task submission when the variable it lands in is encrypted at rest. The credit
+ * PRE-528: what history keeps of a task submission when the variable it lands in is encrypted at rest. The credit
  * review of {@code loan-review-form.bpmn} stores its answer in the variable {@code review}.
  */
 class VariableEncryptionHistoryTest {
@@ -60,12 +60,12 @@ class VariableEncryptionHistoryTest {
     }
 
     @Test
-    void PRE_524_a_submission_that_lands_in_an_encrypted_result_variable_is_masked_in_history() {
+    void PRE_528_a_submission_that_lands_in_an_encrypted_result_variable_is_masked_in_history() {
         assertThat(historyOfApproval(vault("review"))).doesNotContain("income not verified").contains("masked");
     }
 
     @Test
-    void PRE_524_without_encryption_history_keeps_the_submission_as_the_form_declares_it() {
+    void PRE_528_without_encryption_history_keeps_the_submission_as_the_form_declares_it() {
         assertThat(historyOfApproval(VariableVault.NONE)).contains("income not verified");
     }
 }

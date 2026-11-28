@@ -47,7 +47,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
- * PRE-521 to PRE-524 on a real PostgreSQL: a loan application whose amount is encrypted at rest, a key rotation with a
+ * PRE-525 to PRE-528 on a real PostgreSQL: a loan application whose amount is encrypted at rest, a key rotation with a
  * re-encryption sweep, the refusals of a lost or a changed key, and no clear value in the table, the log or a span.
  */
 @Testcontainers
@@ -120,7 +120,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_521_the_amount_is_ciphertext_in_the_table_and_whole_again_when_read() {
+    void PRE_525_the_amount_is_ciphertext_in_the_table_and_whole_again_when_read() {
         CALLER.as("bank-a");
         ProcessServices engine = engine(new VariableVault(ring(K1), RULES));
 
@@ -134,7 +134,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_521_no_table_of_the_engine_holds_the_amount_after_a_start_a_claim_and_a_completion() {
+    void PRE_525_no_table_of_the_engine_holds_the_amount_after_a_start_a_claim_and_a_completion() {
         CALLER.as("bank-a");
         ProcessServices engine = engine(new VariableVault(ring(K1), RULES));
         String n = "LN-2027-ALL-" + (++sequence);
@@ -153,7 +153,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_522_an_idempotent_replay_after_a_rotation_returns_the_first_answer_whole() {
+    void PRE_526_an_idempotent_replay_after_a_rotation_returns_the_first_answer_whole() {
         CALLER.as("bank-a");
         StartRequest request = StartRequest.of("loan-origination").withBusinessKey("LN-2027-REPLAY")
                 .withVariables(Map.of("amount", Money.ofMinor("VND", 150_000_000))).withIdempotencyKey("k-replay");
@@ -170,7 +170,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_521_a_row_moved_to_another_tenant_is_refused() {
+    void PRE_525_a_row_moved_to_another_tenant_is_refused() {
         CALLER.as("bank-a");
         ProcessServices engine = engine(new VariableVault(ring(K1), RULES));
         ProcessInstance started = startLoan(engine, 150_000_000);
@@ -181,7 +181,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_522_a_rotation_locks_nobody_out_and_the_instance_takes_the_same_path_after_it() {
+    void PRE_526_a_rotation_locks_nobody_out_and_the_instance_takes_the_same_path_after_it() {
         CALLER.as("bank-a");
         ProcessInstance started = startLoan(engine(new VariableVault(ring(K1), RULES)), 150_000_000);
         assertThat(stored(started.id())).contains("\"k1\"");
@@ -200,7 +200,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_522_the_sweep_rewrites_a_waiting_instance_under_the_current_key_without_changing_its_version() {
+    void PRE_526_the_sweep_rewrites_a_waiting_instance_under_the_current_key_without_changing_its_version() {
         CALLER.as("bank-c");
         ProcessInstance started = startLoan(engine(new VariableVault(ring(K1), RULES)), 20_000_000);
         long version = started.lockVersion();
@@ -222,7 +222,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_522_a_sweep_of_one_tenant_touches_no_row_of_another() {
+    void PRE_526_a_sweep_of_one_tenant_touches_no_row_of_another() {
         CALLER.as("bank-a");
         startLoan(engine(new VariableVault(ring(K1), RULES)), 20_000_000);
 
@@ -233,7 +233,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_523_a_lost_key_refuses_the_read_with_a_named_code_and_the_row_is_untouched() {
+    void PRE_527_a_lost_key_refuses_the_read_with_a_named_code_and_the_row_is_untouched() {
         CALLER.as("bank-a");
         ProcessInstance started = startLoan(engine(new VariableVault(ring(K1), RULES)), 150_000_000);
         String before = stored(started.id());
@@ -248,7 +248,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_523_a_start_with_a_protected_variable_and_no_current_key_stores_nothing() {
+    void PRE_527_a_start_with_a_protected_variable_and_no_current_key_stores_nothing() {
         CALLER.as("bank-a");
         ProcessServices keyless = engine(new VariableVault(ring(null), RULES));
         long before = JdbcClient.create(db).sql("SELECT count(*) FROM pre_instance").query(Long.class).single();
@@ -260,7 +260,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_523_a_changed_ciphertext_is_refused_with_a_named_code() {
+    void PRE_527_a_changed_ciphertext_is_refused_with_a_named_code() {
         CALLER.as("bank-a");
         ProcessServices engine = engine(new VariableVault(ring(K1), RULES));
         ProcessInstance started = startLoan(engine, 150_000_000);
@@ -272,7 +272,7 @@ class VariableEncryptionPostgresIT {
     }
 
     @Test
-    void PRE_524_no_log_line_and_no_span_call_holds_the_amount_or_a_key() {
+    void PRE_528_no_log_line_and_no_span_call_holds_the_amount_or_a_key() {
         CALLER.as("bank-a");
         List<String> seen = new ArrayList<>();
         Handler handler = new Handler() {

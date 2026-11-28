@@ -2729,7 +2729,7 @@ components:
         `VALIDATION_FAILED`, `GUARDRAIL_CONTRACT_INVALID`, `BPMN_UNSUPPORTED_ELEMENT`, `CMMN_UNSUPPORTED`, `BPMN_UNSAFE_XML`, `DEFINITION_TOO_LARGE`,
         `IDEMPOTENCY_KEY_REUSE_MISMATCH`, `STEP_FAILED`, `FORM_VALIDATION_FAILED` or `OUTPUT_INVALID`. `428` is `PRECONDITION_REQUIRED`. `503` is `QUERY_TIMEOUT` (a list read stopped by `query.statement-timeout`, `PRE-394`). `500` is `INTERNAL`,
         `DEFINITION_INTEGRITY_FAILED`, `VARIABLE_KEY_UNAVAILABLE` (an encrypted variable's key is not in the keyring, or no key is current;
-        nothing is stored or returned, `PRE-523`), `VARIABLE_INTEGRITY_FAILED` (an encrypted variable does not authenticate) or
+        nothing is stored or returned, `PRE-527`), `VARIABLE_INTEGRITY_FAILED` (an encrypted variable does not authenticate) or
         `EVENT_LISTENER_FAILED` (a host event listener threw, so the change was rolled back), with a correlation id only.
       headers:
         WWW-Authenticate:

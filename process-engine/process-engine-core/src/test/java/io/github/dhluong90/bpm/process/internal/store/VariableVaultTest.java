@@ -18,7 +18,7 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * PRE-521 to PRE-524 on the vault alone: a national id number and a salary, two keys, two tenants.
+ * PRE-525 to PRE-528 on the vault alone: a national id number and a salary, two keys, two tenants.
  */
 class VariableVaultTest {
 
@@ -51,7 +51,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_a_protected_variable_is_stored_as_an_envelope_and_comes_back_whole() {
+    void PRE_525_a_protected_variable_is_stored_as_an_envelope_and_comes_back_whole() {
         VariableVault vault = new VariableVault(ring(K1), RULES);
 
         String stored = vault.seal("bank-a", "I1", "loan", VARIABLES);
@@ -62,7 +62,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_a_definition_entry_with_a_star_protects_every_variable_of_that_definition_only() {
+    void PRE_525_a_definition_entry_with_a_star_protects_every_variable_of_that_definition_only() {
         VariableVault vault = new VariableVault(ring(K1), RULES);
 
         String payroll = vault.seal("bank-a", "I1", "payroll", VARIABLES);
@@ -75,7 +75,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_two_writes_of_one_value_differ_but_both_open_to_it() {
+    void PRE_525_two_writes_of_one_value_differ_but_both_open_to_it() {
         VariableVault vault = new VariableVault(ring(K1), RULES);
 
         String first = vault.seal("bank-a", "I1", "loan", VARIABLES);
@@ -86,7 +86,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_a_value_copied_to_another_tenant_instance_or_variable_does_not_authenticate() {
+    void PRE_525_a_value_copied_to_another_tenant_instance_or_variable_does_not_authenticate() {
         VariableVault vault = new VariableVault(ring(K1), new VariableEncryptionRules(Set.of("idNumber", "taxId"),
                 Map.of()));
         String stored = vault.seal("bank-a", "I1", "loan", "{\"idNumber\":\"" + ID_NUMBER + "\"}");
@@ -99,7 +99,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_a_flipped_byte_of_the_ciphertext_is_refused() {
+    void PRE_525_a_flipped_byte_of_the_ciphertext_is_refused() {
         VariableVault vault = new VariableVault(ring(K1), RULES);
         String stored = vault.seal("bank-a", "I1", "loan", VARIABLES);
         String ct = (String) ((Map<?, ?>) Values.readMap(stored).get("idNumber")).get("ct");
@@ -109,7 +109,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_a_plain_variable_shaped_like_an_envelope_is_refused() {
+    void PRE_525_a_plain_variable_shaped_like_an_envelope_is_refused() {
         VariableVault vault = new VariableVault(ring(K1), RULES);
 
         assertThatThrownBy(() -> vault.seal("bank-a", "I1", "loan",
@@ -118,7 +118,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_522_a_value_written_under_the_old_key_opens_while_the_new_key_writes() {
+    void PRE_526_a_value_written_under_the_old_key_opens_while_the_new_key_writes() {
         String underK1 = new VariableVault(ring(K1), RULES).seal("bank-a", "I1", "loan", VARIABLES);
         VariableVault rotated = new VariableVault(ring(K2, K1), RULES);
 
@@ -127,7 +127,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_522_reencrypt_moves_every_envelope_to_the_current_key_and_leaves_a_current_row_alone() {
+    void PRE_526_reencrypt_moves_every_envelope_to_the_current_key_and_leaves_a_current_row_alone() {
         String underK1 = new VariableVault(ring(K1), RULES).seal("bank-a", "I1", "loan", VARIABLES);
         VariableVault rotated = new VariableVault(ring(K2, K1), RULES);
 
@@ -141,7 +141,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_522_a_rotation_keeps_the_values_the_engine_reads_identical() {
+    void PRE_526_a_rotation_keeps_the_values_the_engine_reads_identical() {
         String underK1 = new VariableVault(ring(K1), RULES).seal("bank-a", "I1", "loan", VARIABLES);
         VariableVault rotated = new VariableVault(ring(K2, K1), RULES);
 
@@ -152,7 +152,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_523_a_key_id_the_keyring_does_not_hold_is_refused_with_its_own_code_and_no_value() {
+    void PRE_527_a_key_id_the_keyring_does_not_hold_is_refused_with_its_own_code_and_no_value() {
         String underK1 = new VariableVault(ring(K1), RULES).seal("bank-a", "I1", "loan", VARIABLES);
         VariableVault lost = new VariableVault(ring(K2), RULES);
 
@@ -162,7 +162,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_523_a_protected_variable_with_no_current_key_is_refused_and_never_stored_in_the_clear() {
+    void PRE_527_a_protected_variable_with_no_current_key_is_refused_and_never_stored_in_the_clear() {
         VariableVault none = new VariableVault(VariableKeyring.none(), RULES);
 
         assertThatThrownBy(() -> none.seal("bank-a", "I1", "loan", VARIABLES))
@@ -170,7 +170,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_523_a_vault_without_rules_still_refuses_a_stored_envelope_instead_of_passing_it_on() {
+    void PRE_527_a_vault_without_rules_still_refuses_a_stored_envelope_instead_of_passing_it_on() {
         String underK1 = new VariableVault(ring(K1), RULES).seal("bank-a", "I1", "loan", VARIABLES);
 
         assertThatThrownBy(() -> VariableVault.NONE.open("bank-a", "I1", underK1))
@@ -178,13 +178,13 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_523_a_row_that_holds_no_envelope_and_no_protected_variable_passes_untouched() {
+    void PRE_527_a_row_that_holds_no_envelope_and_no_protected_variable_passes_untouched() {
         assertThat(VariableVault.NONE.seal("bank-a", "I1", "loan", VARIABLES)).isSameAs(VARIABLES);
         assertThat(VariableVault.NONE.open("bank-a", "I1", VARIABLES)).isSameAs(VARIABLES);
     }
 
     @Test
-    void PRE_524_no_key_and_no_value_appear_in_a_key_text_or_a_refusal() {
+    void PRE_528_no_key_and_no_value_appear_in_a_key_text_or_a_refusal() {
         assertThat(K1.toString()).doesNotContain("1, 1").contains("redacted");
         VariableVault vault = new VariableVault(ring(K1), RULES);
         String stored = vault.seal("bank-a", "I1", "loan", VARIABLES);
@@ -195,7 +195,7 @@ class VariableVaultTest {
     }
 
     @Test
-    void PRE_521_a_key_must_be_exactly_32_bytes_with_a_plain_id() {
+    void PRE_525_a_key_must_be_exactly_32_bytes_with_a_plain_id() {
         assertThatThrownBy(() -> new Key("k1", new byte[16])).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> new Key("bad id", bytes(1))).isInstanceOf(IllegalArgumentException.class);
     }

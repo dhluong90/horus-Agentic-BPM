@@ -921,8 +921,8 @@ Types follow `processes.<aggregate>.<pastTense>.v<N>`. Each is handed to the hos
 | `query.max-page-size`, `query.statement-timeout` | `200`, `PT2S` | Page size may be lowered only; timeout per read transaction. `statement-timeout` is applied to the instance and definition lists (`PRE-394`); the other lists keep the ordinary transaction until they move to the same runner |
 | `query.max-roles` | `100` | Most role and group queues one task list reads (#408, `PRE-216`); 1 to 1,000. A caller over it who names no `role` or `group` gets `400 ROLE_FAN_OUT_EXCEEDED` |
 | `jobs.lease-margin`, `adapters.default-timeout` | `30s`, `PT30S` | ADR-0008 |
-| `variable-encryption.variables`, `variable-encryption.definitions.<key>` | none | Top-level instance variable names encrypted at rest in every definition, and per definition key (`*` is every variable of it). Empty: nothing is encrypted (`PRE-521`). Naming a variable with no key stops start-up |
-| `variable-encryption.keys.<id>`, `variable-encryption.active-key-id` | none | Base64 AES-256 keys (exactly 32 bytes) by id, from an environment variable or a secret store, and the id that writes. The others only read, which is how a rotation avoids a lockout (`PRE-522`). A host with a vault registers its own `VariableKeyring` bean instead |
+| `variable-encryption.variables`, `variable-encryption.definitions.<key>` | none | Top-level instance variable names encrypted at rest in every definition, and per definition key (`*` is every variable of it). Empty: nothing is encrypted (`PRE-525`). Naming a variable with no key stops start-up |
+| `variable-encryption.keys.<id>`, `variable-encryption.active-key-id` | none | Base64 AES-256 keys (exactly 32 bytes) by id, from an environment variable or a secret store, and the id that writes. The others only read, which is how a rotation avoids a lockout (`PRE-526`). A host with a vault registers its own `VariableKeyring` bean instead |
 | `history.retention` | none; required outside `dev` | Whole months; drops whole monthly partitions of `pre_history` older than the period. Outside the `dev` profile start-up is refused until it is set, and a value below `history.retention-floor` or not in whole months is refused (PD-050). The process history ships in M2 and retention applies with the rule engine's in M3; before M3 nothing is deleted |
 | `history.retention-floor` | `P12M` | Shortest `history.retention` accepted; a host may raise it, never lower it below the engine floor (ADR-0024, `TR-EXT-05`) |
 | `jobs.timer-lease` | `60s` | Lease of timer, SLA and effective-date jobs, which make no external call (ADR-0008) |
@@ -1579,10 +1579,10 @@ Latency budget per cockpit read (`TR-PERF-08`, p99 150 ms per host): authenticat
 | Masked variables stay masked in activities, task context and forms | Query service | `PRE-012`, `PRE-027` (`TR-SEC-05`) |
 | Step catalogue needs `processes:author`; it lists names and schemas, never configuration values or secrets | REST | `PRE-032` |
 | Bounded reads and statement timeouts limit the cost any caller can impose | Query registry | `PRE-030` (`TR-PERF-07`) |
-| Instance variables named in the configuration are AES-256-GCM ciphertext in `pre_instance.variables` and in the stored idempotent answers; a missing or wrong key is refused by name, never read as plain | `VariableVault` (`internal.store`), `JdbcProcessStore`, `JdbcVariableReencryption` | `PRE-521` to `PRE-524` (`TR-SEC-05`) |
+| Instance variables named in the configuration are AES-256-GCM ciphertext in `pre_instance.variables` and in the stored idempotent answers; a missing or wrong key is refused by name, never read as plain | `VariableVault` (`internal.store`), `JdbcProcessStore`, `JdbcVariableReencryption` | `PRE-525` to `PRE-528` (`TR-SEC-05`) |
 | No reflection: handlers are registered typed functions | `StepRegistry` | ArchUnit (`TR-SEC-01`) |
 
-### 10.1 Variable encryption (#594, `PRE-521` to `PRE-524`)
+### 10.1 Variable encryption (#594, `PRE-525` to `PRE-528`)
 
 Only `pre_instance.variables` and the stored answers of idempotent calls (`pre_idempotency.response_body`) hold variable values, so the control sits in `JdbcProcessStore`, in front of the two statements that write the column and the mappers that read it; `ProcessServices` and the execution kernel see plain variables, so replay and every expression behave as before. No migration: a protected value is an envelope inside the same `jsonb` object.
 

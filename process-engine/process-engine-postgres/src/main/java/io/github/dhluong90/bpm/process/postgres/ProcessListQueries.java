@@ -497,7 +497,7 @@ final class ProcessListQueries {
 
     /**
      * One page of the instances of one tenant that hold an encrypted variable, locked for the re-encryption sweep
-     * (PRE-522), in primary key order after the last id. Parameters: tenant, after id, limit.
+     * (PRE-526), in primary key order after the last id. Parameters: tenant, after id, limit.
      */
     static final ListQuery REENCRYPT_INSTANCES = new ListQuery("variable-reencrypt-instances",
             new Bound.Page("the primary key (tenant_id, id) orders the page; the sweep passes at most 500 rows"),
