@@ -330,7 +330,7 @@ A replica that already holds the version in its cache serves it until the cache 
 | `horus_owner` | Migrations and the decision log partition step, on a connection opened for each run and closed after it. Never used for a request | Owns the tables. Not a superuser |
 | the application role (`horus` in the compose file, `horus_app` below) | Every request | `SELECT`, `INSERT`, `UPDATE`, `DELETE` on the engine tables, minus `UPDATE` and `DELETE` on the append-only ones. No ownership, no `ALTER`, `TRUNCATE` or `TRIGGER`, no `CREATE` in the schema |
 
-The single-role set-up (one role in `spring.datasource`, nothing under `horus.bpm.*.database`) still works and is not for production. The compose file in the repository uses two roles.
+The single-role set-up (one role in `spring.datasource`, nothing under `horus.bpm.*.database`, no `db_owner_password` secret in the compose file) still works and is **not for production**: that one role owns the tables and can switch off the append-only triggers. It is for a laptop walkthrough only. The compose file in the repository uses two roles.
 
 ### Create the roles
 
@@ -378,6 +378,13 @@ WHERE r.rolname = 'horus_app' AND c.relkind IN ('r', 'p', 'v', 'S');
 
 -- Expected: f
 SELECT pg_has_role('horus_app', 'horus_owner', 'MEMBER');
+
+-- Expected: no rows (no TRIGGER right on any table)
+SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
+  AND has_table_privilege('horus_app', c.oid, 'TRIGGER');
+
+-- Expected: f (no CREATE in the schema)
+SELECT has_schema_privilege('horus_app', 'public', 'CREATE');
 
 -- Expected: no rows (no engine table can be changed or truncated by the application role)
 SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
@@ -551,7 +558,7 @@ This is the path from 1.0.0 to the next release. The upgrade test proves it on a
 1. Read the release notes for the target version. They list every migration.
 2. Take a backup and check that you can restore it ([Backup, restore and recovery](#backup-restore-and-recovery)). This is the way back: migrations are not reversed.
 3. Run the migrations as the owner role (see [Database roles](#point-the-host-at-both-roles)), or let the first host do it with the default `migrate-on-start`.
-4. If you use the two-role set-up, run the grant script again as the owner.
+4. With the two-role set-up there is nothing to run: each engine grants the application role its rights after every migration, as the owner. Run the [grant checks](#check-the-grants) afterwards. A table added by the host's own migrations gets its rights from the default privileges that `app-role-grants.sql` sets; tighten it by hand if it must be append-only.
 5. Roll the hosts, one at a time, waiting for `UP` each time.
 6. Run the checks below.
 
