@@ -3035,7 +3035,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Example:** `20 POST /api/cards/applications -> 0 connections on 4317 and 4318, with management.otlp.metrics.export.step=PT1S`.
 - **Test ID:** `PRE_520_with_no_tracing_property_nothing_is_exported_and_no_exporter_connects_anywhere` (`TracingExportOffIT`)
 
-### PRE-521 The step that applies an async result is linked to the step that scheduled the call
+### PRE-530 The step that applies an async result is linked to the step that scheduled the call
 - **Traces to:** `TR-OBS-03`, `TR-SEC-05`
 - **Milestone:** M3
 - **Kind:** control
@@ -3047,7 +3047,7 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
   - A reference that is not two hex ids, a tracer that cannot link and a tracer written before links existed (the four-argument `startStep` only) give an ordinary step span; the link is never a reason to fail or roll back a step. A job written before links existed has no `traceLink` and its answer is applied as before.
   - The reference holds no business key, instance id, variable, input or output.
 - **Example:** `START span 0af7...-b7ad6b7169203331 schedules the bureau call -> ASYNC_RESULT span, new trace, link to 0af7...-b7ad6b7169203331`.
-- **Test ID:** `PRE_521_the_span_that_applies_an_async_result_is_linked_to_the_span_that_scheduled_the_call`, `PRE_521_the_link_is_ids_only_and_never_a_value_of_the_request`, `PRE_521_a_tracer_that_does_not_know_links_still_applies_the_result` (`AsyncSpanLinkTest`); `PRE_521_the_result_of_an_async_call_is_a_span_linked_to_the_span_that_scheduled_it`, `PRE_521_a_step_names_itself_by_trace_id_and_span_id_only_so_a_later_span_can_link_to_it`, `PRE_521_a_link_that_is_not_two_hex_ids_gives_a_plain_span_and_never_fails_the_step`, `PRE_521_a_linked_step_that_ends_on_an_Error_leaves_no_current_span` (`ProcessEngineTracingTest`)
+- **Test ID:** `PRE_530_the_span_that_applies_an_async_result_is_linked_to_the_span_that_scheduled_the_call`, `PRE_530_the_link_is_ids_only_and_never_a_value_of_the_request`, `PRE_530_a_tracer_that_does_not_know_links_still_applies_the_result` (`AsyncSpanLinkTest`); `PRE_530_the_result_of_an_async_call_is_a_span_linked_to_the_span_that_scheduled_it`, `PRE_530_a_step_names_itself_by_trace_id_and_span_id_only_so_a_later_span_can_link_to_it`, `PRE_530_a_link_that_is_not_two_hex_ids_gives_a_plain_span_and_never_fails_the_step`, `PRE_530_a_linked_step_that_ends_on_an_Error_leaves_no_current_span` (`ProcessEngineTracingTest`)
 
 ### PRE-525 Instance variables named in the configuration are encrypted at rest with AES-256-GCM, in the instance and in every store that copies them
 - **Traces to:** `TR-SEC-05`, `TR-TEN-01`, PD-153, #594
