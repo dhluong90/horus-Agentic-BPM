@@ -20,16 +20,34 @@ public final class ProcessEngineSchemaMigrator {
     public static final String MIGRATION_LOCATION = "classpath:io/github/dhluong90/bpm/process/postgres/migration";
 
     private final DataSource dataSource;
+    private final DataSource ownerDataSource;
+    private final String appRole;
 
     /** @param dataSource the host's data source */
     public ProcessEngineSchemaMigrator(DataSource dataSource) {
+        this(dataSource, null, null);
+    }
+
+    /**
+     * Migrates as a schema owner and reads as the application role (#700). {@link #migrate()} runs on
+     * {@code ownerDataSource}; {@link #currentVersion()} reads on {@code dataSource}. After each migration run the
+     * callback {@code afterMigrate__app_role_grants.sql} gives {@code appRole} the grants it needs and no more.
+     *
+     * @param dataSource the host's data source, used for reads
+     * @param ownerDataSource the schema owner's data source; {@code null} migrates on {@code dataSource}, the
+     *     single-role setup for development
+     * @param appRole the role the host connects with at run time; {@code null} or blank grants nothing
+     */
+    public ProcessEngineSchemaMigrator(DataSource dataSource, DataSource ownerDataSource, String appRole) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource must not be null");
+        this.ownerDataSource = ownerDataSource;
+        this.appRole = appRole == null ? "" : appRole.strip();
     }
 
     /** @return the number of migrations applied */
     public int migrate() {
         try {
-            MigrateResult result = flyway().migrate();
+            MigrateResult result = flyway(ownerDataSource == null ? dataSource : ownerDataSource).migrate();
             return result.migrationsExecuted;
         } catch (FlywayValidateException e) {
             throw new IllegalStateException("The pre_* tables were made by a build before the 1.0 schema baseline and "
@@ -40,7 +58,7 @@ public final class ProcessEngineSchemaMigrator {
 
     /** @return the current schema version, or null before the first migration */
     public String currentVersion() {
-        MigrationInfo current = flyway().info().current();
+        MigrationInfo current = flyway(dataSource).info().current();
         return current == null || current.getVersion() == null ? null : current.getVersion().getVersion();
     }
 
@@ -51,10 +69,11 @@ public final class ProcessEngineSchemaMigrator {
      */
     static final Map<String, String> LOCKING = Map.of("flyway.postgresql.transactional.lock", "false");
 
-    private Flyway flyway() {
+    private Flyway flyway(DataSource target) {
         return Flyway.configure(ProcessEngineSchemaMigrator.class.getClassLoader())
                 .configuration(LOCKING)
-                .dataSource(dataSource)
+                .dataSource(target)
+                .placeholders(Map.of("horusAppRole", appRole))
                 .table(HISTORY_TABLE)
                 .locations(MIGRATION_LOCATION)
                 .baselineOnMigrate(true)

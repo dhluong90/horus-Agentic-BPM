@@ -87,7 +87,7 @@ step "5. recover: fresh PostgreSQL, restore, host"
 T_RECOVERY=$(now)
 compose up -d --wait postgres
 T_PG=$(now)
-compose exec -T postgres pg_restore -U postgres -d horus --no-owner --role=horus --exit-on-error < "$WORK/horus.dump"
+compose exec -T postgres pg_restore -U postgres -d horus --no-owner --role=horus_owner --exit-on-error < "$WORK/horus.dump"
 T_RESTORED=$(now)
 compose up -d --wait host
 T_HOST=$(now)

@@ -9,8 +9,10 @@
 # variable, so docker inspect and /proc/<pid>/environ show none. git and the build context ignore secrets/;
 # when a file is missing, compose stops before any container starts and names the file.
 # PostgreSQL publishes no port: only the example host reaches it, on the compose network.
-# The host connects as "horus", a role without superuser rights that owns the database horus and runs
-# the migrations; the superuser "postgres" is used only by the init script (deploy/postgres/initdb).
+# Two database roles, neither a superuser (docs/DEPLOYING.md, "Two database roles"):
+#   horus_owner  owns the database and its tables and runs the migrations of the host and both engines;
+#   horus        serves every request and owns nothing, so it cannot alter a table or switch off a trigger.
+# The superuser "postgres" is used only by the init script (deploy/postgres/initdb).
 
 name: horus-bpm
 
@@ -26,9 +28,11 @@ services:
       - db_admin_password
       # Read by deploy/postgres/initdb/10-application-role.sh on the first start only.
       - db_password
+      - db_owner_password
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./deploy/postgres/app-role-grants.sql:/opt/horus/app-role-grants.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U horus -d horus"]
       interval: 5s
@@ -53,6 +57,42 @@ services:
           memory: 512M
           pids: 256
 
+  # The migration step: the same image, connected as the schema owner. It migrates the host's own tables and both engines,
+  # creates the decision log partitions, grants the application role its rights and exits. It is the only service that
+  # receives the owner's password. Run it again (docker compose run --rm migrate) after an upgrade and at least every
+  # few months, to create the next decision log partitions. docs/DEPLOYING.md, "Two database roles".
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        EXAMPLE: ${HORUS_EXAMPLE:-rule-engine-only}
+    image: horus-bpm/${HORUS_EXAMPLE:-rule-engine-only}:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
+      HORUS_DB_USERNAME: horus_owner
+      HORUS_BPM_MIGRATE_ONLY: "true"
+      HORUS_BPM_RULES_DATABASE_APP_ROLE: horus
+      HORUS_BPM_PROCESSES_DATABASE_APP_ROLE: horus
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_PROFILES_ACTIVE: ""
+    secrets:
+      - source: db_owner_password
+        target: HORUS_DB_PASSWORD
+      - source: demo_password
+        target: HORUS_DEMO_PASSWORD
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   host:
     build:
       context: .
@@ -64,9 +104,19 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
+      # Requests: the application role. It owns nothing and holds no ALTER or TRIGGER right. This service gets no owner
+      # setting and no owner secret; the migrate service below migrates and then ends.
       HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
       HORUS_DB_USERNAME: horus
+      SPRING_FLYWAY_ENABLED: "false"
+      HORUS_BPM_RULES_MIGRATE_ON_START: "false"
+      HORUS_BPM_PROCESSES_MIGRATE_ON_START: "false"
+      # Outside the dev profile this is the default; it is set here so the file says what it does.
+      HORUS_BPM_RULES_DATABASE_ROLE_CHECK: enforce
+      HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK: enforce
       # Spring Boot reads each file under /run/secrets as a property named after the file, so
       # ${HORUS_DB_PASSWORD} and ${HORUS_DEMO_PASSWORD} resolve from the mounted secrets.
       SPRING_CONFIG_IMPORT: configtree:/run/secrets/
@@ -173,6 +223,8 @@ secrets:
     file: ./secrets/db_admin_password
   db_password:
     file: ./secrets/db_password
+  db_owner_password:
+    file: ./secrets/db_owner_password
   demo_password:
     file: ./secrets/demo_password
   # Read by Grafana only, in the observability profile. Compose reads it only when that profile is started.

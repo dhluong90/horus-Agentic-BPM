@@ -111,7 +111,9 @@ else
 fi
 
 # R11 DB application role must not own the tables (issue #700)
-row R11 pending "DB app role does not own the tables" "no check or test yet; tracked in #700"
+MISSING=""; S=$(prs_state "704")
+if ! have_files examples/rule-and-process/src/test/java/io/github/dhluong90/bpm/examples/ruleandprocess/TwoRoleDatabaseIT.java deploy/postgres/app-role-grants.sql; then row R11 pending "DB app role does not own the tables (#700, PR 704)" "missing:$MISSING"
+else row R11 "$([ "$S" = "PRs merged" ] && echo pass || echo pending)" "DB app role does not own the tables (#700, PR 704)" "$S; TwoRoleDatabaseIT and app-role-grants.sql exist"; fi
 
 # R12 to R15 pilot-scope gaps: pending until the owner or architect marks each covered elsewhere or out of scope
 row R12 pending "Secrets and key rotation" "no evidence; state covered elsewhere or out of scope"

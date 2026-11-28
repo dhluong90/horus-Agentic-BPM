@@ -123,6 +123,20 @@ import org.springframework.transaction.PlatformTransactionManager;
 @EnableConfigurationProperties(ProcessEngineProperties.class)
 public class ProcessEngineAutoConfiguration {
 
+    /**
+     * Ends the process once the schema is current, when the host runs as the migration step ({@code horus.bpm.migrate-only=true}, #700).
+     * That step connects as the schema owner; the serving hosts never receive the owner's password.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "horus.bpm", name = "migrate-only", havingValue = "true")
+    org.springframework.boot.ApplicationRunner processEngineMigrateOnlyExit(org.springframework.context.ConfigurableApplicationContext context) {
+        return args -> {
+            org.apache.commons.logging.LogFactory.getLog(ProcessEngineAutoConfiguration.class)
+                    .info("horus.bpm.migrate-only: the Process Engine schema is current; exiting");
+            System.exit(org.springframework.boot.SpringApplication.exit(context, () -> 0));
+        };
+    }
+
     static final String DEV_PROFILE = "dev";
     static final List<String> PERMISSIONS = List.of("processes:read", "processes:deploy", "processes:author",
             "processes:approve", "processes:start", "processes:cancel", "processes:task:work",
@@ -137,8 +151,9 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    ProcessEngineSchemaMigrator processEngineSchemaMigrator(DataSource dataSource) {
-        return new ProcessEngineSchemaMigrator(dataSource);
+    ProcessEngineSchemaMigrator processEngineSchemaMigrator(DataSource dataSource, ProcessEngineProperties properties) {
+        return new ProcessEngineSchemaMigrator(dataSource, DatabaseRoles.ownerDataSource(properties.database()),
+                properties.database().appRole());
     }
 
     @Bean
@@ -946,10 +961,15 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     ProcessEngineInitializer processEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
-            ProcessEngineProperties properties, ResourceLoader resources, Environment environment) {
+            ProcessEngineProperties properties, ResourceLoader resources, Environment environment,
+            DataSource dataSource) {
         // PD-146: the one start-up summary of unclassified agent step fields is logged outside the dev profile only
+        io.github.dhluong90.bpm.process.postgres.DatabaseRoleCheck roleCheck =
+                new io.github.dhluong90.bpm.process.postgres.DatabaseRoleCheck(dataSource);
         return new ProcessEngineInitializer(migrator, services, properties, resources,
-                !environment.matchesProfiles("dev"));
+                !environment.matchesProfiles("dev"))
+                .withRoleCheck(() -> DatabaseRoles.verify(roleCheck, properties.database(), environment,
+                        org.apache.commons.logging.LogFactory.getLog(ProcessEngineInitializer.class)));
     }
 
     @Bean

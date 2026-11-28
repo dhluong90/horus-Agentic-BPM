@@ -180,6 +180,9 @@
         <configuration>
           <systemPropertyVariables>
             <rule-engine.version>${project.version}</rule-engine.version>
+            <!-- The context tests use a data source that cannot connect; outside the dev profile the role check
+                 would otherwise refuse it (HORUS-DB-ROLE-001). TwoRoleDatabaseIT proves the default. -->
+            <horus.bpm.rules.database.role-check>off</horus.bpm.rules.database.role-check>
           </systemPropertyVariables>
         </configuration>
       </plugin>

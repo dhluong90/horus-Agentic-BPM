@@ -41,6 +41,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  * @param calls limits of a process that calls another (#92)
  * @param tasks how a user task is completed through a declared form (PRE-031)
+ * @param database the schema owner and the application role (#700)
  * @param parallelStart limits of the arrivals a parallel multiple start holds (PD-149, AUD-10)
  * @param variableEncryption which instance variables are encrypted at rest and under which keys (PRE-395)
  */
@@ -73,7 +74,41 @@ public record ProcessEngineProperties(
         @DefaultValue Tasks tasks,
         @DefaultValue Cursor cursor,
         @DefaultValue ParallelStart parallelStart,
+        @DefaultValue Database database,
         @DefaultValue VariableEncryption variableEncryption) {
+
+    /**
+     * Two database roles for production (#700): a schema owner that migrates and an application role that serves traffic.
+     * Unset, the engine migrates and runs as the one role of the host's {@code DataSource}, which suits development and
+     * is not for production, because that role owns the tables and can disable their triggers.
+     *
+     * @param ownerUrl JDBC URL of the schema owner's connection; required with {@code ownerUsername}
+     * @param ownerUsername the schema owner; set it to turn the two-role setup on. Do not set it on a serving host: run the migration as a separate step ({@code horus.bpm.migrate-only=true}, connecting as the owner) and give the serving hosts the application role only. The owner migrates at start-up (and
+     *     keeps the partition step, when the engine has one) and is not used for requests: its connections are opened
+     *     for one run and closed
+     * @param ownerPassword the owner's password; supply it from a secret, never from a file in the repository
+     * @param appRole the role the host's {@code DataSource} connects as; after each migration the engine grants it
+     *     SELECT, INSERT, UPDATE and DELETE on the engine's tables and nothing else. Empty grants nothing: apply
+     *     {@code deploy/postgres/app-role-grants.sql} yourself
+     * @param roleCheck what start-up does when the role the host serves traffic with owns the engine's tables, holds
+     *     TRIGGER on them or is a superuser: {@code enforce} (default outside the {@code dev} profile) stops the start with the code {@code HORUS-DB-ROLE-001}, {@code warn} logs one WARN,
+     *     {@code off} skips the check. Outside {@code dev}, {@code warn} and {@code off} are an opt-out that logs {@code HORUS-DB-ROLE-002} at ERROR on every start. In the {@code dev} profile the default is {@code off}. The check is skipped when {@code horus.bpm.migrate-only=true}
+     */
+    public record Database(String ownerUrl, String ownerUsername, String ownerPassword, String appRole,
+            @DefaultValue("") String roleCheck) {
+
+        /** Whether the two-role setup is on. */
+        public boolean split() {
+            return ownerUsername != null && !ownerUsername.isBlank();
+        }
+
+        /** Never prints the password. */
+        @Override
+        public String toString() {
+            return "Database[ownerUrl=" + ownerUrl + ", ownerUsername=" + ownerUsername + ", ownerPassword=***, appRole="
+                    + appRole + ", roleCheck=" + roleCheck + "]";
+        }
+    }
 
     /**
      * Application-level encryption of instance variables (PRE-395). Off until {@code variables} or

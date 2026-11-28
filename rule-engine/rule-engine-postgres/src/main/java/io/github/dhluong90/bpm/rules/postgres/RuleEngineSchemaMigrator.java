@@ -30,6 +30,8 @@ public final class RuleEngineSchemaMigrator {
     public static final String MIGRATION_LOCATION = "classpath:io/github/dhluong90/bpm/rules/postgres/migration";
 
     private final DataSource dataSource;
+    private final DataSource ownerDataSource;
+    private final String appRole;
 
     /**
      * Creates a migrator bound to the host's data source.
@@ -38,7 +40,27 @@ public final class RuleEngineSchemaMigrator {
      *     creates a pool
      */
     public RuleEngineSchemaMigrator(DataSource dataSource) {
+        this(dataSource, null, null);
+    }
+
+    /**
+     * Creates a migrator that migrates as a schema owner and reads as the application role (#700).
+     *
+     * <p>{@link #migrate()} runs on {@code ownerDataSource}, which must be a role that owns the {@code rle_*} tables and
+     * may create them. {@link #status()} and {@link #currentVersion()} read on {@code dataSource}, the role the host
+     * serves traffic with. After each migration run the callback {@code afterMigrate__app_role_grants.sql} gives
+     * {@code appRole} the grants it needs and no more.
+     *
+     * @param dataSource the host's data source, used for reads
+     * @param ownerDataSource the data source of the schema owner, used for migrations; {@code null} migrates on
+     *     {@code dataSource}, the single-role setup for development
+     * @param appRole the role the host connects with at run time, granted by the callback; {@code null} or blank
+     *     grants nothing
+     */
+    public RuleEngineSchemaMigrator(DataSource dataSource, DataSource ownerDataSource, String appRole) {
         this.dataSource = Objects.requireNonNull(dataSource, "dataSource must not be null");
+        this.ownerDataSource = ownerDataSource;
+        this.appRole = appRole == null ? "" : appRole.strip();
     }
 
     /**
@@ -48,7 +70,7 @@ public final class RuleEngineSchemaMigrator {
      * @return what was applied and the resulting schema version
      */
     public SchemaMigrationResult migrate() {
-        Flyway flyway = flyway();
+        Flyway flyway = flyway(ownerDataSource == null ? dataSource : ownerDataSource);
         MigrateResult result;
         try {
             result = flyway.migrate();
@@ -69,7 +91,7 @@ public final class RuleEngineSchemaMigrator {
      * @return the latest applied version, or empty when no engine migration has run
      */
     public Optional<String> currentVersion() {
-        return currentVersionOf(flyway());
+        return currentVersionOf(flyway(dataSource));
     }
 
     /**
@@ -79,7 +101,7 @@ public final class RuleEngineSchemaMigrator {
      * @return the applied version and the number of pending migrations
      */
     public SchemaStatus status() {
-        MigrationInfoService info = flyway().info();
+        MigrationInfoService info = flyway(dataSource).info();
         MigrationInfo current = info.current();
         String version = (current == null || current.getVersion() == null) ? null : current.getVersion().getVersion();
         return new SchemaStatus(version, info.pending().length);
@@ -101,10 +123,11 @@ public final class RuleEngineSchemaMigrator {
      */
     static final Map<String, String> LOCKING = Map.of("flyway.postgresql.transactional.lock", "false");
 
-    private Flyway flyway() {
+    private Flyway flyway(DataSource target) {
         return Flyway.configure(RuleEngineSchemaMigrator.class.getClassLoader())
                 .configuration(LOCKING)
-                .dataSource(dataSource)
+                .dataSource(target)
+                .placeholders(Map.of("horusAppRole", appRole))
                 .table(RuleEngineSchema.HISTORY_TABLE)
                 .locations(MIGRATION_LOCATION)
                 .baselineOnMigrate(true)

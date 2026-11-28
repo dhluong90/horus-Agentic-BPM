@@ -27,7 +27,7 @@ Statuses: **pass** (evidence on `main`), **pending** (work or evidence missing),
 | R8 | Release gate: SBOM and signature | PR #677, `tools/release/verify-release-attestations.sh`, workflow `release.yml`; the script checks the files and the latest run, the release job verifies the attestations | pending until `release.yml` has a run on `main` |
 | R9 | Penetration test | Moved to 1.2, after the pilot (owner decision, 28 Nov 2026) | deferred |
 | R10 | Tomcat CVE exception (decision D3) | `.grype.yaml` entry expires 2026-12-11; the owner decides on extension | decision |
-| R11 | The database application role does not own the tables (#700) | No test or check yet; needs a migration-role split and a test that the application role cannot alter or drop tables | pending |
+| R11 | The database application role does not own the tables (#700) | PR #704: `TwoRoleDatabaseIT`, `deploy/postgres/app-role-grants.sql`, [Operations-Runbook](../wiki/Operations-Runbook.md#database-roles). The role check refuses the start outside dev (`HORUS-DB-ROLE-001`); the owner password goes only to the migration step | pending until #704 is merged |
 | R12 | Secrets and key rotation | No evidence linked; state whether covered elsewhere or out of scope for the pilot | pending |
 | R13 | Rollback of a bad release | Beyond the 1.0.0 upgrade test; no evidence linked | pending |
 | R14 | Multi-tenant isolation test result | No evidence linked; state whether covered elsewhere or out of scope | pending |
