@@ -23,7 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * Span links across an async step (PRE-521, TR-OBS-03, TR-SEC-05): the step that schedules a remote call and the step
+ * Span links across an async step (PRE-530, TR-OBS-03, TR-SEC-05): the step that schedules a remote call and the step
  * that applies its answer run in different transactions, often on different threads, so they sit in different traces.
  * The engine keeps the scheduling span's reference in the job and hands it to the tracer when the answer is applied.
  */
@@ -99,7 +99,7 @@ class AsyncSpanLinkTest {
     }
 
     @Test
-    void PRE_521_the_span_that_applies_an_async_result_is_linked_to_the_span_that_scheduled_the_call() {
+    void PRE_530_the_span_that_applies_an_async_result_is_linked_to_the_span_that_scheduled_the_call() {
         // Given a loan whose first step schedules the bureau call, in a trace of its own
         TestEngine engine = replica(tracing());
         String loan = engine.services.start(new StartRequest("loan-bureau-check", "LOAN-2027-0521",
@@ -120,7 +120,7 @@ class AsyncSpanLinkTest {
     }
 
     @Test
-    void PRE_521_the_link_is_ids_only_and_never_a_value_of_the_request() {
+    void PRE_530_the_link_is_ids_only_and_never_a_value_of_the_request() {
         // Given a loan started with a national id, and its scheduled job
         TestEngine engine = replica(tracing());
         String loan = engine.services.start(new StartRequest("loan-bureau-check", "LOAN-2027-0522",
@@ -135,7 +135,7 @@ class AsyncSpanLinkTest {
     }
 
     @Test
-    void PRE_521_a_tracer_that_does_not_know_links_still_applies_the_result() {
+    void PRE_530_a_tracer_that_does_not_know_links_still_applies_the_result() {
         // Given a tracer written before links existed: only the four-argument method, a span with no link()
         ProcessTracing old = (tenant, key, version, kind) -> new ProcessTracing.Span() {
             @Override

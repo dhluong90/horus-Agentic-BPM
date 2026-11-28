@@ -189,7 +189,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-394 | `PRE_394_*` in `ReadTimeoutPostgresIT`; `TR_SEC_08_*` in `ProcessRestErrorMatrixTest` | Testcontainers: a list slowed by a table lock held on another connection, a host write transaction around the read | M3 | `TR-PERF-07` | Done (#254) |
 | PRE-518 | `PRE_518_*` in `ProcessEngineTracingTest`; `TracingSpansIT` | Unit, integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 | PRE-519 | `PRE_519_*` in `ProcessServicesQaTest` | Unit | M3 | `TR-OBS-03`, `TR-TEN-01` | Done |
-| PRE-521 | `PRE_521_*` in `AsyncSpanLinkTest` and `ProcessEngineTracingTest` | Unit, Testcontainers | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
+| PRE-530 | `PRE_530_*` in `AsyncSpanLinkTest` and `ProcessEngineTracingTest` | Unit, Testcontainers | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 | PRE-520 | `PRE_520_*` in `TracingExportOffIT` | Integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 | PRE-521 | `PRE_521_*` in `IncidentCountsAndFiltersTest`, `ReadTimeoutPostgresIT`, `ListQueryPlanCheckTest`; `list_and_live_count_bodies_match_the_contract` in `ProcessRestContractTest` | Testcontainers: open incidents per version and node, a resolved one, two tenants, a locked table, the plan of the count | M3 | `TR-TEN-01`, `TR-PERF-07` | Done (#91) |
 | PRE-522 | `PRE_522_*` in `IncidentCountsAndFiltersTest`, `ReadTimeoutPostgresIT`, `ListQueryPlanCheckTest`, `IncidentRestContractTest` | Testcontainers: key and version filters, cursor bound to the filter, two tenants, a locked table, the plan of the version page | M3 | `TR-TEN-01`, `TR-PERF-04`, `TR-PERF-07` | Done (#91) |
