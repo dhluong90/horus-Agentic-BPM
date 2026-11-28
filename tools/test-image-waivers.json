@@ -1,0 +1,23 @@
+[
+  {
+    "image": "mcr.microsoft.com/playwright@sha256:1507cbfc550a63a6b7396791ca4f00df17beb56342d2447b3f106c306f525579",
+    "issue": 549,
+    "reason": "Test-only image, never shipped: it runs the browser tests against the local cockpit, with no secret mounted. v1.65.1-noble is the newest tag; the critical findings are Firefox 159 binaries. Move the pin when a Playwright release with a newer Firefox appears.",
+    "owner": "devops",
+    "expires": "2026-12-27"
+  },
+  {
+    "image": "postgres@sha256:e7d9e6aac7fe3232f7661da103aebc0ce38b04105b46af5e9edd5ef6bc343f20",
+    "issue": 551,
+    "reason": "Test-only image, never shipped, holds no real data. 14.25-alpine is the newest 14 image; the findings are OpenSSL (mostly with no upstream fix) and libxml2. Move the pin when the official 14 image picks up OpenSSL 3.5.9-r1 and libxml2 2.13.9-r3.",
+    "owner": "devops",
+    "expires": "2026-12-27"
+  },
+  {
+    "image": "testcontainers/ryuk@sha256:7c1a8a9a47c780ed0f983770a662f80deb115d95cce3e2daa3d12115b8cd28f0",
+    "issue": 553,
+    "reason": "Test-only image, never shipped; the Go standard library findings sit in the Testcontainers reaper, which has no inbound exposure beyond the local test run. It mounts the Docker socket, so the waiver is short. If upstream has published no rebuilt image by the expiry, build ryuk from its tagged source with a fixed Go release and pin that digest.",
+    "owner": "devops",
+    "expires": "2026-12-27"
+  }
+]

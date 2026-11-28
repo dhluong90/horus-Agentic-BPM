@@ -131,7 +131,7 @@ class DevAutoPublishExemptionIT {
             }
             body = bound;
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/bpm/rules/v1"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/api/bpm/rules/v1"
                         + path))
                 .header("Authorization", TestTokens.bearerFor(user, "bank-a", ALL_RULE_PERMISSIONS))
                 .header("Idempotency-Key", "k-" + System.nanoTime())

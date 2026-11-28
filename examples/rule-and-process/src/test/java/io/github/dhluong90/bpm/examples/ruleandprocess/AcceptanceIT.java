@@ -296,7 +296,7 @@ class AcceptanceIT {
     }
 
     private HttpResponse<String> sendWithKey(String user, String path, String body, String key) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Basic " + Base64.getEncoder().encodeToString((user + ":it-pass")
                         .getBytes(StandardCharsets.UTF_8)))
                 .header("Idempotency-Key", key).header("Content-Type", "application/json")
@@ -339,7 +339,7 @@ class AcceptanceIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, String ifMatch,
             String contentType) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Basic " + Base64.getEncoder().encodeToString((user + ":it-pass")
                         .getBytes(StandardCharsets.UTF_8)))
                 .header("Idempotency-Key", java.util.UUID.randomUUID().toString());

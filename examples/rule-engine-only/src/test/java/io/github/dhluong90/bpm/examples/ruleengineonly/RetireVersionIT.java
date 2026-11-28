@@ -254,7 +254,7 @@ class RetireVersionIT {
 
     @Test
     void RLE_026_the_host_metadata_shows_the_retirement_mode() throws Exception {
-        HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpResponse<String> meta = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/meta"))
                 .header("Authorization", TestTokens.bearerFor("dan", "bank-retire-a", PERMISSIONS.get("dan"))).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -290,7 +290,7 @@ class RetireVersionIT {
             }
             body = bound;
         }
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:"
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
                         + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path))
                 .header("Authorization", TestTokens.bearerFor(user, tenant, PERMISSIONS.get(user)))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
