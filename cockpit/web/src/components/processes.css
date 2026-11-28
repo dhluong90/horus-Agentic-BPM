@@ -172,8 +172,11 @@
 }
 .review-changes { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; font: var(--type-label); }
 .review-changes__field { color: var(--muted); margin-right: 6px; }
-.review-changes__from { color: var(--ink-2); text-decoration: line-through; }
-.review-changes__to { color: var(--ink); font-weight: 600; background: var(--indigo-soft); padding: 0 4px; border-radius: var(--radius-xs); }
+/* A changed value is text colour and a sign, never a fill: the old value is struck with a minus, the new one carries a plus. */
+.review-changes__from { color: var(--bad); text-decoration: line-through; }
+.review-changes__from::before { content: '\2212\00a0'; text-decoration: none; display: inline-block; }
+.review-changes__to { color: var(--ok); font-weight: 600; }
+.review-changes__to::before { content: '+\00a0'; }
 .review-changes__none { margin: 0; font: var(--type-label); }
 
 /* ---------- Process approval with the graph diff (CKP-024) ----------
@@ -231,8 +234,10 @@
 .pdiff__values > div { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .pdiff__values dt { color: var(--muted); }
 .pdiff__values dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
-.pdiff__from { color: var(--ink-2); text-decoration: line-through; }
-.pdiff__to { font-weight: 600; background: var(--diff-mod); padding: 0 4px; border-radius: var(--radius-xs); }
+.pdiff__from { color: var(--bad); text-decoration: line-through; }
+.pdiff__from::before { content: '\2212\00a0'; text-decoration: none; display: inline-block; }
+.pdiff__to { font-weight: 600; color: var(--ok); }
+.pdiff__to::before { content: '+\00a0'; }
 
 .diff-mark { display: inline-flex; align-items: center; gap: 4px; font: var(--type-caption); font-weight: 600; white-space: nowrap; }
 .diff-mark--added { color: var(--ok); }
@@ -474,3 +479,7 @@
 .dg-node--heat-3 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 38%, var(--node)); stroke: var(--warn-fill); }
 .dg-node--heat-4 > rect:first-of-type { fill: color-mix(in srgb, var(--warn-fill) 72%, var(--node)); stroke: var(--warn-fill); stroke-width: 2.25; }
 .dg-node .dg-node__heat { fill: var(--ink); font: var(--type-caption); font-weight: 600; stroke: var(--canvas); stroke-width: 4px; paint-order: stroke; stroke-linejoin: round; }
+
+/* A figure with no room is kept back and shown while its step is hovered or focused (#688). */
+.dg-node .dg-node__heat--crowded { opacity: 0; pointer-events: none; }
+.dg-node:hover .dg-node__heat--crowded, .dg-node:focus .dg-node__heat--crowded, .dg-node:focus-within .dg-node__heat--crowded { opacity: 1; }

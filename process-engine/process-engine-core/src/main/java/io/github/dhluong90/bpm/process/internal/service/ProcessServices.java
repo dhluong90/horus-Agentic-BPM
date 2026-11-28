@@ -4787,9 +4787,36 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new io.github.dhluong90.bpm.process.api.FormValidationException(
                         "The result does not meet the task's form", violations);
             }
-            return TaskForms.record(form.schema(), result);
+            return maskEncrypted(row, tenant, task, TaskForms.record(form.schema(), result));
         }
         return null;
+    }
+
+    /**
+     * PRE-395: history keeps what is stored encrypted as masked, as it keeps a field the form masks. A task whose
+     * result variable is encrypted has its whole submission masked, because the submission is that variable; otherwise
+     * each submitted field named like an encrypted variable is.
+     */
+    private io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission maskEncrypted(InstanceRow row,
+            String tenant, TaskRow task, io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission recorded) {
+        String resultVariable = null;
+        StoredDefinition definition = store.definition(tenant, row.definitionId()).orElse(null);
+        if (definition != null && compiled(definition).process().node(task.nodeId()).orElse(null) instanceof UserTask node) {
+            resultVariable = node.extensions()
+                    .first(io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable.class)
+                    .map(io.github.dhluong90.bpm.process.internal.model.horus.ResultVariable::name).orElse(null);
+        }
+        boolean all = resultVariable != null && store.encryptsVariable(row.definitionKey(), resultVariable);
+        Map<String, Object> values = new LinkedHashMap<>(recorded.values());
+        boolean changed = false;
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            if (all || (resultVariable == null && store.encryptsVariable(row.definitionKey(), entry.getKey()))) {
+                entry.setValue(io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission.MASKED);
+                changed = true;
+            }
+        }
+        return changed ? new io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission(values,
+                recorded.unrecordedFields()) : recorded;
     }
 
     @Override
