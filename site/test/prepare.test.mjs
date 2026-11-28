@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { convertLinks, parseSidebar, llmsTxt } from '../prepare.mjs';
+import { convertLinks, parseSidebar, llmsTxt, sizeSvg } from '../prepare.mjs';
 
 const pages = new Set(['Home', 'Cockpit', 'Getting-Started']);
 
@@ -48,4 +48,10 @@ test('the wiki Home page is linked as /Home, not as the site root', () => {
   assert.equal(convertLinks('[[Home]]', pages2, 'X', []), '[Home](./Home)');
   const sb = parseSidebar('**[[Home]]**\n', pages2, []);
   assert.equal(sb[0].items[0].link, '/Home');
+});
+
+test('a rendered diagram gets the size of its viewBox so a phone can scroll it', () => {
+  const out = sizeSvg('<svg id="x" width="100%" xmlns="http://www.w3.org/2000/svg" viewBox="4 4 2845.42 674.8" role="img"><g/></svg>');
+  assert.match(out, /^<svg id="x" width="2845" height="675" xmlns/);
+  assert.equal(sizeSvg('<svg width="24" viewBox="0 0 24 24"></svg>'), '<svg width="24" viewBox="0 0 24 24"></svg>');
 });

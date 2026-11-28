@@ -18,10 +18,10 @@ Export is off by default in the example hosts. To send traces over OTLP:
 ```bash
 export HORUS_TRACING_EXPORT_ENABLED=true
 export HORUS_TRACING_SAMPLING=0.1
-export MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=http://collector:4318/v1/traces
+export MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT=https://collector.example.internal:4318/v1/traces
 ```
 
-On Spring Boot 3.5 the endpoint property is `MANAGEMENT_OTLP_TRACING_ENDPOINT`. Sampling is a fraction between 0 and 1; the spans exist in the host's tracer whether or not they are sampled.
+Use an `https` endpoint: traces name your processes, rule sets and tenants. See the [[Operations runbook|Operations-Runbook]]. On Spring Boot 3.5 the endpoint property is `MANAGEMENT_OTLP_TRACING_ENDPOINT`. Sampling is a fraction between 0 and 1; the spans exist in the host's tracer whether or not they are sampled.
 
 ## Async steps: span links
 

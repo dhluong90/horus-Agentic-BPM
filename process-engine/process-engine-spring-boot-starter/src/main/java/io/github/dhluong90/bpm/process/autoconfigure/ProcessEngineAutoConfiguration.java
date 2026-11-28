@@ -52,7 +52,11 @@ import io.github.dhluong90.bpm.process.postgres.JdbcAgentReplayStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcJobStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcLayoutStore;
 import io.github.dhluong90.bpm.process.postgres.JdbcMigrationStore;
+import io.github.dhluong90.bpm.process.internal.store.VariableVault;
 import io.github.dhluong90.bpm.process.postgres.JdbcProcessStore;
+import io.github.dhluong90.bpm.process.postgres.JdbcVariableReencryption;
+import io.github.dhluong90.bpm.process.spi.VariableEncryptionRules;
+import io.github.dhluong90.bpm.process.spi.VariableKeyring;
 import io.github.dhluong90.bpm.process.postgres.JdbcCalendarStore;
 import io.github.dhluong90.bpm.process.internal.service.Calendars;
 import io.github.dhluong90.bpm.process.api.CalendarService;
@@ -147,16 +151,50 @@ public class ProcessEngineAutoConfiguration {
         }), org.springframework.jdbc.core.simple.JdbcClient.create(dataSource));
     }
 
+    /**
+     * The keys of variable encryption (PRE-395). A host with a vault registers its own {@link VariableKeyring}; the
+     * default reads {@code horus.bpm.processes.variable-encryption.keys}.
+     */
     @Bean
     @ConditionalOnMissingBean
-    JdbcProcessStore processEngineStore(DataSource dataSource, ProcessEngineProperties properties) {
-        return new JdbcProcessStore(dataSource, properties.idempotency().lockTimeout());
+    VariableKeyring processEngineVariableKeyring(ProcessEngineProperties properties) {
+        return properties.variableEncryption().keyring();
+    }
+
+    /**
+     * Encrypts the configured variables. Fails start-up when variables are named and the keyring has no current key:
+     * the engine never falls back to the clear.
+     */
+    @Bean
+    @ConditionalOnMissingBean
+    VariableVault processEngineVariableVault(VariableKeyring keyring, ProcessEngineProperties properties) {
+        VariableEncryptionRules rules = properties.variableEncryption().rules();
+        if (!rules.isEmpty() && keyring.current().isEmpty()) {
+            throw new IllegalStateException("horus.bpm.processes.variable-encryption names variables to encrypt, but "
+                    + "the keyring has no current key. Set variable-encryption.keys and active-key-id from a secret "
+                    + "store.");
+        }
+        return new VariableVault(keyring, rules);
+    }
+
+    /** Rewrites stored values under the current key after a rotation. */
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcVariableReencryption processEngineVariableReencryption(DataSource dataSource, VariableVault vault) {
+        return new JdbcVariableReencryption(dataSource, vault);
     }
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcJobStore processEngineJobStore(DataSource dataSource) {
-        return new JdbcJobStore(dataSource);
+    JdbcProcessStore processEngineStore(DataSource dataSource, ProcessEngineProperties properties,
+            VariableVault vault) {
+        return new JdbcProcessStore(dataSource, properties.idempotency().lockTimeout(), vault);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    JdbcJobStore processEngineJobStore(DataSource dataSource, VariableVault vault) {
+        return new JdbcJobStore(dataSource, vault);
     }
 
     /** This replica's job settings; the replica id defaults to the host name plus a random suffix. */
@@ -660,8 +698,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource) {
-        return new JdbcAgentReplayStore(dataSource);
+    JdbcAgentReplayStore processEngineAgentReplayStore(DataSource dataSource, VariableVault vault) {
+        return new JdbcAgentReplayStore(dataSource, vault);
     }
 
     /**
