@@ -10,6 +10,7 @@ Measured numbers for sizing a deployment (#656). The harness is in this folder, 
 - `baseline.json`: the numbers below, and the limits `check_regression.py` applies.
 - `check_regression.py`: compares a run with the baseline and exits 1 when it is much worse.
 - `smoke.sh`: builds the compose stack, runs the short smoke load, runs the check and removes the stack.
+- [`soak/`](soak/README.md): the HA soak test (#655), three copies behind a balancer and a pooler with kills, restarts and a paused database.
 - `.github/workflows/perf-smoke.yml`: runs `smoke.sh` nightly, on demand and for a pull request that touches `perf/`.
 
 ## What is measured
