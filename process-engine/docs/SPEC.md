@@ -3002,6 +3002,20 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Kind:** control
 - **Given:** The example host started with no tracing property.
 - **When:** It takes traffic that makes engine spans.
-- **Then:** The context holds no span exporter bean, and nothing connects to the default OTLP ports 4317 and 4318.
-- **Example:** `20 POST /api/cards/applications -> 0 connections on 4317 and 4318`.
+- **Then:** The context holds no span exporter bean and no OTLP metrics registry, and nothing connects to the default OTLP ports 4317 and 4318. Spring Boot's OpenTelemetry starter turns on an OTLP metrics registry and an OTLP log exporter by default, each sending to `http://localhost:4318` once a minute; the example host switches both off (`HORUS_METRICS_OTLP_EXPORT_ENABLED`, `HORUS_LOGGING_OTLP_EXPORT_ENABLED`, default `false`), and the test sets the metrics step to one second so a host that sends them fails every run and not one run in sixty seconds.
+- **Example:** `20 POST /api/cards/applications -> 0 connections on 4317 and 4318, with management.otlp.metrics.export.step=PT1S`.
 - **Test ID:** `PRE_520_with_no_tracing_property_nothing_is_exported_and_no_exporter_connects_anywhere` (`TracingExportOffIT`)
+
+### PRE-521 The step that applies an async result is linked to the step that scheduled the call
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A host with a Micrometer `Tracer`, and a loan whose first step schedules a remote bureau call. The answer comes later, from the job runner or from `POST .../steps/{id}:complete`, in a transaction and a trace of its own.
+- **When:** The answer is applied.
+- **Then:**
+  - The scheduling step's span gives a reference made of its trace id and span id only (`ProcessTracing.Span.link()`); the engine keeps it in the job payload as `traceLink`.
+  - The span of the `ASYNC_RESULT` step, and of the `RouteToReview` step of a refused answer, is started with that reference and carries one span link to the scheduling span. No other step has a link, and a link adds no attribute.
+  - A reference that is not two hex ids, a tracer that cannot link and a tracer written before links existed (the four-argument `startStep` only) give an ordinary step span; the link is never a reason to fail or roll back a step. A job written before links existed has no `traceLink` and its answer is applied as before.
+  - The reference holds no business key, instance id, variable, input or output.
+- **Example:** `START span 0af7...-b7ad6b7169203331 schedules the bureau call -> ASYNC_RESULT span, new trace, link to 0af7...-b7ad6b7169203331`.
+- **Test ID:** `PRE_521_the_span_that_applies_an_async_result_is_linked_to_the_span_that_scheduled_the_call`, `PRE_521_the_link_is_ids_only_and_never_a_value_of_the_request`, `PRE_521_a_tracer_that_does_not_know_links_still_applies_the_result` (`AsyncSpanLinkTest`); `PRE_521_the_result_of_an_async_call_is_a_span_linked_to_the_span_that_scheduled_it`, `PRE_521_a_step_names_itself_by_trace_id_and_span_id_only_so_a_later_span_can_link_to_it`, `PRE_521_a_link_that_is_not_two_hex_ids_gives_a_plain_span_and_never_fails_the_step`, `PRE_521_a_linked_step_that_ends_on_an_Error_leaves_no_current_span` (`ProcessEngineTracingTest`)

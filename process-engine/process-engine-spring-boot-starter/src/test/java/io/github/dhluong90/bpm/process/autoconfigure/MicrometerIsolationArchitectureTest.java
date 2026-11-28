@@ -31,7 +31,7 @@ class MicrometerIsolationArchitectureTest {
     void PRE_084_only_the_meters_and_their_conditional_configuration_name_micrometer() {
         noClasses().that().doNotHaveFullyQualifiedName(METERS).and().doNotHaveFullyQualifiedName(METERS_CONFIGURATION)
                 .and().doNotHaveFullyQualifiedName(TRACING).and().doNotHaveFullyQualifiedName(TRACING_CONFIGURATION)
-                .and().doNotHaveSimpleName("TracedFailure")
+                .and().doNotHaveSimpleName("TracedFailure").and().doNotHaveSimpleName("StepSpan")
                 .should().dependOnClassesThat().resideInAPackage("io.micrometer..")
                 .orShould().dependOnClassesThat().haveFullyQualifiedName(METERS)
                 .because("a host without Micrometer must start (the engine core and the other beans load without it)")
