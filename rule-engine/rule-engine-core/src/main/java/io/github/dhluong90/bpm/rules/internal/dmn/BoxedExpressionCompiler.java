@@ -9,7 +9,7 @@ import java.util.Map;
  * Compiles one boxed expression, including decision tables with all eleven hit policies, to a function of a scope
  * (#201 for table, literal, list, relation, conditional, iterator, filter; #202 adds context, invocation and function
  * definition). It reaches FEEL only through the {@code feel} contract: the parser for text, the engine for
- * evaluation. Oracle: the TCK level 2 folders and a unit test per hit policy including priority ties.
+ * evaluation. Reference test: the TCK level 2 folders and a unit test per hit policy including priority ties.
  */
 public interface BoxedExpressionCompiler {
 

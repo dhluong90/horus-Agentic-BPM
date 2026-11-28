@@ -9,7 +9,7 @@ import java.util.Map;
 /**
  * The DMN evaluation entry point (#202): compiles the decision requirements graph once (cycle check, requirement
  * order, knowledge models as functions, decision services) and evaluates a decision or service by name. One budget
- * covers the whole evaluation. A decision service is the unit a {@code businessRuleTask} calls later. Oracle: the
+ * covers the whole evaluation. A decision service is the unit a {@code businessRuleTask} calls later. Reference test: the
  * TCK level 3 folders; a cycle is refused at compile time.
  */
 public interface DmnEvaluator {

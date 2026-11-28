@@ -311,7 +311,7 @@ Five layers, one interface each, so the parser (#197), the evaluator (#198), the
 flowchart LR
   classDef own fill:#e8f3ec,stroke:#2f6f4f,color:#12301f
   classDef old fill:#f4f4f4,stroke:#888,color:#222
-  classDef oracle fill:#fff7e0,stroke:#b58900,color:#3a2e00
+  classDef reference fill:#fff7e0,stroke:#b58900,color:#3a2e00
   SRC["FEEL text"] --> P["FeelParser (#197)"]:::own
   P -->|"FeelNode, with offsets"| E["FeelEngine (#198)"]:::own
   B["FeelBuiltins (#199)"]:::own -->|"FeelFunction"| E
@@ -324,7 +324,7 @@ flowchart LR
   C -->|"evaluate"| E
   D --> C
   V1["urn:horus-bpm:expr:v1 and feel-1.0-subset, frozen"]:::old --> X
-  TCK["DMN TCK, differential test, replay corpus"]:::oracle -.-> E
+  TCK["DMN TCK, differential test, replay corpus"]:::reference -.-> E
   TCK -.-> R
   TCK -.-> D
 ```

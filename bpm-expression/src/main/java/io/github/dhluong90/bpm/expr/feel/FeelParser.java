@@ -5,7 +5,7 @@ import io.github.dhluong90.bpm.expr.api.ExpressionInvalidException;
 /**
  * The FEEL parser (#197). Pure: text and scope in, tree out, no clock and no I/O. Limits: 64 KB of source and nesting
  * depth 64, refused with {@link ExpressionInvalidException} carrying the offset, without backtracking beyond a
- * constant. Oracle: golden tree dumps per grammar rule, {@code parse(print(t)) == t}, and the FEEL texts of the DMN
+ * constant. Reference test: golden tree dumps per grammar rule, {@code parse(print(t)) == t}, and the FEEL texts of the DMN
  * TCK models (parse-only count).
  */
 public interface FeelParser {

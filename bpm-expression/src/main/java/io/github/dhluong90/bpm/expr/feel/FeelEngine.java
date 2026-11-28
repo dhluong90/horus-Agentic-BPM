@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * The FEEL type checker and evaluator (#198). It compiles a {@link FeelNode} once and evaluates it many times. Pure:
  * the clock, zone, budget and error mode come in through {@link FeelOptions} and {@link EvaluationContext}.
- * Oracle: the FEEL folders of the DMN TCK, and the differential test against the current language (TR-STD-02).
+ * Reference test: the FEEL folders of the DMN TCK, and the differential test against the current language (TR-STD-02).
  */
 public interface FeelEngine {
 

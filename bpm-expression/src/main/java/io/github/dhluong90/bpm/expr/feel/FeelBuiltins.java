@@ -5,7 +5,7 @@ import java.util.Optional;
 
 /**
  * The registry of FEEL built-in functions (#199) and the contract of one built-in. The engine looks a function up by
- * its specification name, including names with spaces ({@code string length}, {@code date and time}). Oracle: the
+ * its specification name, including names with spaces ({@code string length}, {@code date and time}). Reference test: the
  * specification's own examples, one table-driven test per function, and the TCK built-in folders.
  */
 public interface FeelBuiltins {

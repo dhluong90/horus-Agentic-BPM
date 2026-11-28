@@ -5,7 +5,7 @@ import java.io.InputStream;
 
 /**
  * Reads DMN 1.1 to 1.5 XML into the semantic model (#200). Hardened: no DTD, no external entity, size and depth
- * limits, Java and PMML functions refused by name with element id and line. Pure: no clock, no network. Oracle: every
+ * limits, Java and PMML functions refused by name with element id and line. Pure: no clock, no network. Reference test: every
  * TCK model reads (count), read-write-read equality, and an XML attack suite.
  */
 public interface DmnXmlReader {

@@ -4,7 +4,7 @@ import io.github.dhluong90.bpm.rules.internal.dmn.model.DmnModel;
 
 /**
  * Writes the model as DMN 1.5 XML with diagram information (#200). Deterministic: element order is model order,
- * attributes in a fixed order, no timestamps. Oracle: read-write-read gives an equal model.
+ * attributes in a fixed order, no timestamps. Reference test: read-write-read gives an equal model.
  */
 public interface DmnXmlWriter {
 
