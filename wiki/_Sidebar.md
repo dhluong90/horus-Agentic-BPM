@@ -65,5 +65,6 @@
 **Project**
 - [[Contributing]]
 - [[Technical stack|Technical-Stack]]
+- [[Operations runbook|Operations-Runbook]]
 - [[Metrics, alerts and dashboards|Metrics-Alerts-and-Dashboards]]
 - [[FAQ]]
