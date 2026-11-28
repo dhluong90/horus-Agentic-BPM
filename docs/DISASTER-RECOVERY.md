@@ -49,23 +49,36 @@ The result is written to `dr-report.json` (`DR_REPORT` sets the path). The `DR d
 
 ## What was measured
 
-Two drills on a laptop (Docker Desktop, PostgreSQL 16, a database of about 230 KB dumped), 28 November 2026, backup with `pg_dump -Fc` taken 10 seconds before the failure:
+**Latest drill: RPO 11.3 s, RTO 14.9 s** (28 November 2026, `deploy/dr/drill.sh`, restore as the owner role, host as the application role). The drill writes both figures to `dr-report.json`, and `tools/readiness-check.sh` reads them from this line.
 
-| | Drill 1 | Drill 2 |
-|---|---|---|
-| Recovery point (failure minus the last decision that survived) | not recorded (the report step had a bug, fixed before drill 2) | 11.6 s; 5 decisions written after the backup were lost, as designed |
-| Fresh PostgreSQL up | 5.8 s | 5.7 s |
-| `pg_restore` | 0.3 s | 0.3 s |
-| Host start until healthy | 6.2 s | 6.2 s |
-| First decision served after the failure (recovery time) | not recorded | 14.6 s |
-| Timer fired after the first decision | 34.0 s | 33.8 s |
-| Seals, audit trail, in-flight instances | all match | all match |
+Three drills on a laptop (Docker Desktop, PostgreSQL 16, a database of about 230 KB dumped), all on 28 November 2026, backup with `pg_dump -Fc` taken 10 seconds before the failure. Drill 3 is the re-run after the restore moved to the owner role (#704); the command is the same, `deploy/dr/drill.sh`.
+
+| | Drill 1 | Drill 2 | Drill 3 (#704) |
+|---|---|---|---|
+| Recovery point (failure minus the last decision that survived) | not recorded (the report step had a bug, fixed before drill 2) | 11.6 s; 5 decisions written after the backup were lost, as designed | 11.3 s; the same 5 decisions lost |
+| Fresh PostgreSQL up | 5.8 s | 5.7 s | 5.8 s |
+| `pg_restore` | 0.3 s | 0.3 s | 0.4 s |
+| Host start until healthy | 6.2 s | 6.2 s | 6.3 s |
+| First decision served after the failure (recovery time) | not recorded | 14.6 s | 14.9 s |
+| Timer fired after the first decision | 34.0 s | 33.8 s | 36.2 s |
+| Seals, audit trail, in-flight instances | all match | all match | all match |
 
 Read these numbers as follows.
 
 - **RPO** is the time since the last backup that survived, not a property of the engines. With a nightly `pg_dump` it is up to 24 hours. The drill shows the loss is exactly the work after the backup and nothing else.
-- **RTO** is dominated by how long your database takes to restore. The drill database is tiny, so restore is 0.3 s; the engines' own part (host start) is 6.2 s. Measure the restore of your own data volume: run `pg_restore` of a production-size dump on your hardware and add about 10 seconds for host start and the first decision.
+- **RTO** is dominated by how long your database takes to restore. The drill database is tiny, so restore is 0.4 s; the engines' own part (host start) is 6.3 s. The figure for your data is not the drill's: size it as below.
 - The timer fires about 34 s after the first decision because it was due a minute after it was set, and the restore was quick. A timer that came due while the database was down fires on the first scan after the restore.
+
+### Size RTO for a larger database
+
+RTO is five steps added up: detect and decide, start a database server, restore the data, start one host, serve the first decision. Only the restore depends on your data. In the drill the other steps (server 5.8 s, host 6.3 s, first decision 0.6 s) add up to about 13 s.
+
+1. Read the size to restore: `SELECT pg_size_pretty(pg_database_size(current_database()));`
+2. Restore your latest real backup into a scratch server of production size and time it: `time pg_restore -d horus_scratch -j 4 --no-owner latest.dump`. For a base backup, time the unpacking and add the WAL replay.
+3. Divide the size by the seconds to get throughput in GB per minute. Divide any target size by it, and add 20% for growth.
+4. RTO is that restore time plus about 13 s plus your detection delay. If it is above the target, move to base backup with WAL archiving and replicas, or shorten what must be restored with [retention](AUDIT-AND-RETENTION.md).
+
+The worked method, with an illustration, is in the [operations runbook](../wiki/Operations-Runbook.md#size-your-recovery-time). Record your own date and result in its rehearsal log.
 
 ## Choose a backup method
 
