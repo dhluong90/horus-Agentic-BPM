@@ -1,4 +1,5 @@
 import type { PendingDefinitionApproval } from '../../api/processes/schemas';
+import { calendarName } from '../processes/calendars/calendarNames';
 import { nameOf } from '../../app/names';
 import type { PendingRuleApproval } from '../../api/rules/schemas';
 import { suppliedName } from '../../app/people';
@@ -77,7 +78,7 @@ export function fromProcess(item: PendingDefinitionApproval, userId: string): Ap
   const type: ApprovalType = item.kind === 'MIGRATION_PLAN' ? 'migration' : item.kind === 'CALENDAR_CHANGE' ? 'calendar' : 'definition';
   return {
     engine: 'processes', type, id: type === 'definition' ? undefined : item.id ?? undefined, sourceVersion: item.sourceVersion ?? undefined, reason: item.reason ?? undefined, effectiveFrom: undefined,
-    key: item.key, title: item.name ?? item.key, version: item.version, hash: item.contentHash ?? item.definitionHash ?? '', lockVersion: item.lockVersion,
+    key: item.key, title: item.name ?? (type === 'calendar' ? calendarName(item.key) : item.key), version: item.version, hash: item.contentHash ?? item.definitionHash ?? '', lockVersion: item.lockVersion,
     requestedBy: item.requestedBy, requesterName: suppliedName(item, 'requestedBy'), requestedAt: item.requestedAt, canApprove,
     approveDenied: denial(item.deniedActions['approve'], canApprove), mine: item.requestedBy === userId, canWithdraw: type === 'definition' && item.allowedActions.includes('withdraw'),
   };

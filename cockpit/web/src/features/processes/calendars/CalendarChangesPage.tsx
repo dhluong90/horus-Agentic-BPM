@@ -1,13 +1,13 @@
 import { useId, useState } from 'react';
 import { toHostError } from '../../../api/hostError';
 import type { CalendarChange } from '../../../api/processes/schemas';
-import { usePersonName } from '../../../app/people';
 import { formatRoute } from '../../../app/route';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../../components/PageParts';
 import { useI18n } from '../../../i18n/I18nProvider';
-import { formatDateTime } from '../../rules/model/dates';
 import { useProcessesSession } from '../api/processesContext';
 import { useApprovalHash } from './approvalHash';
+import { calendarName, zoneLabel } from './calendarNames';
+import { ChangeState } from './ChangeState';
 import { useCalendarChange, useCalendarChanges, useDecideCalendarChange } from './useCalendarChanges';
 
 /**
@@ -20,8 +20,7 @@ export function CalendarChangesPage({ changeId, pageLimit }: { changeId: string 
 }
 
 function ChangeList({ pageLimit }: { pageLimit: number }) {
-  const { t, locale } = useI18n();
-  const person = usePersonName();
+  const { t } = useI18n();
   const list = useCalendarChanges(pageLimit);
   return (
     <section className="workspace" aria-labelledby="calendar-title">
@@ -34,8 +33,8 @@ function ChangeList({ pageLimit }: { pageLimit: number }) {
             {list.data.data.map((change) => (
               <li key={change.id} className="row row--link">
                 <div className="row__text">
-                  <a className="row__main" href={formatRoute({ name: 'calendar-change', changeId: change.id })}>{change.calendarKey}</a>
-                  <span className="row__meta tnum">{t('home.sentBy', { date: formatDateTime(change.proposedAt, locale) ?? '', name: person(change.proposedBy) })}</span>
+                  <a className="row__main" href={formatRoute({ name: 'calendar-change', changeId: change.id })}>{calendarName(change.calendarKey)}</a>
+                  <ChangeState change={change} />
                 </div>
                 <span className="row__chevron" aria-hidden="true">›</span>
               </li>
@@ -70,9 +69,8 @@ function ChangeReview({ changeId }: { changeId: string }) {
 const DAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY', 'SUNDAY'] as const;
 
 function Review({ change }: { change: CalendarChange }) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
   const { userId, can } = useProcessesSession();
-  const person = usePersonName();
   const commentId = useId();
   const [comment, setComment] = useState('');
   // The hash of the change as first shown: Approve names it, so a change that moved on is refused, never approved blind.
@@ -86,13 +84,12 @@ function Review({ change }: { change: CalendarChange }) {
   const reasonId = useId();
   return (
     <section className="workspace" aria-labelledby="calendar-title">
-      <PageHead id="calendar-title" title={t('calendar.reviewTitle', { key: change.calendarKey })} subtitle={t('calendar.subtitle')} />
-      <article className="card" aria-label={t('calendar.reviewTitle', { key: change.calendarKey })}>
+      <PageHead id="calendar-title" title={t('calendar.reviewTitle', { key: calendarName(change.calendarKey) })} subtitle={t('calendar.subtitle')} />
+      <article className="card" aria-label={t('calendar.reviewTitle', { key: calendarName(change.calendarKey) })}>
+        <p className="calendar-review__state" role="status"><ChangeState change={change} /></p>
         <dl className="facts-list">
-          <div><dt>{t('rulesArea.col.requestedBy')}</dt><dd>{mine ? t('approvals.yourRequest') : person(change.proposedBy)}</dd></div>
-          <div><dt>{t('approvals.sent')}</dt><dd className="tnum">{formatDateTime(change.proposedAt, locale)}</dd></div>
           <div><dt>{t('calendar.reason')}</dt><dd>{change.reason}</dd></div>
-          <div><dt>{t('calendar.zone')}</dt><dd>{change.proposed.zone}</dd></div>
+          <div><dt>{t('calendar.zone')}</dt><dd>{zoneLabel(change.proposed.zone, t)}</dd></div>
           <div><dt>{t('calendar.hours')}</dt><dd>
             <ul className="plain-list">
               {DAYS.filter((day) => (change.proposed.week?.[day] ?? []).length > 0).map((day) => <li key={day} className="tnum">{t(`calendar.day.${day}`)} {(change.proposed.week?.[day] ?? []).join(', ')}</li>)}
@@ -123,9 +120,7 @@ function Review({ change }: { change: CalendarChange }) {
               onClick={() => { decide.mutate({ approve: true, comment: comment.trim() }); }}>{decide.isPending ? t('calendar.deciding') : t('calendar.approve')}</button>
           </div>
         </article>
-      ) : (
-        <article className="card"><p role="status">{t(change.status === 'APPROVED' ? 'calendar.approved' : 'calendar.rejected', { who: change.decidedBy === undefined || change.decidedBy === null ? '' : person(change.decidedBy) })}</p></article>
-      )}
+      ) : null}
     </section>
   );
 }

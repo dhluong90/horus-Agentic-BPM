@@ -24,7 +24,10 @@ final class ApprovalSeal {
 
     static final String PLAIN = "sha256:";
     static final String KEYED = "hmac-sha256:";
-    /** Written by migration {@code V2} on a version approved before seals existed; nothing writes it afterwards. */
+    /**
+     * Written by migration {@code V2} on a version approved before seals existed; nothing writes it afterwards. It is
+     * accepted only on a row that migration {@code V3} stamped with {@code legacy_backfilled_at} (RLE-231).
+     */
     static final String LEGACY = "legacy:pre-seal";
 
     private final ApprovalSealKey keys;
@@ -57,7 +60,9 @@ final class ApprovalSeal {
         }
         boolean unkeyedOk = keys.current().isEmpty() || keys.acceptUnkeyedSeals();
         if (LEGACY.equals(stored)) {
-            return unkeyedOk;
+            // The marker stands only for a version that existed before the seals: migration V3 stamped it with the
+            // backfill time. On any other row it is a forgery, whatever else the row holds (RLE-231).
+            return version.legacyBackfilledAt() != null && unkeyedOk;
         }
         String message = message(version);
         if (stored.startsWith(KEYED)) {

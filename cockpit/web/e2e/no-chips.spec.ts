@@ -25,6 +25,7 @@ const SCREENS: readonly (readonly [name: string, scenario: Scenario, hash: strin
   ['process diagram', 'processes-reviewer', '#/processes/kyc-onboarding/2'],
   ['process steps', 'processes-reviewer', '#/processes/kyc-onboarding/2/steps'],
   ['process changes', 'processes-approver', '#/processes/kyc-onboarding/3/changes'],
+  ['process timing', 'processes-reviewer', '#/processes/kyc-onboarding/2/timing'],
   ['process cases', 'processes-reviewer', '#/processes/kyc-onboarding/2/cases'],
   ['instance', 'processes-reviewer', '#/instances/01JD4I9NSTANCE0000000000I9'],
   ['instance with an incident', 'processes-reviewer', '#/instances/01JD4I5NC1DENT00000000IN05'],
@@ -34,6 +35,8 @@ const SCREENS: readonly (readonly [name: string, scenario: Scenario, hash: strin
   ['incidents', 'incidents-operator', '#/incidents'],
   ['migration', 'migration-operator', '#/processes/kyc-onboarding/2/move'],
   ['calendar changes', 'calendar-approver', '#/calendar-changes'],
+  ['calendars', 'calendar-proposer', '#/calendars'],
+  ['calendar editor', 'calendar-proposer', '#/calendars/vn-banking-hours'],
   ['service', 'ready', '#/service'],
 ];
 

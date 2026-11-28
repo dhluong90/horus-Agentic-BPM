@@ -18,7 +18,7 @@ sequenceDiagram
     Host->>HF: migrate db/migration
     HF->>DB: V1 loan_application, recorded in flyway_schema_history
     Host->>RE: all singletons created
-    RE->>DB: baseline 0, V1 rle_* tables and V2, recorded in rle_schema_history
+    RE->>DB: baseline 0, V1 rle_* tables, V2 and V3, recorded in rle_schema_history
     RE->>DB: partitions for the Clock month and the next, in one transaction
     Host->>DB: GET /actuator/health checks db and ruleEngine
 ```
