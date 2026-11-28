@@ -41,6 +41,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param classification the reminder about agent step fields that declare no {@code mask} (PD-146)
  * @param calls limits of a process that calls another (#92)
  * @param tasks how a user task is completed through a declared form (PRE-031)
+ * @param database the schema owner and the application role (#700)
  * @param parallelStart limits of the arrivals a parallel multiple start holds (PD-149, AUD-10)
  */
 @ConfigurationProperties("horus.bpm.processes")
@@ -71,7 +72,42 @@ public record ProcessEngineProperties(
         @DefaultValue MultiInstance multiInstance,
         @DefaultValue Tasks tasks,
         @DefaultValue Cursor cursor,
-        @DefaultValue ParallelStart parallelStart) {
+        @DefaultValue ParallelStart parallelStart,
+        @DefaultValue Database database) {
+
+    /**
+     * Two database roles for production (#700): a schema owner that migrates and an application role that serves traffic.
+     * Unset, the engine migrates and runs as the one role of the host's {@code DataSource}, which suits development and
+     * is not for production, because that role owns the tables and can disable their triggers.
+     *
+     * @param ownerUrl JDBC URL of the schema owner's connection; required with {@code ownerUsername}
+     * @param ownerUsername the schema owner; set it to turn the two-role setup on. The owner migrates at start-up (and
+     *     keeps the partition step, when the engine has one) and is not used for requests: its connections are opened
+     *     for one run and closed
+     * @param ownerPassword the owner's password; supply it from a secret, never from a file in the repository
+     * @param appRole the role the host's {@code DataSource} connects as; after each migration the engine grants it
+     *     SELECT, INSERT, UPDATE and DELETE on the engine's tables and nothing else. Empty grants nothing: apply
+     *     {@code deploy/postgres/app-role-grants.sql} yourself
+     * @param roleCheck what start-up does when the role the host serves traffic with owns the engine's tables, holds
+     *     TRIGGER on them or is a superuser: {@code warn} (default) logs one WARN, {@code enforce} stops the start,
+     *     {@code off} skips the check. In the {@code dev} profile the default is {@code off}
+     */
+    public record Database(String ownerUrl, String ownerUsername, String ownerPassword, String appRole,
+            @DefaultValue("") String roleCheck) {
+
+        /** Whether the two-role setup is on. */
+        public boolean split() {
+            return ownerUsername != null && !ownerUsername.isBlank();
+        }
+
+        /** Never prints the password. */
+        @Override
+        public String toString() {
+            return "Database[ownerUrl=" + ownerUrl + ", ownerUsername=" + ownerUsername + ", ownerPassword=***, appRole="
+                    + appRole + ", roleCheck=" + roleCheck + "]";
+        }
+    }
+
 
     /**
      * The keys that sign list cursors (AUD-13). Supply every key from an environment variable or a secret store,

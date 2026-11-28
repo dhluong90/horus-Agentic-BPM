@@ -133,8 +133,9 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    ProcessEngineSchemaMigrator processEngineSchemaMigrator(DataSource dataSource) {
-        return new ProcessEngineSchemaMigrator(dataSource);
+    ProcessEngineSchemaMigrator processEngineSchemaMigrator(DataSource dataSource, ProcessEngineProperties properties) {
+        return new ProcessEngineSchemaMigrator(dataSource, DatabaseRoles.ownerDataSource(properties.database()),
+                properties.database().appRole());
     }
 
     @Bean
@@ -905,10 +906,15 @@ public class ProcessEngineAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     ProcessEngineInitializer processEngineInitializer(ProcessEngineSchemaMigrator migrator, ProcessServices services,
-            ProcessEngineProperties properties, ResourceLoader resources, Environment environment) {
+            ProcessEngineProperties properties, ResourceLoader resources, Environment environment,
+            DataSource dataSource) {
         // PD-146: the one start-up summary of unclassified agent step fields is logged outside the dev profile only
+        io.github.dhluong90.bpm.process.postgres.DatabaseRoleCheck roleCheck =
+                new io.github.dhluong90.bpm.process.postgres.DatabaseRoleCheck(dataSource);
         return new ProcessEngineInitializer(migrator, services, properties, resources,
-                !environment.matchesProfiles("dev"));
+                !environment.matchesProfiles("dev"))
+                .withRoleCheck(() -> DatabaseRoles.verify(roleCheck, properties.database(), environment,
+                        org.apache.commons.logging.LogFactory.getLog(ProcessEngineInitializer.class)));
     }
 
     @Bean

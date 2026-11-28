@@ -4,7 +4,7 @@
 >
 > - demo users share one password and may sign in with HTTP Basic, and `hoa` may both author and approve;
 > - traffic is plain HTTP on 127.0.0.1, with no TLS;
-> - the host connects as the database owner, which also runs the migrations (a role without superuser rights);
+> - the database has two roles, which is the production shape: `horus_owner` migrates and `horus` serves requests. The single-role setup the engines still accept for development, one role that owns the tables, is not for production (see [Two database roles](#two-database-roles));
 > - there is one instance of each service, and no backups. Backup, restore and the recovery drill are in [DISASTER-RECOVERY.md](DISASTER-RECOVERY.md).
 >
 > For anything shared, start from [Run without demo users](#run-without-demo-users). The host logs a `WARN` at start-up while demo users are on.
@@ -52,11 +52,12 @@ docker compose up --build --wait
 
 The `sed` line turns on the `dev` profile (demo users) for your own machine; `.env.example` leaves it empty.
 
-`deploy/create-secrets.sh` writes three random passwords, one file each, and never prints them:
+`deploy/create-secrets.sh` writes random passwords, one file each, and never prints them:
 
 ```
 created  /home/you/horus-Agentic-BPM/secrets/db_admin_password
 created  /home/you/horus-Agentic-BPM/secrets/db_password
+created  /home/you/horus-Agentic-BPM/secrets/db_owner_password
 created  /home/you/horus-Agentic-BPM/secrets/demo_password
 ```
 
@@ -393,10 +394,11 @@ Settings live in `.env` ([`.env.example`](../.env.example) documents each one); 
 | File in `secrets/` | Mounted in | Meaning |
 |---|---|---|
 | `db_admin_password` | `postgres` at `/run/secrets/db_admin_password` (`POSTGRES_PASSWORD_FILE`) | Password of the PostgreSQL superuser `postgres`, used only to create the database on the first start. The host never receives it |
-| `db_password` | `postgres` at `/run/secrets/db_password`, read once by the init script; `host` at `/run/secrets/HORUS_DB_PASSWORD` | Password of `horus`, the role the host connects with. PostgreSQL keeps both database passwords from its first start; to change one, reset (below) |
+| `db_password` | `postgres` at `/run/secrets/db_password`, read once by the init script; `host` at `/run/secrets/HORUS_DB_PASSWORD` | Password of `horus`, the role the host serves requests with. PostgreSQL keeps the database passwords from its first start; to change one, reset (below) |
+| `db_owner_password` | `postgres` at `/run/secrets/db_owner_password`, read once by the init script; `host` at `/run/secrets/HORUS_DB_OWNER_PASSWORD` | Password of `horus_owner`, the schema owner that runs the migrations. Never used for a request |
 | `demo_password` | `host` at `/run/secrets/HORUS_DEMO_PASSWORD` | Password of the demo users on the `dev` profile |
 
-The host reads its two files through Spring Boot's config tree import (`SPRING_CONFIG_IMPORT=configtree:/run/secrets/`): each file becomes a property named after it, so the host's `${HORUS_DB_PASSWORD}` and `${HORUS_DEMO_PASSWORD}` resolve from the files. Nothing in the image changes: the same image runs everywhere, configured through environment variables and mounted files.
+The host reads its two files through Spring Boot's config tree import (`SPRING_CONFIG_IMPORT=configtree:/run/secrets/`): each file becomes a property named after it, so the host's `${HORUS_DB_PASSWORD}`, `${HORUS_DB_OWNER_PASSWORD}` and `${HORUS_DEMO_PASSWORD}` resolve from the files. Nothing in the image changes: the same image runs everywhere, configured through environment variables and mounted files.
 
 To bring your own values instead of random ones, write each file before the first start, with no trailing newline, and keep the directory private:
 
@@ -404,17 +406,45 @@ To bring your own values instead of random ones, write each file before the firs
 mkdir -p secrets && chmod 700 secrets
 printf '%s' 'your-admin-password' > secrets/db_admin_password
 printf '%s' 'your-app-password' > secrets/db_password
+printf '%s' 'your-owner-password' > secrets/db_owner_password
 printf '%s' 'your-demo-password' > secrets/demo_password
 chmod 644 secrets/*
 ```
 
 The files are `0644` because compose bind-mounts them as they are and the container users (`postgres`, uid 70, and `horus`, uid 10001) must read them; the `0700` directory keeps other users of your machine out. A database created before secret files existed keeps its old passwords: write those into the files, or reset.
 
-### Database roles
+### Two database roles
 
-On its first start PostgreSQL runs [`deploy/postgres/initdb/10-application-role.sh`](../deploy/postgres/initdb/10-application-role.sh). It creates `horus`, which owns the database `horus` and its `public` schema, and is not a superuser: it cannot create roles or databases, read server files or run programs. The host connects as `horus`, and the host's and the engines' Flyway migrations run as that owner at start-up.
+The compose file runs the production shape: two roles, neither a superuser.
 
-Beyond a local walkthrough, run the migrations as the schema owner in a separate step, and run the application with a second role that has only data rights (`SELECT`, `INSERT`, `UPDATE`, `DELETE` on the tables, `USAGE` on the sequences). Set `horus.bpm.rules.migrate-on-start=false` in the application ([configuration](../examples/rule-engine-only/README.md#rule-engine-properties)). The schema belongs to the host. The variables the host itself reads are listed in the [example host README](../examples/rule-engine-only/README.md#environment-variables).
+| Role | Does | Cannot |
+|---|---|---|
+| `horus_owner` | Owns the database and its tables. Runs the migrations of the host and of both engines, and the Rule Engine's decision log partition step. Used on connections opened for that work and closed after it | Serve a request |
+| `horus` | Serves every request through `spring.datasource` | Own a table, `ALTER`, `DROP` or `TRUNCATE` one, hold `TRIGGER`, `CREATE` in the schema, or touch a trigger |
+
+The split matters because a table owner can run `ALTER TABLE ... DISABLE TRIGGER`, which switches off the append-only audit triggers and the approval seal. The application role cannot.
+
+On its first start PostgreSQL runs [`deploy/postgres/initdb/10-application-role.sh`](../deploy/postgres/initdb/10-application-role.sh), which runs [`deploy/postgres/app-role-grants.sql`](../deploy/postgres/app-role-grants.sql). The host reads the owner's password from `secrets/db_owner_password` and the application role's from `secrets/db_password`. These variables, set in `docker-compose.yml`, make the host use both:
+
+| Variable | Value in compose | Role |
+|---|---|---|
+| `HORUS_DB_URL`, `HORUS_DB_USERNAME`, `HORUS_DB_PASSWORD` | `horus` | requests |
+| `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | `horus_owner` | the host's own migrations |
+| `HORUS_BPM_RULES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD` | `horus_owner` | Rule Engine migrations and partitions |
+| `HORUS_BPM_PROCESSES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD` | `horus_owner` | Process Engine migrations |
+| `HORUS_BPM_RULES_DATABASE_APP_ROLE`, `HORUS_BPM_PROCESSES_DATABASE_APP_ROLE` | `horus` | the role each engine grants its data rights to after a migration |
+| `HORUS_BPM_RULES_DATABASE_ROLE_CHECK`, `HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK` | `enforce` | the host does not start if `horus` owns an engine table, holds `TRIGGER` or is a superuser |
+
+After a start, confirm the split from the database. Expected: `horus_owner` owns the tables, and `horus` owns none.
+
+```bash
+docker compose exec postgres psql -U horus_owner -d horus -Atc "SELECT tableowner, count(*) FROM pg_tables WHERE schemaname = 'public' GROUP BY 1"
+docker compose exec postgres psql -U horus -d horus -c "ALTER TABLE pre_history DISABLE TRIGGER pre_history_no_change"
+```
+
+The first prints one line, `horus_owner|<number of tables>`. The second prints `ERROR:  must be owner of table pre_history`.
+
+For your own PostgreSQL, run the script once as an administrator (the command is in its header and in the [operations runbook](../wiki/Operations-Runbook.md#database-roles)), give the host the variables above, and keep the `enforce` check on. A database created before this change has one role that owns everything: reset the volume (`docker compose down -v`, below); the host refuses to start against it while the check is `enforce`. The soak test's compose file ([`perf/soak`](../perf/soak)) keeps one role on purpose.
 
 ### Run without demo users
 

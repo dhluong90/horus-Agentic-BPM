@@ -126,7 +126,7 @@ WHERE i.inhparent = 'rle_decision'::regclass ORDER BY 1 DESC LIMIT 3;
 
 The host log has a warning from `horus-rle-partitions` that names the month and the cause. `GET /actuator/health` shows `partitionMaintenanceLastSuccess`.
 
-**Remedy.** If the application role is not the table owner, run the partition script in [Database roles](#create-the-decision-log-partitions-as-the-owner) as the owner. It moves the rows into the new month in the same transaction. Otherwise fix the cause in the log and restart the host: it creates the missing months at start-up.
+**Remedy.** If the application role is not the table owner, give the host the owner settings (see [the partition step](#the-decision-log-partition-step)): the roll-over then creates the month as the owner and moves the rows into it in the same transaction. Otherwise fix the cause in the log and restart the host: it creates the missing months at start-up.
 
 ### HorusUnkeyedSealAccepted
 
@@ -327,68 +327,42 @@ A replica that already holds the version in its cache serves it until the cache 
 
 | Role | Used by | Rights |
 |---|---|---|
-| `horus_owner` | The migration step only. Not in the application's configuration | Owns the tables. Not a superuser |
-| `horus_app` | The running host | `SELECT`, `INSERT`, `UPDATE`, `DELETE` on the tables, minus the append-only tables, which keep `SELECT` and `INSERT` |
+| `horus_owner` | Migrations and the decision log partition step, on a connection opened for each run and closed after it. Never used for a request | Owns the tables. Not a superuser |
+| the application role (`horus` in the compose file, `horus_app` below) | Every request | `SELECT`, `INSERT`, `UPDATE`, `DELETE` on the engine tables, minus `UPDATE` and `DELETE` on the append-only ones. No ownership, no `ALTER`, `TRUNCATE` or `TRIGGER`, no `CREATE` in the schema |
 
-The example `deploy/postgres/initdb/10-application-role.sh` creates a single role that owns the database and runs the migrations. That suits a local walkthrough. For a pilot or production use two roles.
+The single-role set-up (one role in `spring.datasource`, nothing under `horus.bpm.*.database`) still works and is not for production. The compose file in the repository uses two roles.
 
 ### Create the roles
 
-Run once as a database administrator, on an empty database `horus`:
+Run once as a database administrator, connected to the database that will hold the tables. The script [`deploy/postgres/app-role-grants.sql`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/deploy/postgres/app-role-grants.sql) creates both roles, makes the owner own the database and the `public` schema, and sets default rights on tables the owner creates later, which covers the host's own tables:
 
-```sql
-CREATE ROLE horus_owner LOGIN PASSWORD '<owner password>' NOSUPERUSER NOCREATEDB NOCREATEROLE;
-CREATE ROLE horus_app   LOGIN PASSWORD '<app password>'   NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;
-ALTER DATABASE horus OWNER TO horus_owner;
-REVOKE ALL ON DATABASE horus FROM PUBLIC;
-GRANT CONNECT ON DATABASE horus TO horus_app;
+```bash
+psql --no-psqlrc --set ON_ERROR_STOP=1 --dbname horus \
+  -v database=horus -v owner=horus_owner -v app=horus_app \
+  -v owner_password="$OWNER_PW" -v app_password="$APP_PW" \
+  -f deploy/postgres/app-role-grants.sql
 ```
 
-Take the passwords from your secret store. Do not make `horus_app` a member of `horus_owner`.
+Take the passwords from your secret store. Neither role is a superuser, and `horus_app` is not a member of `horus_owner`.
 
-### Run the migrations as the owner
+### Point the host at both roles
 
-Start one copy of the host with `horus_owner` as the database user and `migrate-on-start` at its default (`true`). Wait for `/actuator/health` to report `UP`, then stop it. Start every other copy with `horus_app` and set `horus.bpm.rules.migrate-on-start=false` and `horus.bpm.processes.migrate-on-start=false` (environment variables `HORUS_BPM_RULES_MIGRATE_ON_START` and `HORUS_BPM_PROCESSES_MIGRATE_ON_START`).
+The host connects as the application role. Give each engine the owner's connection and the name of the application role. The engine migrates as the owner, then grants the application role what it needs. The host's own Flyway takes `spring.flyway.*`.
 
-### Grant the application role its rights
+| What | Variable (or property) |
+|---|---|
+| Requests | `HORUS_DB_URL`, `HORUS_DB_USERNAME`, `HORUS_DB_PASSWORD` (the application role) |
+| The host's own migrations | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` (the owner) |
+| Rule Engine | `HORUS_BPM_RULES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD`, `..._APP_ROLE`, `..._ROLE_CHECK` |
+| Process Engine | `HORUS_BPM_PROCESSES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD`, `..._APP_ROLE`, `..._ROLE_CHECK` |
 
-Run this as `horus_owner` in database `horus` after the first migration and after every upgrade that adds a migration. It is safe to repeat. It finds the append-only tables by their `..._no_change` trigger, so it covers tables added later.
+Set `ROLE_CHECK` to `enforce` in production: the host then refuses to start if its request role owns an engine table, holds `TRIGGER` on one or is a superuser. The default `warn` logs one warning at start-up; the `dev` profile skips the check. The compose file in the repository shows every variable, with the passwords read from mounted secret files.
 
-```sql
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
-GRANT USAGE ON SCHEMA public TO horus_app;
+Every copy of the host may carry the owner settings. A copy runs migrations at start-up under Flyway's lock, as before, and the owner's connection lives only for that run. If you would rather keep the owner's password off the running hosts, run one copy with the owner settings, wait for `/actuator/health` to report `UP`, and start the others without them and with `HORUS_BPM_RULES_MIGRATE_ON_START=false` and `HORUS_BPM_PROCESSES_MIGRATE_ON_START=false`. The decision log partition step then needs the owner: see [the partition step](#the-decision-log-partition-step).
 
--- 1. Data rights on every table and sequence the owner has created.
-GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO horus_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO horus_app;
+### What the engine grants
 
--- 2. Append-only tables: every table with a "..._no_change" trigger keeps SELECT and INSERT only.
-DO $$
-DECLARE t regclass;
-BEGIN
-  FOR t IN SELECT DISTINCT tgrelid::regclass FROM pg_trigger WHERE tgname LIKE '%\_no\_change' LOOP
-    EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON %s FROM horus_app', t);
-  END LOOP;
-END $$;
-
--- 3. Exceptions. The roll-over moves rows out of the default partition, so it keeps DELETE.
---    The key table and the migration histories are written only once, or by the migrator.
-GRANT DELETE ON rle_decision_default TO horus_app;
-REVOKE UPDATE, DELETE, TRUNCATE ON rle_engine_key FROM horus_app;
-DO $$
-DECLARE t text;
-BEGIN
-  FOREACH t IN ARRAY ARRAY['rle_schema_history', 'pre_schema_history'] LOOP
-    IF to_regclass(t) IS NOT NULL THEN
-      EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON %I FROM horus_app', t);
-    END IF;
-  END LOOP;
-END $$;
-```
-
-Tables the host creates later are not covered until the script runs again. Run this script again as `horus_owner` after any change that adds a table, or set a default for future tables with `ALTER DEFAULT PRIVILEGES FOR ROLE horus_owner IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO horus_app;` and then rerun the script so append-only tables are tightened.
-
-The host's own tables (for example an outbox) are granted by step 1 as well. If one of them must be append-only too, revoke its rights after this script.
+After each migration run, as the owner, each engine applies a Flyway callback (`afterMigrate__app_role_grants.sql`). For its own tables (`rle_*`, `pre_*`) it grants the application role `SELECT`, `INSERT`, `UPDATE` and `DELETE`, revokes `TRUNCATE`, `REFERENCES`, `TRIGGER` and `CREATE` on the schema, and revokes `UPDATE` and `DELETE` on every table that has a `..._no_change` trigger. The callback does nothing when `..._APP_ROLE` is empty, and stops the migration with a clear message when the role does not exist.
 
 ### Check the grants
 
@@ -405,7 +379,7 @@ WHERE r.rolname = 'horus_app' AND c.relkind IN ('r', 'p', 'v', 'S');
 -- Expected: f
 SELECT pg_has_role('horus_app', 'horus_owner', 'MEMBER');
 
--- Expected: exactly one row, rle_decision_default
+-- Expected: no rows (no engine table can be changed or truncated by the application role)
 SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace AND c.relkind IN ('r', 'p')
   AND EXISTS (SELECT 1 FROM pg_trigger t WHERE t.tgrelid = c.oid AND t.tgname LIKE '%\_no\_change')
   AND (has_table_privilege('horus_app', c.oid, 'UPDATE') OR has_table_privilege('horus_app', c.oid, 'DELETE')
@@ -413,58 +387,30 @@ SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace A
 ORDER BY 1;
 ```
 
-Then try the attacks as `horus_app` (`psql -U horus_app -d horus`). Each must fail:
+Then try the attacks as `horus_app` (`psql -U horus_app -d horus`). Each must fail with SQLSTATE `42501`:
 
 ```
 > ALTER TABLE pre_history DISABLE TRIGGER pre_history_no_change;
 ERROR:  must be owner of table pre_history
 > DROP TRIGGER rle_version_legacy_seal_guard ON rle_version;
-ERROR:  must be owner of relation rle_version
+ERROR:  must be owner of table rle_version
 > ALTER TABLE rle_version DROP CONSTRAINT rle_version_approval_seal_check;
 ERROR:  must be owner of table rle_version
-> UPDATE rle_decision SET tenant_id = tenant_id;
-ERROR:  permission denied for table rle_decision
+> UPDATE rle_version_history SET tenant_id = tenant_id;
+ERROR:  permission denied for table rle_version_history
 > DELETE FROM pre_history;
 ERROR:  permission denied for table pre_history
-> TRUNCATE rle_version_history;
-ERROR:  permission denied for table rle_version_history
+> TRUNCATE rle_decision;
+ERROR:  permission denied for table rle_decision
 ```
 
-These are the messages of PostgreSQL 16. Also audit DDL on `rle_*` and `pre_*` in the database log (`log_statement = 'ddl'`), so a change by the owner leaves a record.
+The repository's integration test `TwoRoleDatabaseIT` runs these and 17 more statements against a real host started as the application role. Also audit DDL on `rle_*` and `pre_*` in the database log (`log_statement = 'ddl'`), so a change by the owner leaves a record.
 
-### Create the decision log partitions as the owner
+### The decision log partition step
 
-The engine's daily roll-over creates the monthly `rle_decision_YYYY_MM` partitions and drops expired ones. Both are DDL, and a role that does not own the tables cannot run them. With the two-role set-up the roll-over logs a warning, retries each day, and decisions go to `rle_decision_default` until the month exists (the alert [HorusDecisionLogDefaultPartitionRows](#horusdecisionlogdefaultpartitionrows) fires). Create the months yourself, as the owner, at least once a quarter. The script runs the engine's own steps for this month and the next 12, skips months that exist, and moves any rows already in the default partition:
+The engine's daily roll-over creates the monthly `rle_decision_YYYY_MM` partitions and drops expired ones. Both are DDL. With the owner settings in place the Rule Engine runs this step as `horus_owner`, on a connection it opens for the run and closes after it, so months are created and expired months are dropped and recorded in `rle_decision_log_drop` as before. The application role never runs DDL.
 
-```sql
-DO $$
-DECLARE m date; lo timestamptz; hi timestamptz; n text;
-BEGIN
-  FOR m IN SELECT generate_series(date_trunc('month', now() AT TIME ZONE 'UTC')::date,
-                                  (date_trunc('month', now() AT TIME ZONE 'UTC') + interval '12 months')::date,
-                                  interval '1 month')::date LOOP
-    n := 'rle_decision_' || to_char(m, 'YYYY_MM');
-    CONTINUE WHEN to_regclass(n) IS NOT NULL;
-    lo := m::timestamp AT TIME ZONE 'UTC';
-    hi := (m + interval '1 month')::timestamp AT TIME ZONE 'UTC';
-    EXECUTE format('CREATE TABLE %I (LIKE rle_decision INCLUDING DEFAULTS INCLUDING CONSTRAINTS)', n);
-    EXECUTE format('ALTER TABLE %I ADD CONSTRAINT %I CHECK (created_at >= %L AND created_at < %L)', n, n || '_range', lo, hi);
-    EXECUTE format('WITH moved AS (DELETE FROM rle_decision_default WHERE created_at >= %L AND created_at < %L RETURNING *) INSERT INTO %I SELECT * FROM moved', lo, hi, n);
-    EXECUTE format('ALTER TABLE rle_decision ATTACH PARTITION %I FOR VALUES FROM (%L) TO (%L)', n, lo, hi);
-    EXECUTE format('CREATE TRIGGER %I BEFORE TRUNCATE ON %I FOR EACH STATEMENT EXECUTE FUNCTION rle_decision_append_only()', n || '_no_truncate', n);
-  END LOOP;
-END $$;
-```
-
-Check: this prints 14 rows on the day you first run it (13 months and the default partition).
-
-```sql
-SELECT count(*) FROM pg_inherits WHERE inhparent = 'rle_decision'::regclass;
-```
-
-**Known gap: retention.** With `decision-log.retention` set, the engine drops expired months and records each drop in `rle_decision_log_drop`. That is a `DROP TABLE`, so under the two-role set-up it fails and the old months are kept (nothing is lost). Until the maintainers provide an owner-side drop that writes the same record, set `keep-forever` and manage old months with your own archive process. Status: the retention-drop procedure is to be decided by the maintainers; tracked separately.
-
-These statements were run on PostgreSQL 16 against the engines' migrations `V1` and `V2` (Rule Engine and Process Engine). They have not been run through a full host start-up with the two roles, so rehearse them as listed in the [rehearsal log](#rehearsal-log).
+A host started without the owner settings but with a request role that owns nothing cannot run the step: the roll-over logs a warning, retries each day, and decisions go to `rle_decision_default` until the month exists (the alert [HorusDecisionLogDefaultPartitionRows](#horusdecisionlogdefaultpartitionrows) fires). Set the owner settings on at least one copy of the host.
 
 ## Backup, restore and recovery
 
@@ -604,7 +550,7 @@ This is the path from 1.0.0 to the next release. The upgrade test proves it on a
 
 1. Read the release notes for the target version. They list every migration.
 2. Take a backup and check that you can restore it ([Backup, restore and recovery](#backup-restore-and-recovery)). This is the way back: migrations are not reversed.
-3. Run the migrations as the owner role (see [Database roles](#run-the-migrations-as-the-owner)), or let the first host do it with the default `migrate-on-start`.
+3. Run the migrations as the owner role (see [Database roles](#point-the-host-at-both-roles)), or let the first host do it with the default `migrate-on-start`.
 4. If you use the two-role set-up, run the grant script again as the owner.
 5. Roll the hosts, one at a time, waiting for `UP` each time.
 6. Run the checks below.

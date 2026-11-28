@@ -817,6 +817,9 @@ The same journey runs as a Playwright test against this host: `LIVE_HOST_URL=htt
 | `horus.bpm.host-id` | unset; `rule-engine-only` here | Id returned by `GET /api/bpm/meta` |
 | `horus.bpm.rules.security.role-permissions` | empty; `ROLE_PRICING_AUTHOR` and `ROLE_PRICING_APPROVER` here | Host role to `rules:*` permissions, listed by `GET /api/bpm/me` |
 | `horus.bpm.rules.migrate-on-start` | `true` | `false` for hosts that run the `rle_*` migrations in a separate job. If the schema is not current, the `ruleEngine` health contributor is down and partitions are not created until it is |
+| `horus.bpm.rules.database.owner-url`, `.owner-username`, `.owner-password` | unset | The schema owner, for two database roles: migrations and the decision log partition step run as this role, requests as `spring.datasource`. Not for the single-role development setup. [Operations runbook](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#database-roles) |
+| `horus.bpm.rules.database.app-role` | unset | The role `spring.datasource` connects as; the engine grants it data rights after each migration |
+| `horus.bpm.rules.database.role-check` | `warn`, `off` in `dev` | `enforce` stops the start when the request role owns an `rle_*` table, holds `TRIGGER` on one or is a superuser |
 | `horus.bpm.rules.query.max-page-size` | `200` | Largest `limit` of `GET /rule-sets` and `GET .../versions`, 1 to 200; may be lowered, never raised |
 | `horus.bpm.rules.lifecycle.reason-max-length` | `2000` | Longest `:reject` reason in characters, 1 to 2000; may be lowered, never raised |
 | `horus.bpm.rules.decision-log.retention` | none: keeps everything, warns | `keep-forever`, or how long decisions are kept, in whole months, at least `decision-log.retention-floor` (`P12M`). Unset, nothing is dropped and start-up is unaffected |

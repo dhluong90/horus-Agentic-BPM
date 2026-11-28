@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
+import io.github.dhluong90.bpm.rules.postgres.DatabaseRoleCheck;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import java.time.Clock;
@@ -57,8 +58,9 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEngineSchemaMigrator ruleEngineSchemaMigrator(DataSource dataSource) {
-        return new RuleEngineSchemaMigrator(dataSource);
+    RuleEngineSchemaMigrator ruleEngineSchemaMigrator(DataSource dataSource, RuleEngineProperties properties) {
+        return new RuleEngineSchemaMigrator(dataSource, DatabaseRoles.ownerDataSource(properties.database()),
+                properties.database().appRole());
     }
 
     @Bean
@@ -81,9 +83,10 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions partitions,
+    RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions runtimePartitions,
             RuleEngineProperties properties, ObjectProvider<Clock> clock,
             org.springframework.core.env.Environment environment) {
+        DecisionLogPartitions partitions = maintenancePartitions(runtimePartitions, properties);
         return new RuleEnginePartitionMaintenance(partitions, engineClock(clock),
                 properties.decisionLog().partitionsAheadOrDefault(), EngineDefaults.PARTITION_MAINTENANCE_INTERVAL,
                 DecisionLogRetention.resolve(properties.decisionLog(), environment));
@@ -93,17 +96,37 @@ public class RuleEngineAutoConfiguration {
     @ConditionalOnMissingBean
     RuleEngineSchemaInitializer ruleEngineSchemaInitializer(
             RuleEngineSchemaMigrator migrator,
-            DecisionLogPartitions partitions,
+            DecisionLogPartitions runtimePartitions,
+            DataSource dataSource,
             RuleEngineProperties properties,
+            org.springframework.core.env.Environment environment,
             ObjectProvider<Clock> clock,
             ObjectProvider<RuleEngineCursorKeyInitializer> cursorKeys,
             ObjectProvider<RuleEngineMaskingCheck> maskingCheck,
             ObjectProvider<RuleEngineFunctionCheck> functionCheck,
             ObjectProvider<RuleEngineLifecycleSweeper> sweeper,
             ObjectProvider<RuleEnginePartitionMaintenance> maintenance) {
-        return new RuleEngineSchemaInitializer(migrator, partitions, properties.migrateOnStart(), engineClock(clock),
+        DatabaseRoleCheck roleCheck = new DatabaseRoleCheck(dataSource);
+        return new RuleEngineSchemaInitializer(migrator, maintenancePartitions(runtimePartitions, properties),
+                properties.migrateOnStart(), engineClock(clock),
                 cursorKeys.getIfAvailable(), maskingCheck.getIfAvailable(), sweeper.getIfAvailable(),
-                maintenance.getIfAvailable(), functionCheck.getIfAvailable());
+                maintenance.getIfAvailable(), functionCheck.getIfAvailable())
+                .withRoleCheck(() -> DatabaseRoles.verify(roleCheck, properties.database(), environment,
+                        org.apache.commons.logging.LogFactory.getLog(RuleEngineSchemaInitializer.class)));
+    }
+
+    /**
+     * The partition step runs DDL, so with two database roles it runs as the schema owner, on a connection opened for
+     * the run and closed after it (#700). With one role it is the runtime step.
+     */
+    private static DecisionLogPartitions maintenancePartitions(DecisionLogPartitions runtime,
+            RuleEngineProperties properties) {
+        DataSource owner = DatabaseRoles.ownerDataSource(properties.database());
+        if (owner == null) {
+            return runtime;
+        }
+        return new DecisionLogPartitions(owner, new RuleEngineTransactions(
+                new org.springframework.jdbc.datasource.DataSourceTransactionManager(owner)));
     }
 
     /** The decision log gauge, bound by the host's meter registry when Micrometer is present (DESIGN 4.8). */
