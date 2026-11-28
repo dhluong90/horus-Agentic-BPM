@@ -2144,6 +2144,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String payloadJson = boundedJson(fields, "payload");
         String requestHash = Hashes.sha256Parts("message-correlate", caller, messageName, correlationKey, payloadJson);
         // A refusal throws, so the transaction rolls back with the idempotency claim: nothing is stored (#491).
+        try {
+            return correlateInTransaction(tenant, caller, messageName, correlationKey, fields, idempotencyKey, requestHash);
+        } catch (MessageNotCorrelatedException e) {
+            metrics.messageRefused("NOT_CORRELATED");
+            throw e;
+        } catch (MessageAmbiguousException e) {
+            metrics.messageRefused("AMBIGUOUS");
+            throw e;
+        }
+    }
+
+    private MessageDelivery correlateInTransaction(String tenant, String caller, String messageName,
+            String correlationKey, Map<String, Object> fields, String idempotencyKey, String requestHash) {
         return transactions.inTransaction(() -> idempotent(tenant, "message-correlate", idempotencyKey, requestHash,
                 () -> correlateOnce(tenant, caller, messageName, correlationKey, fields),
                 d -> Values.write(java.util.Map.of("outcome", d.outcome().name(),
