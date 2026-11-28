@@ -14,9 +14,9 @@ describe('environment tag', () => {
     render(<I18nProvider><EnvironmentTag environment="production" /><EnvironmentTag environment="demo" /></I18nProvider>);
     const [production, demo] = screen.getAllByTestId('environment-tag');
     expect(production).toHaveTextContent('Production');
-    expect(production).toHaveClass('tag--env');
-    expect(production).not.toHaveClass('tag--demo');
+    expect(production).toHaveClass('env');
+    expect(production).not.toHaveClass('env--demo');
     expect(demo).toHaveTextContent('Demo');
-    expect(demo).toHaveClass('tag--demo');
+    expect(demo).toHaveClass('env--demo');
   });
 });
