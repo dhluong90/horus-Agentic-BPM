@@ -1,4 +1,5 @@
 import type { DefinitionLayout } from '../../../api/processes/schemas';
+import { labelSize, placeLabels, type Rect } from './edgeLabels';
 import { onOutline, SYMBOL_SIZE, type Layout, type PlacedEdge, type PlacedNode, type Point } from './layout';
 
 /*
@@ -19,10 +20,16 @@ function centreOf(node: PlacedNode): Point {
  * A flow the diagram does not route but whose ends have moved: straight when the steps are level or one above the other, otherwise one bend
  * halfway between them, so it runs along the rows and columns of the drawing and never at a slant.
  */
-function straight(source: PlacedNode, target: PlacedNode): Point[] {
+function straight(source: PlacedNode, target: PlacedNode, fanOut: boolean): Point[] {
   const from = centreOf(source);
   const to = centreOf(target);
   if (Math.abs(from.y - to.y) < 6 || Math.abs(from.x - to.x) < 6) return [onShape(from, to, source), onShape(to, from, target)];
+  const reach = target.shape === 'task' ? target.width / 2 : SYMBOL_SIZE / 2;
+  if (fanOut && Math.abs(from.x - to.x) > reach + 6) {
+    // One of several flows leaving a step: it leaves by the foot or the top, so it never shares a line with the flow that runs on along the row.
+    const corner = { x: from.x, y: to.y };
+    return [onShape(from, corner, source), corner, onShape(to, corner, target)];
+  }
   const middle = (from.x + to.x) / 2;
   const leaving = onShape(from, { x: middle, y: from.y }, source);
   const arriving = onShape(to, { x: middle, y: to.y }, target);
@@ -37,12 +44,6 @@ function onShape(centre: Point, toward: Point, node: PlacedNode): Point {
   const scale = Math.min(dx === 0 ? Infinity : node.width / 2 / Math.abs(dx), dy === 0 ? Infinity : node.height / 2 / Math.abs(dy));
   return Number.isFinite(scale) ? { x: centre.x + dx * scale, y: centre.y + dy * scale } : centre;
 }
-
-const midpoint = (points: readonly Point[]): Point | undefined => {
-  const a = points[Math.floor((points.length - 1) / 2)];
-  const b = points[Math.ceil((points.length - 1) / 2)];
-  return a === undefined || b === undefined ? undefined : { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-};
 
 export function applyStoredLayout(layout: Layout, stored: DefinitionLayout): Layout {
   const boxes = new Map(Object.entries(stored.nodes));
@@ -73,6 +74,8 @@ export function applyStoredLayout(layout: Layout, stored: DefinitionLayout): Lay
     moved.add(node.id);
   }
   const waypoints = stored.edges ?? {};
+  const leaving = new Map<string, number>();
+  for (const edge of layout.edges) leaving.set(edge.source, (leaving.get(edge.source) ?? 0) + 1);
   const edges: PlacedEdge[] = layout.edges.map((edge) => {
     const source = byId.get(edge.source);
     const target = byId.get(edge.target);
@@ -86,15 +89,19 @@ export function applyStoredLayout(layout: Layout, stored: DefinitionLayout): Lay
       const before2 = points[points.length - 2];
       if (source.shape !== 'task' && first && second) points[0] = onOutline(first, second, source);
       if (target.shape !== 'task' && last && before2) points[points.length - 1] = onOutline(last, before2, target);
-      return { ...edge, points, labelAt: edge.label === undefined ? undefined : midpoint(points) };
+      return { ...edge, points };
     }
     if (moved.has(edge.source) || moved.has(edge.target)) {
-      const points = straight(source, target);
-      return { ...edge, points, labelAt: edge.label === undefined ? undefined : midpoint(points) };
+      return { ...edge, points: straight(source, target, (leaving.get(edge.source) ?? 0) > 1) };
     }
     return edge;
   });
-  return fitted({ ...layout, nodes, edges });
+  return fitted({ ...layout, nodes, edges: placeLabels(nodes, edges, labelBounds(stored)) });
+}
+
+/** The label bounds a diagram keeps for its flows, by `source->target`. */
+function labelBounds(stored: DefinitionLayout): Record<string, Rect> {
+  return stored.labels ?? {};
 }
 
 /** The drawing's size after the move: everything shifted so the top left sits at the margin, captions included. */
@@ -107,7 +114,14 @@ function fitted(layout: Layout): Layout {
     xs.push(left, left + widthOf(node));
     ys.push(node.y, node.y + node.height);
   }
-  for (const edge of layout.edges) for (const p of edge.points) { xs.push(p.x); ys.push(p.y); }
+  for (const edge of layout.edges) {
+    for (const p of edge.points) { xs.push(p.x); ys.push(p.y); }
+    if (edge.label !== undefined && edge.labelAt !== undefined) {
+      const size = labelSize(edge.label);
+      xs.push(edge.labelAt.x - size.width / 2, edge.labelAt.x + size.width / 2);
+      ys.push(edge.labelAt.y - size.height / 2, edge.labelAt.y + size.height / 2);
+    }
+  }
   const minX = Math.min(...xs);
   const minY = Math.min(...ys);
   const dx = MARGIN - minX;

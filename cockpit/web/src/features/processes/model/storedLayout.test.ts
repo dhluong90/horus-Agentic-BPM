@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { DefinitionLayout } from '../../../api/processes/schemas';
 import { readBpmnGraph } from './bpmnGraph';
+import { footprint, labelSize } from './edgeLabels';
 import { layoutGraph, overlaps, symbolCentre } from './layout';
 
 const XML = `<?xml version="1.0" encoding="UTF-8"?>
@@ -81,7 +82,7 @@ describe('BPMN diagram coordinates', () => {
   it('CKP_209_an_unrouted_flow_between_steps_in_different_rows_bends_once_and_never_slants', () => {
     const layout = layoutGraph({ ...readBpmnGraph(XML), stored: DI });
     const edge = layout.edges.find((candidate) => candidate.source === 'ok' && candidate.target === 'no');
-    expect(edge?.points).toHaveLength(4);
+    expect(edge?.points.length).toBeGreaterThanOrEqual(3);
     const points = edge?.points ?? [];
     for (let i = 1; i < points.length; i += 1) {
       expect(Math.min(Math.abs((points[i - 1]?.x ?? 0) - (points[i]?.x ?? 0)), Math.abs((points[i - 1]?.y ?? 0) - (points[i]?.y ?? 0)))).toBeLessThan(1e-6);
@@ -128,5 +129,52 @@ describe('BPMN diagram coordinates', () => {
     expect(byId.get('yes')?.x).toBeGreaterThan(byId.get('s')?.x ?? Infinity);
     expect(layout.width).toBeGreaterThan(layout.height);
     expect(JSON.stringify(layoutGraph(graph))).toBe(JSON.stringify(layout));
+  });
+
+  const clear = (layout: ReturnType<typeof layoutGraph>) => {
+    const named = layout.edges.filter((edge) => edge.label !== undefined && edge.labelAt !== undefined);
+    const rects = named.map((edge) => {
+      const size = labelSize(edge.label ?? '');
+      const at = edge.labelAt ?? { x: 0, y: 0 };
+      return { id: edge.id, x: at.x - size.width / 2, y: at.y - size.height / 2, ...size };
+    });
+    const hits = (a: { x: number; y: number; width: number; height: number }, b: typeof a) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    for (const [index, rect] of rects.entries()) {
+      for (const node of layout.nodes) expect(hits(rect, footprint(node)), `${rect.id} meets ${node.id}`).toBe(false);
+      for (const other of rects.slice(index + 1)) expect(hits(rect, other), `${rect.id} meets ${other.id}`).toBe(false);
+    }
+    return named.length;
+  };
+
+  it('CKP_209_a_flow_name_is_clear_of_every_step_and_of_other_names', () => {
+    expect(clear(layoutGraph({ ...readBpmnGraph(XML), stored: DI }))).toBe(1);
+  });
+
+  it('CKP_209_a_flow_name_sits_at_the_label_bounds_the_diagram_keeps', () => {
+    const labelled: DefinitionLayout = { ...DI, labels: { 'ok->yes': { x: 120, y: 330, width: 30, height: 18 } } };
+    const plain = layoutGraph({ ...readBpmnGraph(XML), stored: DI });
+    const layout = layoutGraph({ ...readBpmnGraph(XML), stored: labelled });
+    const here = layout.edges.find((edge) => edge.id === 'c')?.labelAt;
+    const start = layout.nodes.find((node) => node.id === 's');
+    const startPlain = plain.nodes.find((node) => node.id === 's');
+    if (!here || !start || !startPlain) throw new Error('missing');
+    // The bounds are absolute: the same offset from the start event as in the diagram (start at 282, 40; bounds centre 135, 339).
+    expect(here.x - symbolCentre(start).x).toBeCloseTo(135 - 300, 5);
+    expect(here.y - symbolCentre(start).y).toBeCloseTo(339 - 58, 5);
+  });
+
+  it('CKP_209_flows_leaving_one_step_share_no_line_when_one_is_not_routed', () => {
+    // Two flows leave `ok`: `yes` is routed by the diagram, `no` is not. Neither may start along the other.
+    const layout = layoutGraph({ ...readBpmnGraph(XML), stored: DI });
+    const first = (target: string) => {
+      const points = layout.edges.find((edge) => edge.source === 'ok' && edge.target === target)?.points ?? [];
+      return [points[0], points[1]] as const;
+    };
+    const [a0, a1] = first('yes');
+    const [b0, b1] = first('no');
+    if (!a0 || !a1 || !b0 || !b1) throw new Error('missing');
+    const along = (p: { x: number; y: number }, q: { x: number; y: number }) => (p.y === q.y ? 'row' : 'column');
+    const sameLine = along(a0, a1) === along(b0, b1) && (along(a0, a1) === 'row' ? Math.abs(a0.y - b0.y) < 1 : Math.abs(a0.x - b0.x) < 1);
+    expect(sameLine).toBe(false);
   });
 });

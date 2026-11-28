@@ -69,6 +69,23 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1440, height: 1200 }]
     expect(Math.abs(booked.y - approved.y)).toBeLessThan(10);
     expect(booked.x).toBeGreaterThan(approved.x);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    // A flow name never sits on a step or on another name, and the flows from Capture application and its reminder timer start on different lines.
+    const rects = await page.locator('svg [data-edge] .dg-edge__label rect').evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; }));
+    const steps = await page.locator('svg [data-node]').evaluateAll((els) => els.filter((el) => el.getAttribute('data-type') !== 'subProcess').map((el) => { const r = (el.querySelector('rect, circle, path') ?? el).getBoundingClientRect(); return { id: el.getAttribute('data-node') ?? '', x: r.x, y: r.y, w: r.width, h: r.height }; }));
+    const hit = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+    expect(rects.length).toBeGreaterThan(0);
+    for (const [i, rect] of rects.entries()) {
+      for (const step of steps) expect(hit(rect, step), `a flow name meets ${step.id}`).toBe(false);
+      for (const other of rects.slice(i + 1)) expect(hit(rect, other)).toBe(false);
+    }
+    const startOf = async (id: string) => page.locator(`svg [data-edge="${id}"] path`).first().getAttribute('d');
+    const toAssess = await startOf('f2');
+    const toRemind = await startOf('f8');
+    expect(toAssess).not.toBeNull();
+    expect(toRemind).not.toBeNull();
+    const leg = (d: string | null) => (d ?? '').split(/[ML]/).filter(Boolean).slice(0, 2).join('|');
+    expect(leg(toAssess)).not.toBe(leg(toRemind));
     await page.screenshot({ path: `${SHOTS}/di-stored-${String(size.width)}x${String(size.height)}.png` });
   });
 }

@@ -339,6 +339,8 @@ export const definitionLayout = z
     schemaVersion: z.literal(1),
     nodes: z.record(z.string(), z.object({ x: coordinate, y: coordinate, width: z.number().positive().optional(), height: z.number().positive().optional() })),
     edges: z.record(z.string(), z.array(z.object({ x: coordinate, y: coordinate }))).optional(),
+    /** Where the diagram puts the name of a flow (BPMNLabel bounds), by `source->target`; a flow not listed has its name placed clear of the steps. */
+    labels: z.record(z.string(), z.object({ x: coordinate, y: coordinate, width: z.number().positive(), height: z.number().positive() })).optional(),
   })
   .loose();
 export type DefinitionLayout = z.infer<typeof definitionLayout>;
