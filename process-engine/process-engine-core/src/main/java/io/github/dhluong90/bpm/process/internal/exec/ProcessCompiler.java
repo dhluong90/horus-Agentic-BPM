@@ -113,7 +113,9 @@ public final class ProcessCompiler {
             boolean root = container.equals(process.id());
             // #499: the root may start on an instantiating event-based gateway, which stands for its start event.
             List<FlowNode> starts = nodes.values().stream().filter(n -> n instanceof StartEvent
-                            || root && n instanceof EventBasedGateway g && g.instantiate())
+                            || root && n instanceof EventBasedGateway g && g.instantiate()
+                            || root && n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask r
+                            && r.instantiate())
                     .filter(n -> container.equals(containerOf.get(n.id()))).toList();
             if (starts.size() != 1) {
                 problems.add(DefinitionProblem.of("START_EVENT_COUNT", kind(root, nodes.get(container))
@@ -186,6 +188,31 @@ public final class ProcessCompiler {
                         && boundary.eventDefinitions().get(0) instanceof ErrorEventDefinition) {
                     problems.add(DefinitionProblem.of("BOUNDARY_ERROR_NOT_INTERRUPTING", "An error boundary event always"
                             + " cancels its activity; remove cancelActivity=\"false\"", node.id()));
+                }
+            }
+            if (node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask receive
+                    && receive.instantiate()) {
+                // #632: a receive task with instantiate="true" stands for the message start event of the process.
+                if (!containerOf.get(node.id()).equals(process.id())) {
+                    problems.add(DefinitionProblem.of("RECEIVE_INSTANTIATE_SCOPE", "A receive task that starts the"
+                            + " process stands in the process, not in a sub-process or transaction", node.id()));
+                }
+                if (flows.stream().anyMatch(f -> f.targetRef().equals(node.id()))) {
+                    problems.add(DefinitionProblem.of("RECEIVE_INSTANTIATE_INCOMING", "A receive task that starts the"
+                            + " process has no incoming flow", node.id()));
+                }
+                if (receive.messageRef() == null || receive.messageRef().isBlank()) {
+                    problems.add(DefinitionProblem.of("RECEIVE_INSTANTIATE_MESSAGE", "A receive task that starts the"
+                            + " process names the message that starts it", node.id()));
+                }
+                if (node.extensions().first(CorrelationKey.class).isPresent()) {
+                    problems.add(DefinitionProblem.of("CORRELATION_KEY_UNEXPECTED", "A receive task that starts the"
+                            + " process has no instance yet; the message's key becomes the business key", node.id()));
+                }
+                if (nodes.values().stream().anyMatch(n -> n instanceof BoundaryEvent b
+                        && node.id().equals(b.attachedToRef()))) {
+                    problems.add(DefinitionProblem.of("RECEIVE_INSTANTIATE_BOUNDARY", "A receive task that starts the"
+                            + " process never waits, so it has no boundary event", node.id()));
                 }
             }
             if (node instanceof EventBasedGateway gateway) {
@@ -581,10 +608,8 @@ public final class ProcessCompiler {
                     + " a message, signal or conditional start event starts a process or an event sub-process",
                     start.id()));
         }
-        if (!start.isInterrupting()) {
-            problems.add(DefinitionProblem.of("START_TRIGGER_MISPLACED", "isInterrupting=\"false\" applies to the start"
-                    + " event of an event sub-process", start.id()));
-        }
+        // #632: isInterrupting="false" outside an event sub-process is read and ignored, as BPMN says: a process or a
+        // sub-process has no other work to interrupt.
         if (hasMessage && start.extensions().first(CorrelationKey.class).isPresent()) {
             problems.add(DefinitionProblem.of("CORRELATION_KEY_UNEXPECTED", "A message start event has no instance"
                     + " yet; the message's key becomes the business key", start.id()));
@@ -611,9 +636,10 @@ public final class ProcessCompiler {
             List<DefinitionProblem> problems) {
         String id = node.id();
         if (isForCompensation(node)) {
-            if (!(node instanceof ServiceTask)) {
+            if (!(node instanceof Activity) || node instanceof SubProcess || node instanceof Transaction
+                    || node instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.AdHocSubProcess) {
                 problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_INVALID", "isForCompensation applies to a"
-                        + " service task: the undo of a step is a handler", id));
+                        + " task or a call activity: the undo of a step is a handler or a person's work", id));
             }
             if (!out.isEmpty() || flows.stream().anyMatch(f -> f.targetRef().equals(id))) {
                 problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_HAS_FLOW", "A compensation activity is run by"
@@ -646,10 +672,10 @@ public final class ProcessCompiler {
             }
             List<Association> mine = associations.stream().filter(a -> id.equals(a.sourceRef())).toList();
             FlowNode target = mine.size() == 1 ? nodes.get(mine.get(0).targetRef()) : null;
-            if (!(target instanceof ServiceTask) || !isForCompensation(target)
+            if (!isForCompensation(target) || target instanceof SubProcess || target instanceof Transaction
                     || !containerOf.get(target.id()).equals(containerOf.get(id))) {
                 problems.add(DefinitionProblem.of("COMPENSATION_ACTIVITY_MISSING", "A compensation boundary event has"
-                        + " one association to a service task marked isForCompensation in the same scope", id));
+                        + " one association to a task or call activity marked isForCompensation in the same scope", id));
             }
             if (host != null && nodes.values().stream().anyMatch(n -> n != node && isCompensationBoundary(n)
                     && host.id().equals(((BoundaryEvent) n).attachedToRef()) && n.id().compareTo(id) < 0)) {

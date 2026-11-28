@@ -516,7 +516,13 @@ public final class CanonicalProcessWriter {
                 // #491: message steps. The message name, the key variable and the mappings follow below.
                 case IntermediateCatchEvent c when messageOf(c) != null -> step.put("type", "messageCatch");
                 case IntermediateThrowEvent t when messageOf(t) != null -> step.put("type", "messageThrow");
-                case ReceiveTask t -> step.put("type", "receiveTask");
+                case ReceiveTask t -> {
+                    step.put("type", "receiveTask");
+                    if (t.instantiate()) {
+                        // #632: the receive task starts the process; only when set, so other hashes are unchanged.
+                        step.put("instantiate", true);
+                    }
+                }
                 case SendTask t -> step.put("type", "sendTask");
                 default -> step.put("type", node.getClass().getSimpleName());
             }

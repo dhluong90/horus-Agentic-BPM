@@ -86,7 +86,9 @@ horus:
           - classpath:processes/conformance/event-gateway-start.bpmn
           - classpath:processes/conformance/gateways.bpmn
           - classpath:processes/conformance/multiple-throw-and-end.bpmn
+          - classpath:processes/conformance/non-interrupting-start.bpmn
           - classpath:processes/conformance/parallel-join.bpmn
           - classpath:processes/conformance/parallel-multiple-start.bpmn
+          - classpath:processes/conformance/receive-task-start.bpmn
           - classpath:processes/conformance/sub-process-and-timer.bpmn
         auto-approve: true

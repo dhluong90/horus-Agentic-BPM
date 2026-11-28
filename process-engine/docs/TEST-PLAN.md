@@ -250,6 +250,10 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | PRE-374 | `PRE_374_*` in `ActivityDefaultFlowAndTerminateTest` and `BoundaryEventsPostgresIT` | A terminate reached from an error boundary ends the instance with every other branch | M3 | `TR-STD-04` | Done |
 | PRE-375 | `PRE_375_*` in `ActivityDefaultFlowAndTerminateTest` | A flow condition reads a field of a rule task result | M3 | `TR-STD-04` | Done |
 | PRE-376 | `PRE_376_*` in `ActivityDefaultFlowAndTerminateTest` | Two boundary paths share one end event | M3 | `TR-STD-04` | Done |
+| PRE-382 | `PRE_382_*` in `RefusalsLiftedTest` and `ConformanceSuiteTest` | A start event with `isInterrupting="false"` is read in every scope | M3 | `TR-STD-04` | Done (#632) |
+| PRE-383 | `PRE_383_*` in `RefusalsLiftedTest` and `ConformanceSuiteTest` | A compensation activity may be any task type or a call activity: a person does the undo | M3 | `TR-STD-04` | Done (#632) |
+| PRE-384 | `PRE_384_*` in `RefusalsLiftedTest`, `ConformanceSuiteTest` and `DataStoreAndGatewayStartPostgresIT` | A receive task with `instantiate="true"` starts the process on the first message | M3 | `TR-STD-04` | Done (#632) |
+| PRE-385 | `PRE_385_*` in `RefusalsLiftedTest` | A service task names its handler with `implementation="urn:horus-bpm:handler:<name>"` | M3 | `TR-STD-16` | Done (#632) |
 
 Cancellation under PD-103 (`PRE-054`) is proven by `ProcessRestApiIT.PRE_054_*` and `QueryLimitsTest.PRE_054_*`: a caller with `processes:start` only gets `403`, a holder of `processes:cancel` cancels with a reason recorded on the history row and the event, the cancel enters no step and runs no compensation, a missing, blank or 2,001-character reason is `400`, and `/api/bpm/me` lists the permission only for its holders.
 

@@ -164,6 +164,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /** A {@code horus:compensate} value: a handler or adapter name, or {@code manual}. */
     /** The key of a called definition: lower-case words joined by hyphens, as every definition key. */
     private static final Pattern CALLED_ELEMENT = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
+    /** The {@code implementation} form that names a registered handler (#632). */
+    private static final String HANDLER_URN = "urn:horus-bpm:handler:";
+    /** The activities that can be a compensation activity: a person or a handler undoes the step (#632). */
+    private static final Set<String> COMPENSATION_ACTIVITIES = Set.of("serviceTask", "userTask", "manualTask", "task",
+            "scriptTask", "sendTask", "receiveTask", "businessRuleTask", "callActivity");
     private static final Pattern COMPENSATE_HANDLER = Pattern.compile("^[A-Za-z][A-Za-z0-9_.-]{0,99}$");
     private static final Pattern RULE_SET = Pattern.compile("^[a-z][a-z0-9]*([.-][a-z0-9]+)*$");
     /** The step id a {@code horus:memory} entry reads from: an id, never an expression or a variable path. */
@@ -378,6 +383,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         .forEach(e -> gateways.add(e.id()));
                 all.stream().filter(e -> e instanceof SequenceFlow f && gateways.contains(f.sourceRef()))
                         .forEach(e -> startingCatches.add(((SequenceFlow) e).targetRef()));
+                // #632: a receive task that starts the process is its start event; the message's key is the business key.
+                all.stream().filter(e -> e instanceof ReceiveTask r && r.instantiate())
+                        .forEach(e -> startingCatches.add(e.id()));
             }
             invalid.removeIf(p -> "CORRELATION_KEY_REQUIRED".equals(p.code()) && startingCatches.contains(p.elementId()));
             for (DefinitionProblem ref : unresolvedRefs) {
@@ -960,6 +968,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 }
                 behaviourAttributes();
                 String activityDefault = attr("default");
+                boolean forCompensation = "true".equals(attr("isForCompensation"));
                 lastLoop = null;
                 lastIo = null;
                 lastIn = new ArrayList<>();
@@ -1084,6 +1093,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         skip();
                     }
                 }
+                if (forCompensation) {
+                    attachCompensation(elements, before);
+                }
                 if (lastLoop != null) {
                     attachLoop(elements, before, lastLoop);
                     lastLoop = null;
@@ -1207,6 +1219,21 @@ public final class SubsetBpmnReader implements DefinitionReader {
             }
         }
 
+        /**
+         * #632: marks the activity just read as a compensation activity. A service task reads the attribute itself; a
+         * user, manual, script, send, receive, business rule or abstract task and a call activity take it here.
+         */
+        private void attachCompensation(List<FlowElement> elements, int before) {
+            if (elements.size() > before && elements.get(elements.size() - 1) instanceof Activity activity
+                    && !activity.activity().isForCompensation()) {
+                ActivityAttributes a = activity.activity();
+                elements.set(elements.size() - 1, withAttributes(activity, new ActivityAttributes(true,
+                        a.startQuantity(), a.completionQuantity(), a.defaultFlow(), a.ioSpecification(),
+                        a.dataInputAssociations(), a.dataOutputAssociations(), a.resources(),
+                        a.loopCharacteristics())));
+            }
+        }
+
         /** #499: puts the data read for the element just added on it; any other element refuses it. */
         private void attachData(List<FlowElement> elements, int before) {
             if (lastIo == null && lastIn.isEmpty() && lastOut.isEmpty()) {
@@ -1262,6 +1289,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         t.scriptFormat(), t.script(), t.info());
                 case CallActivity t -> new CallActivity(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
                         t.calledElement(), t.info());
+                case ReceiveTask t -> new ReceiveTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.instantiate(), t.messageRef(), t.operationRef(), t.info());
+                case SendTask t -> new SendTask(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
+                        t.implementation(), t.messageRef(), t.operationRef(), t.info());
                 case SubProcess t -> new SubProcess(t.id(), t.name(), t.incoming(), t.outgoing(), looped,
                         t.triggeredByEvent(), t.flowElements(), t.artifacts(), t.laneSets(), t.info());
                 default -> activity;
@@ -1580,9 +1611,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
          */
         private void behaviourAttributes() {
             String id = attr("id");
-            if ("true".equals(attr("isForCompensation")) && !"serviceTask".equals(xml.getLocalName())) {
-                unsupported("isForCompensation", id, BpmnStages.NOT_PLANNED, "applies to a service task: the undo of a"
-                        + " step is a handler");
+            String local = xml.getLocalName();
+            if ("true".equals(attr("isForCompensation")) && !COMPENSATION_ACTIVITIES.contains(local)) {
+                unsupported("isForCompensation", id, BpmnStages.NOT_PLANNED, "applies to a service, user, manual,"
+                        + " script, send, receive, business rule or abstract task or a call activity: the undo of a"
+                        + " step is one of them, not a sub-process");
             }
             for (String quantity : List.of("startQuantity", "completionQuantity")) {
                 String value = attr(quantity);
@@ -1590,19 +1623,30 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     unsupported(quantity, id, BpmnStages.NOT_PLANNED);
                 }
             }
-            if ("false".equals(attr("isInterrupting")) && !"startEvent".equals(xml.getLocalName())) {
-                unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to the start event of an event"
-                        + " sub-process; a boundary event uses cancelActivity");
+            if ("false".equals(attr("isInterrupting")) && !"startEvent".equals(local) && !"boundaryEvent".equals(local)) {
+                unsupported("isInterrupting", id, BpmnStages.NOT_PLANNED, "applies to a start event, or to a boundary"
+                        + " event as cancelActivity=\"false\"; BPMN defines it on no other element");
             }
-            if ("true".equals(attr("parallelMultiple")) && !xml.getLocalName().endsWith("Event")) {
+            if ("true".equals(attr("parallelMultiple")) && !local.endsWith("Event")) {
                 unsupported("parallelMultiple", id, BpmnStages.NOT_PLANNED, "applies to an event that has several event"
                         + " definitions");
             }
             String implementation = attr("implementation");
-            if (implementation != null && !"##unspecified".equals(implementation)) {
+            if (implementation != null && !"##unspecified".equals(implementation) && handlerOfUrn(implementation) == null) {
                 unsupported("implementation", id, BpmnStages.NOT_PLANNED,
-                        "is not supported; bind the step with horus:handler instead of a service implementation");
+                        "is not supported; bind the step with horus:handler or implementation=\""
+                        + HANDLER_URN + "<name>\" instead of a service implementation");
+            } else if (implementation != null && handlerOfUrn(implementation) != null && !"serviceTask".equals(local)) {
+                unsupported("implementation", id, BpmnStages.NOT_PLANNED, "names a handler on a service task only");
             }
+        }
+
+        /** The handler name of {@code urn:horus-bpm:handler:<name>}, or null when the text is not that form. */
+        private static String handlerOfUrn(String implementation) {
+            if (implementation == null || !implementation.startsWith(HANDLER_URN)) {
+                return null;
+            }
+            return implementation.substring(HANDLER_URN.length());
         }
 
         /** A note on the diagram: its {@code text} is kept exactly, nothing is executed. */
@@ -1761,6 +1805,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             String attachedTo = attr("attachedToRef");
             boolean cancel = !"false".equals(attr("cancelActivity"));
+            if ("false".equals(attr("isInterrupting"))) {
+                // #632: the start-event spelling of the same thing; the two never disagree.
+                if ("true".equals(attr("cancelActivity"))) {
+                    invalid.add(new DefinitionProblem("BOUNDARY_INTERRUPTING_CONFLICT", "isInterrupting=\"false\" and"
+                            + " cancelActivity=\"true\" disagree; give cancelActivity alone", element, safe(id), line()));
+                }
+                cancel = false;
+            }
             String key = horus("correlationKey");
             boolean parallel = "true".equals(attr("parallelMultiple"));
             int line = line();
@@ -1969,9 +2021,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String name = attr("name");
             String ref = attr("messageRef");
             String key = horus("correlationKey");
-            if (receive && "true".equals(attr("instantiate"))) {
-                unsupported("instantiate", id, BpmnStages.NOT_PLANNED, "is not supported; start a process with a message"
-                        + " start event");
+            boolean instantiate = receive && "true".equals(attr("instantiate"));
+            if (!receive && attr("instantiate") != null) {
+                invalid.add(new DefinitionProblem("INSTANTIATE_ON_SEND_TASK", "instantiate applies to a receiveTask",
+                        element, safe(id), line));
             }
             messageLines.putIfAbsent(id, line);
             Node children = children(element, id, true);
@@ -1979,7 +2032,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             correlation(element, id, line, key, receive, ext);
             ext.addAll(children.horus());
             return receive
-                    ? new ReceiveTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, false, ref,
+                    ? new ReceiveTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, instantiate, ref,
                             null, info(ext, children.foreign()))
                     : new SendTask(id, name, List.of(), List.of(), ActivityAttributes.defaults(), null, ref, null,
                             info(ext, children.foreign()));
@@ -2092,6 +2145,18 @@ public final class SubsetBpmnReader implements DefinitionReader {
             int line = line();
             ActivityAttributes activity = serviceTaskAttributes();
             String handler = horus("handler");
+            String urnHandler = handlerOfUrn(attr("implementation"));
+            if (urnHandler != null) {
+                if (!COMPENSATE_HANDLER.matcher(urnHandler).matches()) {
+                    invalid.add(new DefinitionProblem("IMPLEMENTATION_HANDLER_INVALID", "implementation=\"" + HANDLER_URN
+                            + "<name>\" names a handler: a letter, then letters, digits, '_', '.' or '-', at most 100",
+                            "serviceTask", safe(id), line));
+                } else if (handler != null && !handler.equals(urnHandler)) {
+                    invalid.add(new DefinitionProblem("IMPLEMENTATION_HANDLER_CONFLICT", "implementation and"
+                            + " horus:handler name different handlers; give one", "serviceTask", safe(id), line));
+                }
+                handler = handler == null ? urnHandler : handler;
+            }
             String mode = horus("mode");
             String type = horus("type");
             String name = attr("name");

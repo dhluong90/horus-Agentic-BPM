@@ -2312,6 +2312,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return null;
         }
         for (io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode n : process.nodes()) {
+            // #632: a receive task that starts the process is its own catch.
+            if (!signal && n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask r
+                    && r.instantiate() && process.containerOf(r.id()).equals(process.process().id())
+                    && name.equals(r.messageRef())) {
+                return r.id();
+            }
             if (!(n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g) || !g.instantiate()
                     || !process.containerOf(g.id()).equals(process.process().id())) {
                 continue;

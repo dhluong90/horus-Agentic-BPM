@@ -147,7 +147,7 @@ class SubsetBpmnRefusalTest {
     @Test
     void PRE_108_a_behaviour_attribute_that_changes_how_a_step_runs_is_refused_by_name() {
         byte[] file = (HEAD + "<bpmn:startEvent id=\"s\"/>"
-                + "<bpmn:task id=\"undo\" isForCompensation=\"true\"/>"
+                + "<bpmn:subProcess id=\"undo\" isForCompensation=\"true\"/>"
                 + "<bpmn:serviceTask id=\"batch\" completionQuantity=\"2\" horus:handler=\"h\"/>"
                 + "<bpmn:serviceTask id=\"ws\" implementation=\"##WebService\" horus:handler=\"h\"/>"
                 + TAIL).getBytes(StandardCharsets.UTF_8);

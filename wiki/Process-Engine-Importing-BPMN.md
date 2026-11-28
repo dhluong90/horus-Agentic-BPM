@@ -349,17 +349,25 @@ The answer lists every unsupported element in the file, each with its id, its li
 
 **Stage.** `stage` in each entry is a label from the coverage table in [standards compliance](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md), never a sprint or a date. It does not say whether the refusal will be lifted. The "Status" column below does.
 
-Every boundary event, sub-process, transaction, loop and multi-instance marker that BPMN 2.0 defines for execution imports. The engine still refuses what is below, one row for each. "Deliberate deviation" means the engine keeps the refusal by design and lists it in the [deviation register](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md). "Planned for 1.1 (#632)" means the refusal will be lifted in that issue.
+Every boundary event, sub-process, transaction, loop and multi-instance marker that BPMN 2.0 defines for execution imports. The engine still refuses what is below, one row for each. "Deliberate deviation" means the engine keeps the refusal by design and lists it in the [deviation register](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/architecture/standards-compliance.md). A refusal that had a business meaning is lifted and listed in the next table as "Supported".
+
+**Read since 1.1 (#632)**
+
+| File has | What the engine does | Status |
+|---|---|---|
+| `isInterrupting="false"` on a start event | Read in every scope. In an event sub-process it makes the trigger non-interrupting; in a process or an embedded sub-process there is no other work to interrupt, so BPMN says to ignore it, and the export writes it back. On a boundary event it means `cancelActivity="false"`; a `cancelActivity="true"` beside it is `BOUNDARY_INTERRUPTING_CONFLICT` | Supported |
+| `isForCompensation="true"` on a user, manual, script, send, receive, business rule or abstract task, or a call activity | It is the compensation activity of a compensation boundary event. A person does the undo: the walk raises the `COMPENSATION_MANUAL_REQUIRED` incident naming the step, as `horus:compensate="manual"` does. A service task still runs its handler | Supported |
+| `receiveTask` with `instantiate="true"` | The receive task stands for the message start event: no flow in, the first message of its `messageRef` starts the process, the key becomes the business key and a repeat of the key returns the same instance | Supported |
+| `implementation="urn:horus-bpm:handler:<name>"` on a service task | The same as `horus:handler="<name>"`; the export writes `horus:handler`. Two different names are `IMPLEMENTATION_HANDLER_CONFLICT` | Supported |
 
 **Refused with `BPMN_UNSUPPORTED_ELEMENT` (`422`, listed in `unsupportedElements`)**
 
 | File has | Condition | Status |
 |---|---|---|
 | `startQuantity` or `completionQuantity` | any value other than `1` | Deliberate deviation |
-| `implementation` | any value other than `##unspecified`. `urn:horus-bpm:handler:<name>` is planned for 1.1 (#632); every other value (WSDL, web service) stays refused. Bind the step with `horus:handler` | Planned for 1.1 (#632) for the urn form, otherwise deliberate deviation |
-| `isForCompensation="true"` | on anything but a service task | Planned for 1.1 (#632) |
-| `isInterrupting="false"` | on any element but a start event. On a boundary event write `cancelActivity="false"` | Planned for 1.1 (#632) |
-| `receiveTask` with `instantiate="true"` | always. Start the process with a message start event | Planned for 1.1 (#632) |
+| `implementation` | any value other than `##unspecified` or `urn:horus-bpm:handler:<name>` (WSDL, web service), and the urn form on any task but a service task. Bind the step with `horus:handler` | Deliberate deviation |
+| `isForCompensation="true"` | on a sub-process, transaction, ad-hoc sub-process or any element that is not an activity | Deliberate deviation |
+| `isInterrupting="false"` | on an element that is neither a start event nor a boundary event; BPMN defines it on none | Deliberate deviation |
 | `boundaryEvent` or `intermediateCatchEvent` | with no event definition | Deliberate deviation |
 | `intermediateThrowEvent` | with no event definition, or with an `errorEventDefinition` or `terminateEventDefinition`; raise these from an end event | Deliberate deviation |
 | `startEvent` | with a `cancelEventDefinition` | Deliberate deviation |
@@ -381,7 +389,6 @@ Every boundary event, sub-process, transaction, loop and multi-instance marker t
 | `eventBasedGateway` with `eventGatewayType="Parallel"` and no `instantiate="true"` | `EVENT_GATEWAY_PARALLEL_INSTANTIATE` | Deliberate deviation |
 | A throw or end event with several definitions | `MULTIPLE_THROW_DEFINITION_INVALID`: only message, signal, escalation and a compensation with `waitForCompletion="false"` | Deliberate deviation |
 | A multiple event with a definition its place does not take | `MULTIPLE_EVENT_DEFINITION_INVALID`. A process start event takes message and signal only, so it cannot wait for a timer or a condition | Deliberate deviation |
-| A start event with `isInterrupting="false"` outside an event sub-process | `START_TRIGGER_MISPLACED` | Planned for 1.1 (#632) |
 | More than one `process` and no collaboration pointing to each | `PROCESS_NOT_IN_COLLABORATION` | Deliberate deviation |
 
 An attribute or extension element from another modeler's namespace, such as a vendor `class` attribute on a service task, is not refused. It is never read or run, and the stored source keeps it. When the file is refused for another reason, `warnings` lists it as `FOREIGN_EXTENSION_IGNORED` with its namespace and line.
