@@ -21,8 +21,10 @@ describe('The business calendar editor (#125)', () => {
     open('#/calendars');
 
     const table = await screen.findByRole('table', { name: 'Business calendars' });
-    expect(within(table).getByRole('link', { name: 'vn-banking-hours' })).toHaveAttribute('href', '#/calendars/vn-banking-hours');
-    expect(within(table).getByText('Asia/Ho_Chi_Minh')).toBeInTheDocument();
+    expect(within(table).getByRole('link', { name: 'Vn banking hours' })).toHaveAttribute('href', '#/calendars/vn-banking-hours');
+    expect(within(table).getByText('Ho Chi Minh City (UTC+7)')).toBeInTheDocument();
+    expect(table).not.toHaveTextContent('Asia/Ho_Chi_Minh');
+    expect(table).not.toHaveTextContent('vn-banking-hours');
   });
 
   it('CKP_092_a_change_is_proposed_against_the_version_read_and_waits_for_a_second_person', async () => {
@@ -30,6 +32,7 @@ describe('The business calendar editor (#125)', () => {
     setScenario('calendar-proposer');
     open('#/calendars/vn-banking-hours');
 
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit calendar' }));
     const send = await screen.findByRole('button', { name: 'Send for approval' });
     expect(send).toBeDisabled();
     await userEvent.click(screen.getByRole('tab', { name: /Holidays/ }));
@@ -54,6 +57,7 @@ describe('The business calendar editor (#125)', () => {
     const engine = resetProcessEngine();
     setScenario('calendar-proposer');
     open('#/calendars/vn-banking-hours');
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit calendar' }));
     await userEvent.click(await screen.findByRole('tab', { name: /Holidays/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Add holiday' }));
     await userEvent.type(screen.getByLabelText('Holiday 3, date'), '2027-04-30');
@@ -70,10 +74,10 @@ describe('The business calendar editor (#125)', () => {
 
     // The calendar is now one version on, and its history names who proposed and who approved the change.
     window.location.hash = '#/calendars';
-    await userEvent.click(await screen.findByRole('link', { name: 'vn-banking-hours' }));
+    await userEvent.click(await screen.findByRole('link', { name: 'Vn banking hours' }));
     await userEvent.click(await screen.findByRole('tab', { name: 'History' }));
     const row = await screen.findByRole('link', { name: 'Holiday added' });
-    expect(row.closest('li')).toHaveTextContent(/proposed by .*approved by/);
+    expect(row.closest('li')).toHaveTextContent(/Approved.*Approved by .*Proposed by/);
     expect(JSON.parse(engine.handle({ method: 'GET', path: '/api/bpm/processes/v1/calendars/vn-banking-hours', headers: {}, body: '', user: 'lan', permissions: ['processes:read'] }).body)).toMatchObject({ version: 4, approvedBy: 'minh' });
   });
 
@@ -81,6 +85,7 @@ describe('The business calendar editor (#125)', () => {
     const engine = resetProcessEngine();
     setScenario('calendar-proposer');
     open('#/calendars/vn-banking-hours');
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit calendar' }));
     await userEvent.click(await screen.findByRole('tab', { name: /Holidays/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Add holiday' }));
     await userEvent.type(screen.getByLabelText('Holiday 3, date'), '2027-04-30');
@@ -98,6 +103,7 @@ describe('The business calendar editor (#125)', () => {
     resetProcessEngine();
     setScenario('calendar-proposer');
     open('#/calendars/vn-banking-hours');
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit calendar' }));
     await userEvent.click(await screen.findByRole('tab', { name: /Holidays/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Add holiday' }));
     await userEvent.type(screen.getByLabelText('Holiday 3, date'), '2027-04-30');
@@ -112,6 +118,37 @@ describe('The business calendar editor (#125)', () => {
     await waitFor(() => { expect(screen.queryByRole('alert')).not.toBeInTheDocument(); });
   });
 
+  it('CKP_092_a_pending_change_reads_as_waiting_with_who_proposed_it_and_when_and_no_chip', async () => {
+    resetProcessEngine();
+    setScenario('calendar-proposer');
+    open('#/calendars/vn-banking-hours');
+    await userEvent.click(await screen.findByRole('button', { name: 'Edit calendar' }));
+    await userEvent.click(await screen.findByRole('tab', { name: /Holidays/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Add holiday' }));
+    await userEvent.type(screen.getByLabelText('Holiday 3, date'), '2027-04-30');
+    await userEvent.type(screen.getByLabelText('Reason for the change'), 'Holiday added');
+    await userEvent.click(screen.getByRole('button', { name: 'Send for approval' }));
+    await screen.findByRole('link', { name: 'Open the change' });
+    window.location.hash = '#/calendar-changes';
+
+    const row = (await screen.findByRole('link', { name: 'Vn banking hours' })).closest('li');
+    expect(row).toHaveTextContent(/Waiting for a second person.*Proposed by .*, /);
+    expect(row?.querySelector('.change-state__dot')).not.toBeNull();
+  });
+
+  it('CKP_092_hours_are_read_first_and_one_edit_control_opens_them', async () => {
+    resetProcessEngine();
+    setScenario('calendar-proposer');
+    open('#/calendars/vn-banking-hours');
+
+    await screen.findByText('Ho Chi Minh City (UTC+7)');
+    expect(screen.queryByLabelText('Mon, range 1, from')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Add hours on/ })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Edit calendar' }));
+    expect(screen.getByLabelText('Mon, range 1, from')).toBeInTheDocument();
+    expect(screen.getByLabelText('Time zone')).toBeInTheDocument();
+  });
+
   it('CKP_092_a_reader_sees_the_calendar_and_no_way_to_change_it', async () => {
     resetProcessEngine();
     setScenario('processes-reviewer');
@@ -119,21 +156,23 @@ describe('The business calendar editor (#125)', () => {
 
     expect(await screen.findByText('You can read this calendar. Changing it needs the calendar permission.')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Send for approval' })).not.toBeInTheDocument();
-    expect(screen.getByLabelText('Time zone')).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Edit calendar' })).not.toBeInTheDocument();
+    expect(screen.getByText('Ho Chi Minh City (UTC+7)')).toBeInTheDocument();
+    expect(screen.queryByText('Asia/Ho_Chi_Minh')).not.toBeInTheDocument();
   });
 
-  it('CKP_092_a_new_key_starts_a_calendar_against_version_zero', async () => {
+  it('CKP_092_a_new_calendar_is_named_in_words_and_starts_against_version_zero', async () => {
     const engine = resetProcessEngine();
     setScenario('calendar-proposer');
     open('#/calendars');
-    await userEvent.type(await screen.findByLabelText('New calendar key'), 'sg-banking-hours');
+    await userEvent.type(await screen.findByLabelText('New calendar name'), 'Singapore banking hours');
     await userEvent.click(screen.getByRole('button', { name: 'Create' }));
-    await userEvent.type(await screen.findByLabelText('Time zone'), 'Asia/Singapore');
+    await userEvent.selectOptions(await screen.findByLabelText('Time zone'), 'Singapore (UTC+8)');
     await userEvent.type(screen.getByLabelText('Reason for the change'), 'First calendar for Singapore');
     await userEvent.click(screen.getByRole('button', { name: 'Send for approval' }));
 
     await waitFor(() => { expect(engine.calendarProposals).toHaveLength(1); });
     expect(engine.calendarProposals[0]?.ifMatch).toBe('"0"');
-    expect(engine.calendarProposals[0]?.key).toBe('sg-banking-hours');
+    expect(engine.calendarProposals[0]?.key).toBe('singapore-banking-hours');
   });
 });

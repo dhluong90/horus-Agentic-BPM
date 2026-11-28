@@ -410,3 +410,18 @@
 .calendar-new .muted { margin: var(--space-2) 0 0; }
 .calendars__table .num { text-align: right; }
 .card--pad { padding: var(--card-pad); }
+
+/* A change's state: words with a small dot, and who and when beneath; nothing boxed. */
+.change-state { display: inline-flex; flex-direction: column; gap: 2px; }
+.change-state__head { display: inline-flex; align-items: center; gap: var(--space-2); font: var(--type-label); font-weight: 600; color: var(--ink); }
+.change-state__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.change-state__head--pending .change-state__dot { background: var(--warn-fill); }
+.change-state__head--approved .change-state__dot { background: var(--ok); }
+.change-state__head--rejected .change-state__dot { background: var(--bad); }
+.change-state__who { font: var(--type-caption); color: var(--muted); }
+.calendar-review__state { margin: 0 0 var(--space-3); }
+.calendar-edit__note { display: flex; align-items: center; gap: var(--space-3); }
+.calendar-hours__zone-name { color: var(--ink); }
+.calendar-holidays__item--read { grid-template-columns: 168px minmax(0, 1fr); }
+.calendar-icon-action { min-width: 32px; padding: 0 8px; font-size: 18px; line-height: 1; }
+.calendar-sent { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); grid-column: 1 / -1; }

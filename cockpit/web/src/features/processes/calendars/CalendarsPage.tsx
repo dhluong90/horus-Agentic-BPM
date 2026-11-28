@@ -5,6 +5,7 @@ import { AreaError, EmptyState, LoadingRows, PageHead } from '../../../component
 import { useI18n } from '../../../i18n/I18nProvider';
 import { formatDateTime } from '../../rules/model/dates';
 import { useProcessesSession } from '../api/processesContext';
+import { calendarName, keyFromName, zoneLabel } from './calendarNames';
 import { CalendarEditor } from './CalendarEditor';
 import { useCalendars } from './useCalendarChanges';
 
@@ -45,8 +46,8 @@ function CalendarList({ pageLimit }: { pageLimit: number }) {
             <tbody>
               {list.data.data.map((item) => (
                 <tr key={item.key}>
-                  <th scope="row"><a className="qtable__link" href={formatRoute({ name: 'calendar', calendarKey: item.key })}>{item.key}</a></th>
-                  <td>{item.zone}</td>
+                  <th scope="row"><a className="qtable__link" href={formatRoute({ name: 'calendar', calendarKey: item.key })}>{calendarName(item.key)}</a></th>
+                  <td>{zoneLabel(item.zone, t)}</td>
                   <td className="num tnum">{item.version}</td>
                   <td className="tnum muted">{t('calendars.changedBy', { date: formatDateTime(item.updatedAt, locale) ?? '', who: person(item.updatedBy), approver: person(item.approvedBy) })}</td>
                   <td className="qtable__chevron" aria-hidden="true">›</td>
@@ -66,17 +67,19 @@ function NewCalendar() {
   const { t } = useI18n();
   const id = useId();
   const [key, setKey] = useState('');
-  const valid = KEY.test(key) && key.length <= 100;
+  // The user types a name; the key the engine wants is made from its words.
+  const made = keyFromName(key);
+  const valid = KEY.test(made) && made.length <= 100;
   const go = (event: FormEvent) => {
     event.preventDefault();
-    if (valid) window.location.hash = formatRoute({ name: 'calendar', calendarKey: key });
+    if (valid) window.location.hash = formatRoute({ name: 'calendar', calendarKey: made });
   };
   return (
     <form className="card card--pad calendar-new" onSubmit={go}>
       <label htmlFor={id} className="field__label">{t('calendars.newKey')}</label>
       <div className="calendar-new__row">
         <input id={id} className="field__input" value={key} maxLength={100} autoComplete="off" spellCheck={false} aria-describedby={`${id}-hint`}
-          onChange={(event) => { setKey(event.target.value.trim()); }} />
+          onChange={(event) => { setKey(event.target.value); }} />
         <button type="submit" className="btn btn--secondary" disabled={!valid}>{t('calendars.new')}</button>
       </div>
       <p id={`${id}-hint`} className="muted">{t('calendars.newHint')}</p>
