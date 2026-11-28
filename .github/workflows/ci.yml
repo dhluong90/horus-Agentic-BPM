@@ -29,6 +29,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    # Decision 3a: a pull request that changes only site/**, wiki/**, docs/** or a root-level *.md skips the Java and
+    # cockpit jobs below; the docs-site and wiki workflows and the light jobs here still run. Every other
+    # event (push to main, tag, nightly, manual) runs everything. A skipped job counts as passed for a
+    # required check. The rule is in tools/ci-code-changed.sh.
+    name: Changed paths
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          # The merge commit of a pull request and its first parent (the base tip).
+          fetch-depth: 2
+
+      - name: Tests of the filter
+        run: tools/test-ci-code-changed.sh
+
+      - name: Does the change touch anything but documentation?
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT" != pull_request ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            echo "Event $EVENT: everything runs."
+            exit 0
+          fi
+          # Fail closed: anything but an explicit "false" runs every job.
+          result="$(tools/ci-code-changed.sh HEAD^1 HEAD || echo true)"
+          [ "$result" = false ] || result=true
+          echo "code=$result" >> "$GITHUB_OUTPUT"
+          echo "Docs-only change: $([ "$result" = false ] && echo yes || echo no)"
+
   spec-coverage:
     # TR-QA-01: every specification id in scope has a test named by it. Reads sources only; no build.
     name: Spec-to-test coverage
@@ -64,6 +100,8 @@ jobs:
     # PostgreSQL 18); the nightly run, a manual run and a release tag run all seven (lean mode, PD-151).
     # The 3.5.x legs test the jars built on the 4.x baseline, as an adopter receives them: the same
     # compiled tests run on a Spring Boot 3.5 runtime classpath (-Dspring-boot.line=3.5, pom.xml).
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Java ${{ matrix.java }}, Spring Boot ${{ matrix.boot }}, PostgreSQL ${{ matrix.postgres }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -319,6 +357,8 @@ jobs:
     # TR-SEC-06, TR-LIC-01 and TR-LIC-02: policy checks, licence gate, SBOMs, licence notices in jars
     # and vulnerability scans. Tests run in the verify job; this job builds without them so both
     # finish in parallel. Maven runs with --strict-checksums and download retries (.mvn/maven.config).
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Dependency licences, SBOM and vulnerabilities
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -572,6 +612,8 @@ jobs:
   cockpit:
     # The cockpit web application on every pull request: licences of shipped packages, generated schemas,
     # lint, types and Vitest. The Playwright UI suite is the separate cockpit-ui job below.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Cockpit (lint, typecheck, Vitest)
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -614,6 +656,8 @@ jobs:
     # smoke subset (1440x900, light theme, English: about 390 of the 1,970 checks, 2 minutes locally); main, the
     # nightly run and a manual start run the full suite (every state at two sizes, two themes, two languages, with
     # axe). The specs and visual baselines are in cockpit/web/e2e.
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     name: Cockpit UI (Playwright)
     runs-on: ubuntu-latest
     # The full suite (about 1,970 checks) takes 17 to 20 minutes on a hosted runner; 45 leaves room without
