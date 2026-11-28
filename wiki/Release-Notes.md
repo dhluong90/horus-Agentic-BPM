@@ -15,8 +15,8 @@ Every release note lists the database migrations it adds (TR-OPS-01) and the "sh
 The 1.0 baseline: one version for every module, and the first with a compatibility promise. Migrations that the engines run are the ones listed under 0.3.0 and earlier; 1.0.0 adds none.
 
 - **Rule Engine with simple editing in the cockpit.** Author, test, approve and publish decision tables and rules without code, with four eyes and a full decision log. See [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]].
-- **Every executable BPMN 2.0 element.** The Process Engine imports and runs all of them, from gateways to compensation and event sub-processes. See [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]].
-- **Import from any BPMN 2.0 modeler.** Bring a file in as it is; what the engine reads and what it refuses is listed element by element. See [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]].
+- **Executable BPMN 2.0 elements.** The Process Engine runs the elements in the element table, from gateways to compensation and event sub-processes. See [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]].
+- **BPMN 2.0 import with named refusals.** Imports files that use the elements listed on the import page; every refusal names its reason. Files from other tools can be refused for extensions or encodings. Conformance results are published on the [[Standards Conformance|Standards-Conformance]] page. See [[Process Engine: import a BPMN file|Process-Engine-Importing-BPMN]].
 - **The cockpit.** One screen set to author, approve and operate rules and processes, embedded in your host. See [[Cockpit: embed, approve, operate|Cockpit]].
 - **Multi-tenancy and security hardening.** Every read and write is scoped to a tenant, the decision log cannot be edited, and sensitive input is masked. See [[Multi-tenancy and security|Multi-Tenancy-and-Security]].
 - **Timeline shows cancelled and terminated steps (#600).** A step stopped by a cancel or a terminate end now appears on the instance timeline as `CANCELLED` or `TERMINATED`, not as running. See [[Process Engine API|Process-Engine-API]].
