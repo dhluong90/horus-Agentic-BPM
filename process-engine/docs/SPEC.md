@@ -568,6 +568,16 @@ A `saga` block is a BPMN `transaction`: its steps run under the block's own scop
 - **Example:** `formLink https://evil.example/t/{taskId} -> 422 FORM_LINK_NOT_ALLOWED; with the origin listed -> 201`.
 - **Test ID:** `PRE_219_an_unregistered_form_a_bad_schema_and_bad_hints_are_each_refused_with_their_code`, `PRE_219_a_task_declares_at_most_one_form_and_a_reference_stays_inside_the_form_folder`, `PRE_219_the_same_link_is_accepted_once_its_origin_is_listed`, `PRE_219_the_form_is_part_of_the_definition_hash_so_changing_it_needs_a_new_approval`, `PRE_219_request_approval_checks_the_registry_again_so_a_form_removed_since_import_blocks_it` (`TaskFormTest`), `PRE_219_a_link_is_relative_or_on_a_listed_origin_and_nothing_else`, `PRE_219_a_schema_outside_the_task_form_subset_is_named_by_path_and_rule` (`TaskFormsTest`), `PRE_219_a_schema_path_is_read_as_the_schema_without_hints`, `PRE_219_a_form_key_is_read_from_its_envelope_with_the_hints`, `PRE_219_a_name_outside_the_folder_or_not_plain_is_not_registered`, `PRE_219_the_settings_accept_relative_origins_and_a_relative_folder_only` (`ClasspathFormRegistryTest`)
 
+### PRE-393 Form hints carry option labels with consequences, unit suffixes and money formats
+- **Traces to:** `TR-UI-02`, `TR-STD-03`, #639
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A loan approval form with `decision` (`APPROVE`, `REJECT`), `termMonths`, `amount` and `currency`, and hints `options.decision.APPROVE = {label: {en: "Approve", vi: "Phê duyệt"}, consequence: {en: "The loan is disbursed.", vi: "Khoản vay được giải ngân."}}`, `units.termMonths = {en: "months", vi: "tháng"}`, `formats.amount = {currencyFrom: "currency", grouping: true}`.
+- **When:** The definition is imported; then variants are imported with an option for `MAYBE` (not in the enum), an option on a non-enum field, a unit for an undeclared field, a lower-case `currency`, a well-formed but unassigned code such as `ZZZ`, both `currency` and `currencyFrom`, a `currencyFrom` that names its own field or a masked field, and a member `palette`.
+- **Then:** The first is accepted and the form is returned with the hints as written; each variant is `422 VALIDATION_FAILED` with one `FORM_HINTS_INVALID` problem (the unknown member named). Completion validation is unchanged: the value sent is `APPROVE`, never its label. The hints are part of the form in the definition hash, as `labels` are.
+- **Example:** `options.decision.APPROVE.label.vi -> "Phê duyệt"; amount 250000000 + currency VND -> shown "250.000.000 ₫" in vi`.
+- **Test ID:** `PRE_393_option_labels_with_consequences_a_unit_suffix_and_a_money_format_are_accepted`, `PRE_393_an_option_for_a_value_the_enum_lacks_or_a_field_that_is_no_enum_is_refused`, `PRE_393_a_bad_unit_or_money_format_is_refused_and_an_unknown_member_is_still_named`, `PRE_393_a_currency_must_be_a_real_iso_4217_code`, `PRE_393_currency_from_must_name_another_field_that_is_not_masked` (`TaskFormsTest`)
+
 ### PRE-220 A task form's data keeps masked fields masked, and a link task is returned as its link
 - **Traces to:** `TR-SEC-05`, `TR-UI-02`, #79
 - **Milestone:** M2
