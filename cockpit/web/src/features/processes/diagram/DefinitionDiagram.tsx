@@ -25,7 +25,8 @@ import {
 import { edgeKey, type DiagramMarks, type Mark } from '../model/graphDiff';
 import { nodeIconKind, nodeTypeLabel } from '../model/nodeLabels';
 import { badgeBox, drawingBounds, type Box } from '../model/bounds';
-import { placeCollaboration, POOL_HEADER, type CollaborationDrawing } from '../model/collaborationLayout';
+import { placeCollaboration, POOL_BAND, LANE_BAND, type CollaborationDrawing } from '../model/collaborationLayout';
+import { attachPoint } from '../model/notes';
 import { Minimap, type View } from './Minimap';
 import { NodeIcon } from './NodeIcon';
 
@@ -153,6 +154,18 @@ function MarkBadge({ mark, x, y }: { mark: Mark; x: number; y: number }) {
   );
 }
 
+/** A pool's or lane's name, written upward in its vertical band; a name longer than the band is cut with an ellipsis and carries a title with the whole. */
+function BandName({ label, className, x, y, room }: { label: string; className: string; x: number; y: number; room: number }) {
+  const fit = Math.max(4, Math.floor(room / (LABEL_CHAR * 1.05)));
+  const shown = label.length > fit ? `${label.slice(0, fit - 1)}…` : label;
+  return (
+    <text className={className} transform={`rotate(-90 ${String(x)} ${String(y)})`} x={x} y={y + 4} textAnchor="middle">
+      <title>{label}</title>
+      {shown}
+    </text>
+  );
+}
+
 /** The pool frame, the lane bands and the black-box pools behind the steps (#497). */
 function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
   return (
@@ -160,13 +173,15 @@ function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
       {drawing.pool !== undefined ? (
         <g className="dg-pool" data-pool={drawing.pool.id}>
           <rect x={drawing.pool.x} y={drawing.pool.y} width={drawing.pool.width} height={drawing.pool.height} rx={4} />
-          <text className="dg-pool__name" x={drawing.pool.x + 12} y={drawing.pool.y + POOL_HEADER - 9}>{drawing.pool.label}</text>
+          <path className="dg-pool__band" d={`M${String(drawing.pool.x + POOL_BAND)} ${String(drawing.pool.y)}V${String(drawing.pool.y + drawing.pool.height)}`} />
+          <BandName label={drawing.pool.label} className="dg-pool__name" x={drawing.pool.x + POOL_BAND / 2} y={drawing.pool.y + drawing.pool.height / 2} room={drawing.pool.height - 16} />
         </g>
       ) : null}
       {drawing.lanes.map((lane) => (
-        <g key={lane.id} className="dg-lane" data-lane={lane.id}>
-          <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} rx={6} />
-          <text className="dg-lane__name" x={lane.x + 10} y={lane.y + 14}>{lane.label}</text>
+        <g key={lane.id} className="dg-lane" data-lane={lane.id} data-depth={lane.depth ?? 0}>
+          <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} rx={2} />
+          <path className="dg-lane__band" d={`M${String(lane.x + LANE_BAND)} ${String(lane.y)}V${String(lane.y + lane.height)}`} />
+          <BandName label={lane.label} className="dg-lane__name" x={lane.x + LANE_BAND / 2} y={lane.y + lane.height / 2} room={lane.height - 12} />
         </g>
       ))}
       {drawing.blackBoxes.map((box) => (
@@ -175,6 +190,36 @@ function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
           <text className="dg-pool__name" x={box.x + box.width / 2} y={box.y + box.height / 2 + 4} textAnchor="middle">{box.label}</text>
         </g>
       ))}
+    </g>
+  );
+}
+
+/** A group: a dashed rounded frame with the name of its category value in a tab at the top left; it holds no steps for the run. */
+function GroupFrame({ group, kindLabel }: { group: { id: string; label: string | undefined; x: number; y: number; width: number; height: number }; kindLabel: string }) {
+  const name = group.label ?? kindLabel;
+  return (
+    <g className="dg-group" data-group={group.id} role="img" aria-label={`${kindLabel}: ${name}`}>
+      <title>{`${kindLabel}: ${name}`}</title>
+      <rect x={group.x} y={group.y} width={group.width} height={group.height} rx={10} />
+      {group.label !== undefined ? <text aria-hidden="true" className="dg-group__name" x={group.x + 10} y={group.y + 15}>{group.label}</text> : null}
+    </g>
+  );
+}
+
+/** A text annotation: an open bracket on the side that faces what it notes, then its text. */
+function NoteBox({ note, side, kindLabel }: { note: { id: string; text: string; lines: readonly string[]; x: number; y: number; width: number; height: number }; side: 'left' | 'right'; kindLabel: string }) {
+  const bracket = side === 'right'
+    ? `M${String(note.x + note.width - 10)} ${String(note.y)}H${String(note.x + note.width)}V${String(note.y + note.height)}H${String(note.x + note.width - 10)}`
+    : `M${String(note.x + 10)} ${String(note.y)}H${String(note.x)}V${String(note.y + note.height)}H${String(note.x + 10)}`;
+  const text = note.text;
+  return (
+    <g className="dg-note" data-note={note.id} role="img" aria-label={`${kindLabel}: ${text}`}>
+      <title>{`${kindLabel}: ${text}`}</title>
+      <rect className="dg-note__surface" x={note.x} y={note.y} width={note.width} height={note.height} />
+      <path className="dg-note__bracket" d={bracket} />
+      <text aria-hidden="true" className="dg-note__text" x={note.x + 8 + (side === 'left' ? 2 : 0)} y={note.y + 4 + 11}>
+        {note.lines.map((line, index) => <tspan key={index} x={note.x + 8 + (side === 'left' ? 2 : 0)} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT - 2}>{line}</tspan>)}
+      </text>
     </g>
   );
 }
@@ -645,6 +690,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
               )) : null}
             </defs>
             {collaboration !== undefined ? <Collaboration drawing={collaboration} /> : null}
+            {layout.groups !== undefined ? <g className="dg-group-layer">{layout.groups.map((group) => <GroupFrame key={group.id} group={group} kindLabel={t('diagram.group')} />)}</g> : null}
             <g>{layout.nodes.filter((node) => node.container?.open === true).map((node) => (
               <Frame key={node.id} node={node} label={`${node.name ?? node.id}, ${nodeTypeLabel(node.type, t)}${node.loop !== undefined ? `, ${t(`diagram.loop.${node.loop}`)}` : ''}`}
                 interaction={{ selected: overlay?.selected === node.id, onSelect: overlay ? () => { overlay.onSelect(node.id); } : undefined }}
@@ -654,6 +700,19 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
               <g>{collaboration.flows.map((flow) => <MessageFlowLine key={flow.id} flow={flow} marker={marker} />)}</g>
             ) : null}
             <g>{layout.edges.map((edge) => <Edge key={edge.id} edge={edge} marker={marker} fromGateway={gateways.has(edge.source)} defaultLabel={t('diagram.defaultFlow')} mark={marks?.edges.get(edgeKey(edge.source, edge.target))} />)}</g>
+            {layout.annotations !== undefined ? (
+              <g className="dg-note-layer">
+                {layout.annotations.links.map((link) => (
+                  <g key={link.id} className="dg-edge dg-edge--note" data-note-link={link.id}><path d={path(link.points)} /></g>
+                ))}
+                {layout.annotations.items.map((note) => {
+                  const link = layout.annotations?.links.find((l) => l.annotation === note.id);
+                  const target = link === undefined ? undefined : layout.nodes.find((n) => n.id === link.target);
+                  const side = target === undefined ? 'left' : attachPoint(note, target.shape === 'task' ? target : { x: target.x + target.width / 2 - SYMBOL_SIZE / 2, y: target.y, width: SYMBOL_SIZE, height: SYMBOL_SIZE }).side;
+                  return <NoteBox key={note.id} note={note} side={side === 'right' ? 'right' : 'left'} kindLabel={t('diagram.note')} />;
+                })}
+              </g>
+            ) : null}
             {layout.data !== undefined ? (
               <g className="dg-data-layer">
                 {layout.data.links.map((link) => <DataLine key={link.id} link={link} marker={marker} />)}

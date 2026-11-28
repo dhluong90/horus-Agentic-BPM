@@ -1,5 +1,6 @@
 import dagre from '@dagrejs/dagre';
 import { applyStoredLayout } from './storedLayout';
+import { placeNotes, type Notes, type PlacedGroup } from './notes';
 import { isKnownNodeType, type DiagramGraph, type DiagramNode } from './bpmnGraph';
 
 /*
@@ -72,6 +73,10 @@ export interface Layout {
   edges: PlacedEdge[];
   /** Data symbols and their associations, in a band under every step; absent when the process has none. */
   data?: { items: PlacedDataItem[]; links: PlacedDataLink[] };
+  /** Text annotations and their associations (#209), read only; absent when the process has none. */
+  annotations?: Notes;
+  /** Groups the model's diagram frames, at its own bounds; absent when it has none. */
+  groups?: PlacedGroup[];
 }
 
 /** Width of a task box; its height follows the number of lines of its name. */
@@ -359,8 +364,8 @@ export function layoutGraph(graph: DiagramGraph, typeLabel: (type: string) => st
   const level = layoutLevel(graph, undefined, typeLabel, options);
   const placed: Layout = { width: level.width, height: level.height, nodes: level.nodes, edges: level.edges };
   // The model's own diagram wins where it has coordinates; automatic layout stands for the rest.
-  const base = graph.stored === undefined ? placed : applyStoredLayout(placed, graph.stored);
-  return graph.data === undefined ? base : placeData(graph.data, base);
+  const base = graph.stored === undefined ? placed : applyStoredLayout(placed, graph.stored, graph);
+  return placeNotes(graph.data === undefined ? base : placeData(graph.data, base), graph);
 }
 
 /** The data object is a page 30 by 38, the store a drum 44 by 38; each has its name below, up to DATA_CAPTION wide. */

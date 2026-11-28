@@ -77,6 +77,7 @@ export const KNOWN_NODE_TYPES = [
   'intermediateThrowEvent',
   'intermediateThrowEvent:multiple',
   'endEvent:multiple',
+  'receiveTask:instantiate',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 
@@ -135,7 +136,14 @@ export interface DiagramEdge {
 /** A pool of the collaboration (#497). `self` is the pool of the process this graph shows; the others are black boxes. */
 export interface DiagramPool { id: string; name: string | undefined; self: boolean }
 /** A lane of the process: a name and the steps it holds. Display only. */
-export interface DiagramLane { id: string; name: string | undefined; nodes: string[] }
+export interface DiagramLane { id: string; name: string | undefined; nodes: string[]; /** The lane this one is nested in, when it is a child lane. */ parent?: string }
+
+/** A text annotation: a note the modeller attached to a step, drawn as an open bracket with its text. */
+export interface DiagramAnnotation { id: string; text: string }
+/** The association that joins an annotation to the element it notes (`target`). */
+export interface DiagramAnnotationLink { id: string; annotation: string; target: string }
+/** A group: a dashed frame around steps, with the name of its category value; it has no meaning for the run. */
+export interface DiagramGroup { id: string; label: string | undefined }
 /** A message flow. Each end is a step of this process or a pool; `correlationKey` is the variable the target step reads. */
 export interface DiagramMessageFlow { id: string; label: string | undefined; source: string; target: string; correlationKey: string | undefined }
 export interface DiagramCollaboration { pools: DiagramPool[]; lanes: DiagramLane[]; messageFlows: DiagramMessageFlow[] }
@@ -163,6 +171,10 @@ export interface DiagramGraph {
   collaboration?: DiagramCollaboration;
   /** Data objects, data stores and their associations, read only (#499); absent for a process with none. */
   data?: DiagramData;
+  /** Text annotations, their associations and groups, read only; absent for a process with none. */
+  annotations?: DiagramAnnotation[];
+  annotationLinks?: DiagramAnnotationLink[];
+  groups?: DiagramGroup[];
   /** The layout the model's own diagram stored (BPMNDI, layout revision 1); absent when the version has none, and the cockpit lays the graph out itself. */
   stored?: DefinitionLayout;
 }
@@ -225,6 +237,8 @@ export function nodeType(element: Element): string {
     return kind === undefined ? local : `${local}:${kind}`;
   }
   if (local === 'subProcess' && element.getAttribute('triggeredByEvent') === 'true') return 'subProcess:event';
+  // A receive task that starts the process when its message arrives.
+  if (local === 'receiveTask' && element.getAttribute('instantiate') === 'true') return 'receiveTask:instantiate';
   return local;
 }
 
@@ -309,8 +323,11 @@ function readData(process: Element, nodeIds: ReadonlySet<string>): DiagramData |
   return items.length === 0 ? undefined : { items, links };
 }
 
+/** What a container holds besides steps and flows: notes and groups. */
+interface Sinks { annotations: DiagramAnnotation[]; groups: { id: string; categoryValueRef: string | undefined }[] }
+
 /** Reads the steps and flows of one container into the flat lists; a step inside names its container in `parentId`. */
-function readContainer(container: Element, parentId: string | undefined, nodes: DiagramNode[], edges: DiagramEdge[], defaults: Set<string>, depth: number): void {
+function readContainer(container: Element, parentId: string | undefined, nodes: DiagramNode[], edges: DiagramEdge[], defaults: Set<string>, depth: number, sinks: Sinks): void {
   for (const child of elementChildren(container)) {
     if (child.namespaceURI !== BPMN) continue;
     const id = nonEmpty(child.getAttribute('id'));
@@ -319,6 +336,15 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       const source = nonEmpty(child.getAttribute('sourceRef'));
       const target = nonEmpty(child.getAttribute('targetRef'));
       if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false, ...(elementChildren(child).some((c) => c.namespaceURI === BPMN && c.localName === 'conditionExpression') ? { conditional: true } : {}) });
+      continue;
+    }
+    if (child.localName === 'textAnnotation') {
+      const text = elementChildren(child).find((c) => c.namespaceURI === BPMN && c.localName === 'text')?.textContent.trim();
+      sinks.annotations.push({ id, text: text === undefined || text === '' ? '' : text });
+      continue;
+    }
+    if (child.localName === 'group') {
+      sinks.groups.push({ id, categoryValueRef: nonEmpty(child.getAttribute('categoryValueRef')) });
       continue;
     }
     if (child.localName === 'association') {
@@ -350,16 +376,17 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       ...(child.getAttribute('isForCompensation') === 'true' ? { compensation: true } : {}),
       ...(child.localName === 'adHocSubProcess' ? { ordering: child.getAttribute('ordering') === 'Sequential' ? ('sequential' as const) : ('parallel' as const) } : {}),
     });
-    if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);
+    if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1, sinks);
   }
 }
 
-function readLanes(set: Element, out: DiagramLane[]): void {
+function readLanes(set: Element, out: DiagramLane[], parent?: string): void {
   for (const lane of elementChildren(set)) {
     if (lane.namespaceURI !== BPMN || lane.localName !== 'lane') continue;
     const refs = elementChildren(lane).filter((c) => c.namespaceURI === BPMN && c.localName === 'flowNodeRef').map((c) => c.textContent.trim()).filter((r) => r !== '');
-    out.push({ id: nonEmpty(lane.getAttribute('id')) ?? '', name: nonEmpty(lane.getAttribute('name')), nodes: refs });
-    for (const child of elementChildren(lane)) if (child.namespaceURI === BPMN && child.localName === 'childLaneSet') readLanes(child, out);
+    const laneId = nonEmpty(lane.getAttribute('id')) ?? '';
+    out.push({ id: laneId, name: nonEmpty(lane.getAttribute('name')), nodes: refs, ...(parent !== undefined ? { parent } : {}) });
+    for (const child of elementChildren(lane)) if (child.namespaceURI === BPMN && child.localName === 'childLaneSet') readLanes(child, out, laneId);
   }
 }
 
@@ -408,7 +435,8 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   const nodes: DiagramNode[] = [];
   const edges: DiagramEdge[] = [];
   const defaults = new Set<string>();
-  readContainer(process, undefined, nodes, edges, defaults, 0);
+  const sinks: Sinks = { annotations: [], groups: [] };
+  readContainer(process, undefined, nodes, edges, defaults, 0, sinks);
   const ids = new Set(nodes.map((node) => node.id));
   // A link throw is joined to the catch of the same name in the same container by a dashed line (#493).
   for (const thrown of nodes.filter((node) => node.type === 'intermediateThrowEvent:link' && node.linkName !== undefined)) {
@@ -417,11 +445,21 @@ export function readBpmnGraph(xml: string): DiagramGraph {
   }
   const collaboration = readCollaboration(document, process);
   const data = readData(process, ids);
+  // An association with a note at one end is the note's line, not a compensation association.
+  const noteIds = new Set(sinks.annotations.map((a) => a.id));
+  const annotationLinks: DiagramAnnotationLink[] = edges
+    .filter((edge) => edge.isAssociation === true && (noteIds.has(edge.source) || noteIds.has(edge.target)))
+    .map((edge) => (noteIds.has(edge.source) ? { id: edge.id, annotation: edge.source, target: edge.target } : { id: edge.id, annotation: edge.target, target: edge.source }));
+  const values = new Map(Array.from(document.getElementsByTagNameNS(BPMN, 'categoryValue')).map((v) => [v.getAttribute('id') ?? '', nonEmpty(v.getAttribute('value'))]));
+  const groups: DiagramGroup[] = sinks.groups.map((g) => ({ id: g.id, label: g.categoryValueRef === undefined ? undefined : values.get(g.categoryValueRef) }));
   return {
     name: nonEmpty(process.getAttribute('name')),
     nodes,
     ...(collaboration !== undefined ? { collaboration } : {}),
     ...(data !== undefined ? { data } : {}),
+    ...(sinks.annotations.length > 0 ? { annotations: sinks.annotations } : {}),
+    ...(annotationLinks.length > 0 ? { annotationLinks } : {}),
+    ...(groups.length > 0 ? { groups } : {}),
     // A flow to an element that is not drawn (an artefact, a lane) is left out rather than drawn to nowhere.
     edges: edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target)).map((edge) => ({ ...edge, isDefault: defaults.has(edge.id) })),
   };
