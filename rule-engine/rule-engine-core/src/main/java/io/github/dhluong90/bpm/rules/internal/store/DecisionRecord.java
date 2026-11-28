@@ -31,12 +31,15 @@ import java.time.Instant;
  *     stored outcome that a replay uses instead of the clock
  * @param stepBudget the step budget the decision ran with, or null for a row written before it was recorded (RLE-233)
  * @param timeoutMillis the time backstop in milliseconds the decision ran with, or null as above
+ * @param errorMode the error mode the decision was evaluated in ({@code strict} or {@code spec}), as the engine
+ *     used it (RLE-236); null for a row written before the mode was stored and for a decision refused before any
+ *     evaluation
  */
 public record DecisionRecord(
         String tenantId, String id, Instant createdAt, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String maskedInputsJson, String outputsJson, String matchedRuleIdsJson, String callerId,
         String correlationId, Instant evalClock, long durationMicros, boolean pinned, String onBehalfOf,
-        String functionVersions, String budgetLimit, Integer stepBudget, Integer timeoutMillis) {
+        String functionVersions, String budgetLimit, Integer stepBudget, Integer timeoutMillis, String errorMode) {
 
     /**
      * Creates the row of a decision that did not record the limits it ran with.
@@ -67,7 +70,7 @@ public record DecisionRecord(
             String onBehalfOf, String functionVersions, String budgetLimit) {
         this(tenantId, id, createdAt, ruleSet, version, hitPolicy, outcome, errorCode, maskedInputsJson, outputsJson,
                 matchedRuleIdsJson, callerId, correlationId, evalClock, durationMicros, pinned, onBehalfOf,
-                functionVersions, budgetLimit, null, null);
+                functionVersions, budgetLimit, null, null, null);
     }
 
     /**

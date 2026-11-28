@@ -32,7 +32,30 @@ final class RestSupport {
     /** Base path of every Rule Engine endpoint. */
     static final String BASE = "/api/bpm/rules/v1";
 
+    /**
+     * The error mode every rule set evaluates in until stage S1 adds {@code spec} (PD-066, PD-125, PD-143, RLE-236).
+     * A model that declares nothing is strict; the canonical document leaves {@code strict} out.
+     */
+    static final String ERROR_MODE_STRICT = "strict";
+
     private RestSupport() {
+    }
+
+    /**
+     * Adds {@code errorMode} to a version or decision row (RLE-236). The mode is read from the canonical document
+     * when it names one, and is {@code strict} otherwise; a row that has no document at hand is strict, the only mode
+     * this release accepts. A decision row does not use this: it carries the mode it was evaluated in.
+     */
+    static ObjectNode withErrorMode(ObjectNode node, String canonicalDocument) {
+        String mode = ERROR_MODE_STRICT;
+        if (canonicalDocument != null) {
+            JsonNode declared = EngineJson.JSON.readTree(canonicalDocument).path("errorMode");
+            if (declared.isString() && !declared.stringValue().isBlank()) {
+                mode = declared.stringValue();
+            }
+        }
+        node.put("errorMode", mode);
+        return node;
     }
 
     static void require(CallerResolver callers, String permission) {
@@ -60,7 +83,7 @@ final class RestSupport {
         if (status == HttpStatus.CREATED) {
             builder.header(HttpHeaders.LOCATION, BASE + "/rule-sets/" + version.ruleSet() + "/versions/" + version.version());
         }
-        ObjectNode body = EngineValues.version(version);
+        ObjectNode body = withErrorMode(EngineValues.version(version), version.canonicalDocument());
         body.set("allowedActions", actions(version.status(), version.createdBy(), version.requestedBy(),
                 version.retirementRequest() == null ? null : version.retirementRequest().requestedBy(), callers));
         return builder.contentType(MediaType.APPLICATION_JSON)
@@ -107,7 +130,7 @@ final class RestSupport {
         node.set("approvedAt", EngineValues.value(v.approvedAt()));
         node.set("retireRequestedBy", EngineValues.value(v.retireRequestedBy()));
         node.set("allowedActions", actions(v.status(), v.createdBy(), v.requestedBy(), v.retireRequestedBy(), callers));
-        return node;
+        return withErrorMode(node, null);
     }
 
     static ObjectNode historyEntry(VersionHistoryEntry entry) {

@@ -965,7 +965,8 @@ public final class DefaultRuleEngine implements RuleEngine {
                 HostFunctions.format(context.functions().currentVersions(rules.hostFunctions().keySet())),
                 outcome instanceof DecisionResult.Failed failed ? failed.limit() : null,
                 context.settings().evaluationLimits().stepBudget(),
-                context.settings().evaluationLimits().timeoutMillis()));
+                context.settings().evaluationLimits().timeoutMillis(),
+                rules.errorMode()));
         return result;
     }
 

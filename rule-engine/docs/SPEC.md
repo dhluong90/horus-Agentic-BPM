@@ -1641,6 +1641,16 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Example:** `v1, v2 stamped 2026-11-28T09:00Z, two LEGACY_SEALED rows; insert of v9 with the marker => LEGACY_SEAL_SCOPE; v1 served`
 - **Test IDs:** `RLE_231_a_version_created_after_the_migration_cannot_carry_the_marker_or_its_scope`, `RLE_231_versions_approved_before_the_migration_still_verify_and_each_has_one_audit_entry`
 
+### RLE-236 A version row and a decision row show the error mode they evaluate in
+- **Traces to:** `TR-STD-03`, `TR-STD-25`, RLE-081, PD-125, PD-143, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** `card-fee` v1 imported from a DMN table, which keeps the strict error mode (`RLE-081`), published and evaluated once.
+- **When:** A reader gets the version, lists the versions of `card-fee`, gets the logged decision and lists the decisions.
+- **Then:** Each of the four answers carries `errorMode`, a string. A version row shows the mode of its canonical document, which is `strict` when the document names none (`spec` is refused until stage S1). A decision row shows the mode the engine used when it made the decision: migration `V6` adds `rle_decision.error_mode`, and the engine writes it with the row. A row logged before the column existed, or refused before any evaluation, has no stored mode and shows `unknown`; it is never shown as `strict`. The member is added to `RuleSetVersion`, `VersionSummary`, `LoggedDecision` and `DecisionLogEntry` of the OpenAPI document and is not required, so an idempotent replay of an older answer and an existing client are unaffected. A client reads it as a label and ignores a value it does not know.
+- **Example:** `GET /rule-sets/card-fee/versions/1 -> {"version": 1, "errorMode": "strict", ...}`; `GET /decisions/<id of a January 2027 row, logged before V6> -> {..., "errorMode": "unknown"}`
+- **Test IDs:** `RLE_236_a_version_and_a_version_row_show_strict_for_an_imported_table`, `RLE_236_a_decision_row_shows_the_error_mode_it_was_made_in`, `RLE_236_a_version_whose_document_names_a_mode_shows_that_mode`, `RLE_236_a_decision_row_without_a_stored_mode_shows_unknown_never_strict`, `RLE_236_a_decision_row_stores_the_mode_the_engine_evaluated_in`, `RLE_236_a_row_logged_before_the_mode_was_stored_shows_unknown_and_not_strict`, `RLE_236_the_mode_is_stored_with_the_decision_and_an_older_row_shows_none`
+
 ### RLE-228 Each evaluation call is one span with the rule set, its version, the decision id and the outcome
 - **Traces to:** `TR-OBS-03`, `TR-SEC-05`
 - **Milestone:** M3

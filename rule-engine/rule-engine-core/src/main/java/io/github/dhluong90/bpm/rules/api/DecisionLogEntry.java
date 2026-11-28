@@ -35,12 +35,13 @@ import java.util.Objects;
  * @param onBehalfOf the human an embedded engine evaluated for, as in {@link LoggedDecision}, or null
  * @param limit the evaluation limit the decision reached, {@code STEPS} or {@code TIME}, or null; see
  *     {@link LoggedDecision}
+ * @param errorMode the error mode the decision was evaluated in, as in {@link LoggedDecision}, or null
  */
 public record DecisionLogEntry(
         String decisionId, String ruleSet, int version, String hitPolicy, Outcome outcome, List<String> matchedRuleIds,
         Map<String, Object> inputs, Map<String, Object> outputs, String callerId, String correlationId,
         Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros, boolean pinned,
-        String onBehalfOf, String limit) {
+        String onBehalfOf, String limit, String errorMode) {
 
     /**
      * A decision that reached no evaluation limit.
@@ -67,7 +68,7 @@ public record DecisionLogEntry(
             String correlationId, Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros,
             boolean pinned, String onBehalfOf) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, matchedRuleIds, inputs, outputs, callerId,
-                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, onBehalfOf, null);
+                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, onBehalfOf, null, null);
     }
 
     /**
@@ -94,7 +95,7 @@ public record DecisionLogEntry(
             String correlationId, Instant evalClock, Instant evaluatedAt, Instant loggedAt, long durationMicros,
             boolean pinned) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, matchedRuleIds, inputs, outputs, callerId,
-                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, null, null);
+                correlationId, evalClock, evaluatedAt, loggedAt, durationMicros, pinned, null, null, null);
     }
 
     public DecisionLogEntry {

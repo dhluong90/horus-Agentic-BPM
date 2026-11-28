@@ -30,11 +30,13 @@ import java.util.Objects;
  *     process decision step; null for a decision made for its caller alone or after a timer (ADR-0027)
  * @param limit the evaluation limit the decision reached, {@code STEPS} or {@code TIME}, when it failed with
  *     {@code EVALUATION_BUDGET_EXCEEDED}; null otherwise. New values may be added (RLE-233)
+ * @param errorMode the error mode the decision was evaluated in, as stored with it (RLE-236); null for a decision
+ *     logged before the mode was stored or refused before any evaluation, which the API shows as {@code unknown}
  */
 public record LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
         String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned,
-        String onBehalfOf, String limit) {
+        String onBehalfOf, String limit, String errorMode) {
 
     /**
      * A decision that reached no evaluation limit.
@@ -61,7 +63,7 @@ public record LoggedDecision(String decisionId, String ruleSet, int version, Str
             String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned,
             String onBehalfOf) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
-                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, onBehalfOf, null);
+                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, onBehalfOf, null, null);
     }
 
     /**
@@ -87,7 +89,7 @@ public record LoggedDecision(String decisionId, String ruleSet, int version, Str
             String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,
             String correlationId, Instant evalClock, Instant evaluatedAt, long durationMicros, boolean pinned) {
         this(decisionId, ruleSet, version, hitPolicy, outcome, errorCode, inputsJson, outputsJson, matchedRuleIds,
-                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, null, null);
+                callerId, correlationId, evalClock, evaluatedAt, durationMicros, pinned, null, null, null);
     }
 
     public LoggedDecision {

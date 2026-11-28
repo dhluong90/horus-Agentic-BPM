@@ -283,7 +283,7 @@ public final class DefaultDecisionLogService implements DecisionLogService {
         return new LoggedDecision(row.id(), row.ruleSet(), row.version(), row.hitPolicy(), row.outcome(),
                 row.errorCode(), row.maskedInputsJson(), row.outputsJson(), matched, row.callerId(),
                 row.correlationId(), row.evalClock(), row.createdAt(), row.durationMicros(), row.pinned(),
-                row.onBehalfOf(), row.budgetLimit());
+                row.onBehalfOf(), row.budgetLimit(), row.errorMode());
     }
 
     @Override

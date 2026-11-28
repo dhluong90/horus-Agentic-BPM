@@ -30,6 +30,9 @@ import tools.jackson.databind.node.ObjectNode;
  */
 public final class EngineValues {
 
+    /** What a decision row shows when no error mode was stored with it: a row older than the column (RLE-236). */
+    public static final String ERROR_MODE_UNKNOWN = "unknown";
+
     private static final BigDecimal MAX_SAFE = BigDecimal.valueOf(Money.MAX_JSON_SAFE);
 
     private EngineValues() {
@@ -431,6 +434,7 @@ public final class EngineValues {
         if (entry.limit() != null) {
             node.put("limit", entry.limit());
         }
+        node.put("errorMode", entry.errorMode() == null ? ERROR_MODE_UNKNOWN : entry.errorMode());
         return node;
     }
 
@@ -508,6 +512,7 @@ public final class EngineValues {
         if (d.limit() != null) {
             json.put("limit", d.limit());
         }
+        json.put("errorMode", d.errorMode() == null ? ERROR_MODE_UNKNOWN : d.errorMode());
         return json;
     }
 

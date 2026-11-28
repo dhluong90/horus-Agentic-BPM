@@ -53,6 +53,12 @@ public final class CompiledRuleSet {
      */
     public static final int MAX_VIOLATIONS = 100;
 
+    /**
+     * The error mode every rule set evaluates in until stage S1 adds {@code spec} (PD-066, PD-143, RLE-236): a model
+     * that declares nothing is strict. The decision log records {@link #errorMode()} next to each decision.
+     */
+    public static final String ERROR_MODE_STRICT = "strict";
+
     /** Code of a {@code then} cell naming an output the table does not declare. */
     public static final String UNKNOWN_OUTPUT = "UNKNOWN_OUTPUT";
 
@@ -278,6 +284,15 @@ public final class CompiledRuleSet {
                         + " EVALUATION_BUDGET_EXCEEDED. Split the table or simplify its cells",
                 worstCaseSteps, policy, evaluationLimits.stepBudget()), EvaluationLimits.EVALUATION_BUDGET_EXCEEDED)),
                 false);
+    }
+
+    /**
+     * Returns the error mode this rule set evaluates in; the decision log records it with each decision (RLE-236).
+     *
+     * @return {@code strict} until stage S1 adds {@code spec}
+     */
+    public String errorMode() {
+        return ERROR_MODE_STRICT;
     }
 
     /**

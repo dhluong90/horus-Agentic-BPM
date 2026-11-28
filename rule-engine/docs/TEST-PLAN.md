@@ -140,6 +140,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-235 | `RLE_235_*` in `DecisionLogDeadLetterPostgresIT`, `DeadLetterEndpointsWebMvcTest`, `DecisionLogDeadLetterSettingsTest`, `EventEnvelopeTest` (the event schema) | Testcontainers, WebMvc, wiring | M3 | `TR-AUD-01`, `TR-SEC-04`, `TR-TEN-01`, `TR-IDEM-01` | Implemented (#45) |
 | RLE-227 | `RLE_227_collect_sum_adds_the_matched_rules` and five more | Unit | M3 | `TR-STD-25` | Implemented: `DmnItemDefinitionTest` (SUM, COUNT, MIN, MAX, export round trip, refusals with `DMN_AGGREGATION_UNSUPPORTED`) |
 | RLE-231 | `RLE_231_*` in `ApprovalSealPostgresIT` | The pre-seal marker is accepted only on a version stamped by migration V3; a later version cannot carry it (`LEGACY_SEAL_SCOPE`); one `LEGACY_SEALED` audit row per backfilled version; pre-V2 versions still verify | M3 | `TR-SEC-04` | Done (follow-up to #658, #644) |
+| RLE-236 | `RLE_236_*` in `ErrorModeWebMvcTest`, `DecisionErrorModeTest`, `DecisionLogSearchPostgresIT` | Version rows carry the mode of their document; decision rows carry the mode stored with the decision (migration V6), and a row without one shows `unknown`, never `strict` | M3 | `TR-STD-03`, `TR-STD-25` | Done (#121) |
 | RLE-228 | `RLE_228_*` in `RuleEngineTracingTest`; `TracingSpansIT` | Unit, integration | M3 | `TR-OBS-03`, `TR-SEC-05` | Done |
 
 ## Compatibility matrix

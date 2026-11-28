@@ -2987,6 +2987,14 @@ components:
           description: |
             True when the pending request accepted that no version may remain in effect (PD-101), so its
             confirmation needs no `confirmNoVersionInEffect` of its own; false when none is pending
+        errorMode:
+          type: string
+          enum: [strict, spec]
+          description: |
+            How the version (or the version that made the decision) treats an error in an expression: `strict`
+            fails the evaluation with `EVALUATION_ERROR`. Every version evaluates in `strict` in this release, imported
+            DMN tables included (PD-125, PD-143); `spec` is added in stage S1. A client reads it as a plain label and
+            ignores values it does not know (`RLE-236`)
         createdBy:
           type: [string, 'null']
           description: Who imported the version; neither the author nor the requester may approve it
@@ -3133,6 +3141,14 @@ components:
         hitPolicy:
           type: string
           description: The hit policy of the evaluated version, for example `FIRST`
+        errorMode:
+          type: string
+          enum: [strict, spec, unknown]
+          description: |
+            The error mode the engine used when it made the decision, stored with the decision row: `strict` fails the
+            evaluation with `EVALUATION_ERROR`; `spec` is added in stage S1. `unknown` is a decision logged before the
+            mode was stored, or refused before any evaluation; it is never a guess. A client reads the value as a
+            plain label and ignores values it does not know (`RLE-236`)
         outcome:
           type: string
           enum: [MATCHED, NO_MATCH, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]
@@ -3215,6 +3231,14 @@ components:
         effectiveFrom: { type: [string, 'null'], format: date-time }
         lockVersion: { type: integer }
         canonicalHash: { type: string, pattern: '^[0-9a-f]{64}$' }
+        errorMode:
+          type: string
+          enum: [strict, spec]
+          description: |
+            How the version (or the version that made the decision) treats an error in an expression: `strict`
+            fails the evaluation with `EVALUATION_ERROR`. Every version evaluates in `strict` in this release, imported
+            DMN tables included (PD-125, PD-143); `spec` is added in stage S1. A client reads it as a plain label and
+            ignores values it does not know (`RLE-236`)
         createdBy: { type: [string, 'null'] }
         createdAt: { type: string, format: date-time }
         requestedBy: { type: [string, 'null'] }
@@ -4445,6 +4469,14 @@ components:
           type: string
           enum: [FIRST, UNIQUE, COLLECT]
           description: New values may be added (ANY, PRIORITY, RULE_ORDER, OUTPUT_ORDER from stage S1)
+        errorMode:
+          type: string
+          enum: [strict, spec, unknown]
+          description: |
+            The error mode the engine used when it made the decision, stored with the decision row: `strict` fails the
+            evaluation with `EVALUATION_ERROR`; `spec` is added in stage S1. `unknown` is a decision logged before the
+            mode was stored, or refused before any evaluation; it is never a guess. A client reads the value as a
+            plain label and ignores values it does not know (`RLE-236`)
         outcome:
           type: string
           enum: [OK, UNIQUE_HIT_VIOLATION, EVALUATION_ERROR]

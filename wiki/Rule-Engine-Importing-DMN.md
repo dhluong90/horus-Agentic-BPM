@@ -26,7 +26,7 @@ What the import does:
 - A rule id that does not start with a letter, such as `_5f3a1` written by some modellers, becomes `r_5f3a1`; the original is kept in the rule description as `(DMN id _5f3a1)` and export writes it back.
 - Extension elements and attributes of other namespaces change neither the table nor its hash.
 - Export with `?format=dmn` and import again gives the same canonical hash. The same behaviour written in YAML and in DMN has one hash.
-- A table imported from DMN evaluates in `strict` error mode.
+- A table imported from DMN evaluates in `strict` error mode. Every version and decision row of the REST API carries `errorMode` (`strict` in this release, `spec` from stage S1), so a screen can show it next to the version; a client ignores values it does not know.
 
 ## What is supported
 
