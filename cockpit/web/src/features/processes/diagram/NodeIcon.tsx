@@ -74,6 +74,9 @@ export function NodeIcon({ type, x, y }: { type: KnownNodeType | 'generic'; x: n
       case 'receiveTask':
         // A hollow envelope: the message is awaited.
         return <><rect x="1.5" y="3.5" width="13" height="9" rx="1.5" {...common} /><path d="M2 4.5L8 9l6-4.5" {...common} /></>;
+      case 'receiveTask:instantiate':
+        // The envelope inside a start circle: the message that arrives starts the process.
+        return <><circle cx="8" cy="8" r="7" {...common} /><rect x="4.5" y="5.5" width="7" height="5" rx="0.8" {...common} strokeWidth={1.2} /><path d="M4.8 6.2L8 8.6l3.2-2.4" {...common} strokeWidth={1.2} /></>;
       case 'endEvent:message':
       case 'intermediateThrowEvent:message':
       case 'sendTask':
