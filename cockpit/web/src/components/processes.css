@@ -357,6 +357,7 @@
 .taskform__values { margin: 0; }
 .taskform__value { min-width: 0; overflow-wrap: anywhere; }
 .taskform__value dd { margin: 2px 0 0; font-size: var(--text-md, 15px); }
+.taskform__effect { display: block; margin-top: 2px; font-size: var(--text-sm, 13px); }
 .taskform__note { margin: 0 0 16px; }
 .taskform__values + .taskform__note { margin: 16px 0 0; }
 .taskform__signed { margin: 0 0 16px; color: var(--muted, inherit); }

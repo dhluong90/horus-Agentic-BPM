@@ -216,6 +216,8 @@ export interface RecordedRow {
   text: string | undefined;
   masked: boolean;
   wide: boolean;
+  /** What the chosen option leads to, when the form says so. */
+  consequence?: string;
 }
 
 const isoDay = /^\d{4}-\d{2}-\d{2}$/;
@@ -245,7 +247,7 @@ export function recordedRows(fields: readonly FormField[], data: Json, locale: L
         return row(`${field.kind.grouped ? formatDecimalText(raw, locale) ?? raw : locale === 'vi' ? raw.replace('.', ',') : raw}${unit}`);
       }
       case 'choice':
-        return row(typeof value === 'string' ? optionText(field, value) : undefined);
+        return typeof value === 'string' ? { ...row(optionText(field, value)), ...(field.effects[value] !== undefined ? { consequence: field.effects[value] } : {}) } : row(undefined);
       case 'yesno':
         return row(typeof value === 'boolean' ? (value ? words.yes : words.no) : undefined);
       case 'datetime':
@@ -268,6 +270,20 @@ const isMarker = (value: unknown): boolean => typeof value === 'object' && value
 export function submissionRows(form: { schema: Json; hints: Json }, submission: Json, locale: Locale, words: { yes: string; no: string; when: (iso: string) => string | undefined }): RecordedRow[] {
   const fields = fieldsOf({ ...form, data: submission }, locale).map((field) => ({ ...field, masked: isMarker(submission[field.name]) }));
   return recordedRows(fields, submission, locale, words);
+}
+
+/**
+ * A path the engine did not record, in words: each step is the form's own label when it names one, else the step
+ * written as words; the steps join with " › " ("Collateral › Owner").
+ */
+export function pathLabel(form: { schema: Json; hints: Json }, path: string, locale: Locale): string {
+  const labels = asRecord(form.hints['labels']) ?? {};
+  const known = asRecord(form.schema['properties']) ?? {};
+  return path.split('.').filter((step) => step !== '').map((step, index) => {
+    const named = index === 0 && known[step] !== undefined ? asRecord(labels[step]) : undefined;
+    const text = named?.[locale] ?? named?.['en'];
+    return typeof text === 'string' ? text : fieldLabel(step);
+  }).join(' › ');
 }
 
 export type Problem = 'required' | 'number' | 'integer' | 'money' | 'moneyScale' | 'moneyRange' | 'moneyCurrency' | 'date' | 'datetime' | 'choice' | 'tooLong';

@@ -8,10 +8,11 @@ import { useHostLink } from '../../federation/HostScope';
 import { StatusMark, taskTitle } from '../../tasks/parts';
 import { formatDateTime } from '../../rules/model/dates';
 import { groupWhileTyping } from '../../rules/model/money';
+import { usePersonName } from '../../../app/people';
 import { useProcessesSession } from '../api/processesContext';
 import { useClaimTask, useCompleteForm, useInstanceActivities, useTaskForm } from '../api/useProcesses';
 import { ReviewMeta, useReviewCrumbs } from '../review/ReviewParts';
-import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, recordedRows, submissionRows, type Drafts, type FormField, type Problem } from './model';
+import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, pathLabel, recordedRows, submissionRows, type Drafts, type FormField, type Problem } from './model';
 
 /*
  * A task completed through the form its process declares (CKP-021). The engine owns the form and checks the result;
@@ -64,11 +65,12 @@ export function TaskFormScreen({ task }: { task: Task }) {
 /** Why this user cannot work the task now, in words; undefined when they can. */
 function useWhyNot(task: Task): string | undefined {
   const { t, locale } = useI18n();
+  const person = usePersonName();
   const { userId } = useProcessesSession();
   const allowed = new Set(task.allowedActions);
-  if (task.status === 'COMPLETED') return t('form.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' });
+  if (task.status === 'COMPLETED') return t('form.dock.completed', { who: person(task.completedBy ?? ''), when: formatDateTime(task.completedAt, locale) ?? '' });
   if (task.status === 'CANCELLED') return t('form.dock.cancelled');
-  if (task.status === 'CLAIMED' && task.claimedBy !== userId) return t('form.dock.claimedByOther', { who: task.claimedBy ?? '' });
+  if (task.status === 'CLAIMED' && task.claimedBy !== userId) return t('form.dock.claimedByOther', { who: person(task.claimedBy ?? '') });
   if (task.status === 'OPEN' && !allowed.has('claim')) return task.fourEyes ? t('form.dock.fourEyes', { who: task.assignee.replace(/^(role|group|user):/, '').replace(/[_-]/g, ' ').toLowerCase() }) : t('form.dock.notAssigned');
   if (task.status === 'CLAIMED' && !allowed.has('complete')) return t('form.dock.cannotComplete');
   return undefined;
@@ -119,6 +121,7 @@ function submissionOf(entries: readonly ActivityEntry[], task: Task): ActivityEn
 function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; title: string }) {
   const { t, locale } = useI18n();
   const hostLink = useHostLink();
+  const person = usePersonName();
   const history = useInstanceActivities(task.instanceId, true);
   const content = form.form;
   const stored = history.data === undefined ? undefined : submissionOf(history.data.entries, task);
@@ -134,7 +137,7 @@ function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; t
   return (
     <article className="card taskform__card taskform__recorded" aria-labelledby="taskform-recorded">
       <h2 id="taskform-recorded" className="card__title">{t(recorded ? 'form.decision' : 'form.recorded')}</h2>
-      <p className="taskform__signed">{t('form.completedAt', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
+      <p className="taskform__signed" title={task.completedBy ?? undefined}>{t('form.completedAt', { who: person(task.completedBy ?? ''), when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
       {recorded ? null : <p className="muted taskform__note">{t('form.noSubmission')}</p>}
       {rows.length === 0 ? <p className="muted">{t('form.noFields')}</p> : (
         <dl className="taskform__grid taskform__values" aria-label={title}>
@@ -143,13 +146,13 @@ function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; t
               <dt className="field__label">{row.label}</dt>
               <dd>
                 {row.masked ? <span className="masked__tag"><span aria-hidden="true">◍</span> {t(recorded ? 'form.hidden' : 'form.masked')}</span>
-                  : row.text !== undefined ? row.text : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t(recorded ? 'form.notSubmitted' : 'form.notRecorded')}</span></span>}
+                  : row.text !== undefined ? <>{row.text}{row.consequence !== undefined ? <span className="taskform__effect muted">{row.consequence}</span> : null}</> : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t(recorded ? 'form.notSubmitted' : 'form.notRecorded')}</span></span>}
               </dd>
             </div>
           ))}
         </dl>
       )}
-      {left.length > 0 ? <p className="muted taskform__note">{t('form.unrecorded', { fields: left.join(', ') })}</p> : null}
+      {left.length > 0 ? <p className="muted taskform__note">{t('form.unrecorded', { fields: left.map((path) => (content === undefined ? path : pathLabel(content, path, locale))).join(', ') })}</p> : null}
       <a className="link-action" href={hostLink({ name: 'tasks', view: 'mine' })}>{t('form.dock.back')} <span aria-hidden="true">→</span></a>
     </article>
   );

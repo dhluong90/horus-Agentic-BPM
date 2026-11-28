@@ -6,7 +6,7 @@ import { currentProcessEngine } from '../../../mocks/handlers';
 import { mockHost, setScenario } from '../../../mocks/node';
 import { QUEUE_TASKS } from '../../../mocks/taskQueueDemo';
 import { FORM_TASK_ID } from '../../../mocks/processDemo';
-import { build, fieldsOf, initialDrafts, recordedRows, submissionRows } from './model';
+import { build, fieldsOf, initialDrafts, pathLabel, recordedRows, submissionRows } from './model';
 import { en } from '../../../i18n/en';
 import { vi } from '../../../i18n/vi';
 import { format } from '../../../i18n/I18nProvider';
@@ -47,7 +47,7 @@ describe('CKP-021 a task is completed through its declared form', () => {
     await userEvent.type(reason, 'Income is not verified');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
-    expect(await screen.findByText(/^Completed by an at /)).toBeInTheDocument();
+    expect(await screen.findByText(/^Completed by Lê Thị An at /)).toBeInTheDocument();
     expect(completions()).toHaveLength(1);
     // A completed task shows the decision as the engine recorded it, read-only, with no form or action.
     const recorded = await screen.findByRole('article', { name: 'Recorded decision' });
@@ -168,6 +168,19 @@ describe('the decision as the engine recorded it (#663)', () => {
 
   it('TR_SEC_05_a_stored_masked_marker_reads_as_masked_and_never_as_text', () => {
     expect(submissionRows(form, stored, 'en', words).find((row) => row.name === 'idNumber')).toMatchObject({ masked: true, text: undefined });
+  });
+
+  it('TR_UI_663_a_path_not_recorded_reads_as_the_forms_label_else_as_words', () => {
+    const labelled = { ...form, hints: { ...form.hints, labels: { collateral: { en: 'Collateral', vi: 'Tài sản bảo đảm' } } }, schema: { type: 'object', properties: { ...form.schema.properties, collateral: { type: 'object' } } } };
+    expect(pathLabel(labelled, 'collateral.ownerName', 'en')).toBe('Collateral › Owner name');
+    expect(pathLabel(labelled, 'collateral.ownerName', 'vi')).toBe('Tài sản bảo đảm › Owner name');
+    expect(pathLabel(labelled, 'address.floor', 'en')).toBe('Address › Floor');
+    expect(pathLabel(labelled, 'note', 'en')).toBe('Note');
+  });
+
+  it('TR_UI_663_a_chosen_option_carries_what_it_leads_to', () => {
+    const effects = { ...form, hints: { options: { decision: { REJECTED: { label: { en: 'Rejected' }, consequence: { en: 'The customer is told.' } } } } } };
+    expect(submissionRows(effects, { decision: 'REJECTED' }, 'en', words)[0]).toMatchObject({ text: 'Rejected', consequence: 'The customer is told.' });
   });
 
   it('TR_UI_663_a_choice_without_a_label_reads_as_words_never_as_its_code', () => {
