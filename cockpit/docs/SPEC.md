@@ -343,15 +343,15 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `palette -> 1 handler, 1 agent; save without guardrail -> error on node`.
 - **Test ID:** `CKP_025_modeller_offers_catalogue_steps_and_saves_draft`
 
-### CKP-026 The heatmap shows p50 and p95 per node for a chosen window
-- **Traces to:** `TR-PERF-10`
-- **Milestone:** M3 (cut candidate)
+### CKP-026 The Timing view shows p50 and p95 per step for a chosen period
+- **Traces to:** `TR-PERF-10`, PRE-029, #123
+- **Milestone:** M3
 - **Kind:** other
-- **Given:** Rollup for `kyc-onboarding` v2 over 7 days: `approve` p50 2 h, p95 9 h; `verify-docs` p50 40 s, p95 3 min.
-- **When:** The operator selects "Last 7 days"; then tries "Last 60 days".
-- **Then:** Each node shows its p50 and p95 in text, shaded by p95; the legend states the rollup lag; 60 days is not offered beyond the 31-day limit and the API's `400 QUERY_INVALID` is never reached from the UI.
-- **Example:** `approve p50 2 h, p95 9 h`.
-- **Test ID:** `CKP_026_heatmap_window_stats_per_node`
+- **Given:** Rollup for `kyc-onboarding` v2: `approve` p50 1 h 20 min, p95 2 h 45 min; `verify-docs` p50 14 s, p95 47 s; the rollup is 8 minutes behind.
+- **When:** The operator opens Timing on the version, then selects "Last 7 days".
+- **Then:** The view opens on the process diagram: each step's box is tinted by its 95th percentile against the slowest step, in four tints named by a key of swatches and words, with the figure written on the box. A second choice shows the same figures as a table: steps appear in flow order, each with its case count, median and 95th percentile as plain tabular text and a thin bar of the 95th percentile against the slowest step, warm for steps near the slowest; failed and incidents show only when above zero. A line states how far the figures lag. The periods offered are 24 hours, 7 days and 30 days, inside the engine's 31-day limit, so `400 QUERY_INVALID` is never reached from the UI. A period without activity says so. No figure is computed in the browser; the view reads `GET /definitions/{key}/versions/{version}/node-stats?mode=window`.
+- **Example:** `approve: 187 cases, 1 h 20 min, 2 h 45 min`.
+- **Test IDs:** `CKP_026_the_diagram_tints_each_step_by_slow_time_and_names_the_key`, `CKP_026_each_step_shows_its_typical_and_slow_time_in_flow_order`, `CKP_026_a_longer_period_asks_the_engine_again`, `CKP_026_a_period_without_activity_says_so`
 
 ### CKP-027 A migration plan is shown as two diagrams with mapped steps
 - **Traces to:** `TR-MIG-03`

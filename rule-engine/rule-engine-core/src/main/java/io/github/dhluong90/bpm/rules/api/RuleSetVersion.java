@@ -33,7 +33,7 @@ import java.util.Objects;
  *     version is still {@code PUBLISHED} and serving while it is pending
  * @param sourceFileName the name of the file the version was imported from, or null when the import named none.
  *     Display metadata: it is outside {@code canonicalHash} and {@code sourceHash}, so importing the same file under
- *     another name gives the same hashes (RLE-228)
+ *     another name gives the same hashes (RLE-232)
  */
 public record RuleSetVersion(
         String ruleSet,

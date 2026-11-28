@@ -13,6 +13,7 @@
 - [[Principles]]
 - [[Architecture]]
 - [[Configuration and extension points|Configuration-and-Extension-Points]]
+- [[Traces|Tracing]]
 
 **Developer guides**
 - [[All guides|Guides]]
@@ -60,8 +61,11 @@
 - [[Standards conformance numbers|Standards-Conformance]]
 - [[Roadmap]]
 - [[Release notes|Release-Notes]]
+- [[Support and versioning policy|Support-and-Versioning-Policy]]
 
 **Project**
 - [[Contributing]]
 - [[Technical stack|Technical-Stack]]
+- [[Operations runbook|Operations-Runbook]]
+- [[Metrics, alerts and dashboards|Metrics-Alerts-and-Dashboards]]
 - [[FAQ]]

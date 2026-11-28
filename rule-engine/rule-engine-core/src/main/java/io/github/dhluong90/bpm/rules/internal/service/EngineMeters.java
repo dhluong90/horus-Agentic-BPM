@@ -91,6 +91,12 @@ public final class EngineMeters {
     }
 
     private final List<Recorder> recorders = new CopyOnWriteArrayList<>();
+    private final EngineTracing tracing = new EngineTracing();
+
+    /** @return the tracing port that travels with the meters, so one object reaches every place that times a call */
+    public EngineTracing tracing() {
+        return tracing;
+    }
 
     /**
      * Adds a recorder; a host with several meter registries binds one per registry.

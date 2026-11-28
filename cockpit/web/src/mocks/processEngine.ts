@@ -124,9 +124,21 @@ export interface ProcessSeed {
   resolveApproval?: 'four-eyes' | 'single';
   /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
   unclassified?: boolean;
+  /** Step timing of the demo key: `empty` is a period without activity. */
+  stepTiming?: 'empty';
   /** A pending change of the `vn-banking-hours` calendar, proposed by lan (#473): in the approvals list and under Calendar changes. */
   calendar?: boolean;
 }
+
+/** The figures of the demo key over a period (getNodeStats, mode=window): the approval is the slow step. */
+const STEP_TIMING = {
+  start: { entered: 1240, completed: 1240, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 40, p50Ms: 30, p95Ms: 90 },
+  'screen-sanctions': { entered: 1240, completed: 1236, failed: 4, incidents: 2, slaBreaches: 0, meanMs: 2400, p50Ms: 1900, p95Ms: 6200 },
+  'verify-docs': { entered: 1240, completed: 1232, failed: 8, incidents: 3, slaBreaches: 0, meanMs: 19000, p50Ms: 14000, p95Ms: 47000 },
+  'risk-rating': { entered: 1232, completed: 1232, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 120, p50Ms: 90, p95Ms: 310 },
+  approve: { entered: 187, completed: 171, failed: 0, incidents: 0, slaBreaches: 12, meanMs: 5400000, p50Ms: 4800000, p95Ms: 9900000 },
+  'open-account': { entered: 1216, completed: 1216, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 8100, p50Ms: 6500, p95Ms: 130000 },
+} as const;
 
 /** A command on an incident, as the engine received it. */
 export interface RecordedIncidentCommand {
@@ -184,6 +196,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
   const replies = new Map<string, ProcessAnswer>();
   const overrides: RecordedOverride[] = [];
   const completions: RecordedCompletion[] = [];
+  const submittedData = new Map<string, Record<string, unknown>>();
+  /** What the engine's history keeps of a completed form task (#663): the stored submission and the paths it did not store. */
+  const recordedSubmissions = new Map<string, { instanceId: string; nodeId: string; actor: string; submission: Record<string, unknown>; unrecordedFields: string[] }>();
   const requests: { method: string; path: string; headers: Readonly<Record<string, string>>; body: string }[] = [];
   const incidents: StoredIncident[] = seed.incidents === false ? [] : demoIncidents(locale);
   const incidentCommands: RecordedIncidentCommand[] = [];
@@ -592,6 +607,15 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     }
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject|:withdraw)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
+    const statsRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/node-stats$/.exec(path);
+    if (statsRoute && request.method === 'GET') {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      if (!definitions.some((d) => d.key === statsRoute[1] && d.version === Number(statsRoute[2]))) return problem(404, 'DEFINITION_NOT_FOUND');
+      if (url.searchParams.get('mode') !== 'window') return problem(400, 'INPUT_INVALID');
+      const from = url.searchParams.get('from') ?? '2026-11-20T10:00:00Z';
+      const nodes = seed.stepTiming === 'empty' || statsRoute[1] !== 'kyc-onboarding' ? {} : STEP_TIMING;
+      return json(200, { definitionKey: statsRoute[1], version: Number(statsRoute[2]), mode: 'window', from, to: '2026-11-21T11:00:00Z', asOf: '2026-11-21T10:52:00Z', lagSeconds: 480, nodes });
+    }
     const layoutRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/layout$/.exec(path);
     if (layoutRoute && request.method === 'GET') {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
@@ -628,8 +652,14 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       if (instanceMatch[2] === undefined) return json(200, found.instance, { ETag: `"${String(found.instance['lockVersion'])}"` });
       if (seed.activities === 'missing') return problem(404, 'INPUT_INVALID');
       if (seed.activities === 'failing') return problem(500, 'INTERNAL');
-      if (!found.activities) return problem(404, 'INSTANCE_NOT_FOUND');
-      return json(200, found.activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
+      const added = [...recordedSubmissions.values()].filter((item) => item.instanceId === id).map((item) => ({
+        id: `H-${item.nodeId}-done`, type: 'TASK_COMPLETED', nodeId: item.nodeId, actor: item.actor, occurredAt: '2026-11-20T03:20:00Z',
+        submission: item.submission, ...(item.unrecordedFields.length > 0 ? { unrecordedFields: item.unrecordedFields } : {}),
+      }));
+      const base = found.activities ?? (added.length === 0 ? undefined : { instanceId: id, startedAt: NOW, endedAt: null, nodes: [], entries: [], hasMore: false });
+      if (base === undefined) return problem(404, 'INSTANCE_NOT_FOUND');
+      const activities = added.length === 0 ? base : { ...base, entries: [...base.entries, ...added] };
+      return json(200, activities, { ETag: '"a1b2c3d4e5f60718293a4b5c6d7e8f90"' });
     }
     if (request.method === 'GET' && path === `${BASE}/incidents`) return listIncidents(url, request);
     const incidentMatch = /^\/api\/bpm\/processes\/v1\/incidents\/([^/:]+)(?::(retry|resolve|approve-resolution|reject-resolution))?$/.exec(path);
@@ -651,7 +681,9 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
       const declared = QUEUE_FORMS[task.id];
       if (declared === undefined) return problem(404, 'FORM_NOT_DECLARED');
       const base = { schemaVersion: 1, taskId: task.id, lockVersion: task.lockVersion };
-      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: declared };
+      // Once completed, the schema's variables hold what was submitted (a masked one as the placeholder), as the real engine reads them.
+      const submitted = submittedData.get(task.id);
+      const body = 'link' in declared ? { ...base, link: declared.link.replace('{taskId}', task.id) } : { ...base, form: submitted === undefined ? declared : { ...declared, data: { ...declared.data, ...submitted } } };
       return json(200, body, { ETag: `"${String(task.lockVersion)}"` });
     }
     const taskMatch = /^\/api\/bpm\/processes\/v1\/tasks\/([^/:]+)(?::(claim|unclaim|complete|reassign|delegate))?$/.exec(path);
@@ -714,6 +746,16 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
         const errors = formViolations(declared.schema, result);
         if (errors.length > 0) return problem(422, 'FORM_VALIDATION_FAILED', { violations: errors.map((e) => `$.${e.pointer.slice(1)}: ${e.rule}`), errors });
         completions.push({ taskId: task.id, actor: request.user, result, ifMatch, idempotencyKey });
+        const properties = (declared.schema['properties'] ?? {}) as Record<string, { mask?: boolean }>;
+        // A masked field the operator left alone still holds its value on the case, so it is recorded as the marker.
+        const untouched: [string, unknown][] = Object.keys(declared.data).filter((name) => properties[name]?.mask === true && !(name in result)).map((name) => [name, { masked: true }]);
+        const sent: [string, unknown][] = Object.entries(result).filter(([name]) => name in properties).map(([name, value]) => [name, properties[name]?.mask === true ? { masked: true } : value]);
+        recordedSubmissions.set(task.id, {
+          instanceId: INSTANCE_ID, nodeId: task.nodeId, actor: request.user,
+          submission: Object.fromEntries([...untouched, ...sent]),
+          unrecordedFields: Object.keys(result).filter((name) => !(name in properties)),
+        });
+        submittedData.set(task.id, Object.fromEntries(Object.entries(result).map(([name, value]) => [name, properties[name]?.mask === true ? '***' : value])));
       }
       Object.assign(task, { status: 'COMPLETED', completedBy: request.user, completedAt: '2026-11-20T03:20:00Z', lockVersion: task.lockVersion + 1 });
       return json(200, instance(), { ETag: '"5"' });

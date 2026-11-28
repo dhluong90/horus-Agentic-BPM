@@ -12,7 +12,7 @@ import java.util.Objects;
  * @param correlationId optional correlation id carried by the {@code rules.version.created.v1} event; not part of
  *     the idempotent request, so a replay with another correlation id still returns the original version
  * @param sourceFileName optional name of the file the document came from, kept with the version and shown in its
- *     details and history (RLE-228). Display metadata: it is cleaned to a bare name (any directory part, control and
+ *     details and history (RLE-232). Display metadata: it is cleaned to a bare name (any directory part, control and
  *     format characters are dropped), at most {@link #MAX_FILE_NAME} characters, outside every hash and not part of the
  *     idempotent request. Never used as a path
  */

@@ -29,7 +29,7 @@ import java.util.Objects;
  * @param onBehalfOf the human an embedded engine evaluated for, for example the user who completed the task before a
  *     process decision step; null for a decision made for its caller alone or after a timer (ADR-0027)
  * @param limit the evaluation limit the decision reached, {@code STEPS} or {@code TIME}, when it failed with
- *     {@code EVALUATION_BUDGET_EXCEEDED}; null otherwise. New values may be added (RLE-229)
+ *     {@code EVALUATION_BUDGET_EXCEEDED}; null otherwise. New values may be added (RLE-233)
  */
 public record LoggedDecision(String decisionId, String ruleSet, int version, String hitPolicy, String outcome,
         String errorCode, String inputsJson, String outputsJson, List<String> matchedRuleIds, String callerId,

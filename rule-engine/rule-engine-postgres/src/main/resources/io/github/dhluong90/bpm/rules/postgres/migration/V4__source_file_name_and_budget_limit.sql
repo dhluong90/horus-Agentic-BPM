@@ -1,4 +1,4 @@
--- The file name a version was imported from (RLE-228, #357): display metadata only. It is outside canonical_hash and
+-- The file name a version was imported from (RLE-232, #357): display metadata only. It is outside canonical_hash and
 -- source_hash and outside the approval seal, so exporting and importing again leaves every hash unchanged.
 -- Rollback (forward-only otherwise; run by hand, tested in RuleEngineSchemaMigratorIT):
 --   ALTER TABLE rle_version_history DROP COLUMN source_file_name;
@@ -20,7 +20,7 @@ ALTER TABLE rle_version_history ADD CONSTRAINT rle_version_history_source_file_n
     source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')) NOT VALID;
 ALTER TABLE rle_version_history VALIDATE CONSTRAINT rle_version_history_source_file_name_check;
 
--- The evaluation limit a decision reached (RLE-229, #360): STEPS or TIME for EVALUATION_BUDGET_EXCEEDED, null
+-- The evaluation limit a decision reached (RLE-233, #360): STEPS or TIME for EVALUATION_BUDGET_EXCEEDED, null
 -- otherwise, and the two limits the decision ran with (step_budget, timeout_ms), so that a replay uses the stored
 -- values and the stored outcome and never this machine's clock. A nullable column added to the partitioned parent is a metadata change; no partition is rewritten, and
 -- the value is not constrained in the database so that a later limit kind needs no migration.

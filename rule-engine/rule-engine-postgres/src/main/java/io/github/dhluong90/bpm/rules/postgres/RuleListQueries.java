@@ -19,7 +19,8 @@ final class RuleListQueries {
             v.canonical_json::text AS canonical_json, v.canonical_hash, v.source_format, v.source_document,
             v.source_hash, v.lock_version, v.requested_by, v.requested_at, v.approved_by, v.approved_at,
             v.approval_comment, v.created_by, v.created_at, v.retired_at, v.copied_from, v.retire_requested_by,
-            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version, v.approval_seal, v.source_file_name
+            v.retire_requested_at, v.retire_reason, v.retire_confirm_no_version, v.approval_seal,
+            v.legacy_backfilled_at, v.source_file_name
             """;
 
     /**

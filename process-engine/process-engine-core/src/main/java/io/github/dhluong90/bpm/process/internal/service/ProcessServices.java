@@ -242,6 +242,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
     private final Map<String, Compiled> kernels = new ConcurrentHashMap<>();
     private volatile Cursors cursors;
     private volatile boolean configuredCursors;
+    /** Longest one list read of instances or definitions may run; null leaves it to the database (PRE-394). */
+    private volatile java.time.Duration readTimeout;
     /** Operational measurements, called after commit only (PRE-084); the engine default does nothing. */
     /** The host's task forms (PRE-031); none until the starter installs them, so no declared form is accepted. */
     private volatile TaskForms forms = TaskForms.NONE;
@@ -259,6 +261,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             Map.of();
     private volatile io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory =
             io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE;
+    private volatile io.github.dhluong90.bpm.process.spi.ProcessTracing tracing =
+            io.github.dhluong90.bpm.process.spi.ProcessTracing.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
             io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE;
     /** The kind of the async job the current thread's result transaction handles, for the attempt metric. */
@@ -1459,8 +1463,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (after != null && !isKey(after)) {
             throw Cursors.invalid();
         }
-        List<DefinitionSummary> rows = transactions.inTransaction(() -> store.definitionKeys(tenant, after, limit + 1,
-                clock.instant()));
+        List<DefinitionSummary> rows = transactions.inReadTransaction(readTimeout, () -> store.definitionKeys(tenant,
+                after, limit + 1, clock.instant()));
         if (rows.size() <= limit) {
             return new Page<>(rows, null);
         }
@@ -1629,8 +1633,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         Instant upper = to;
         Instant afterAt = afterStartedAt;
         String afterInstance = afterId;
-        List<InstanceRow> rows = transactions.inTransaction(() -> store.instances(tenant, statuses, q.definitionKey(),
-                lower, upper, afterAt, afterInstance, limit + 1));
+        List<InstanceRow> rows = transactions.inReadTransaction(readTimeout, () -> store.instances(tenant, statuses,
+                q.definitionKey(), lower, upper, afterAt, afterInstance, limit + 1));
         List<InstanceSummary> items = rows.stream().limit(limit).map(r -> new InstanceSummary(r.id(), r.definitionKey(),
                 r.definitionVersion(), r.businessKey(), r.status(), r.lockVersion(), r.startedBy(), r.startedAt(),
                 r.endedAt())).toList();
@@ -1639,6 +1643,20 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
         InstanceSummary last = items.get(limit - 1);
         return new Page<>(items, cursors().sign(tenant, scope, "instances", last.startedAt() + "|" + last.id()));
+    }
+
+    /**
+     * Limits each list read of instances and definitions to {@code limit} in a read-only transaction of its own
+     * ({@code query.statement-timeout}, ADR-0015). A read that exceeds it fails with {@code 503 QUERY_TIMEOUT} and
+     * returns no partial page (PRE-394).
+     *
+     * @param limit the longest one statement of the read may run; positive
+     */
+    public void useReadTimeout(java.time.Duration limit) {
+        if (limit == null || limit.isNegative() || limit.isZero()) {
+            throw new IllegalArgumentException("The read timeout must be positive");
+        }
+        this.readTimeout = limit;
     }
 
     /**
@@ -2144,6 +2162,19 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         String payloadJson = boundedJson(fields, "payload");
         String requestHash = Hashes.sha256Parts("message-correlate", caller, messageName, correlationKey, payloadJson);
         // A refusal throws, so the transaction rolls back with the idempotency claim: nothing is stored (#491).
+        try {
+            return correlateInTransaction(tenant, caller, messageName, correlationKey, fields, idempotencyKey, requestHash);
+        } catch (MessageNotCorrelatedException e) {
+            metrics.messageRefused("NOT_CORRELATED");
+            throw e;
+        } catch (MessageAmbiguousException e) {
+            metrics.messageRefused("AMBIGUOUS");
+            throw e;
+        }
+    }
+
+    private MessageDelivery correlateInTransaction(String tenant, String caller, String messageName,
+            String correlationKey, Map<String, Object> fields, String idempotencyKey, String requestHash) {
         return transactions.inTransaction(() -> idempotent(tenant, "message-correlate", idempotencyKey, requestHash,
                 () -> correlateOnce(tenant, caller, messageName, correlationKey, fields),
                 d -> Values.write(java.util.Map.of("outcome", d.outcome().name(),
@@ -5131,6 +5162,35 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         this.metrics = sink == null ? io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE : sink;
     }
 
+    /**
+     * Installs the sink of the engine's trace points (#114). Called once while the engine is wired.
+     *
+     * @param sink the sink, or null for none
+     */
+    public void useTracing(io.github.dhluong90.bpm.process.spi.ProcessTracing sink) {
+        this.tracing = sink == null ? io.github.dhluong90.bpm.process.spi.ProcessTracing.NONE : sink;
+    }
+
+    private io.github.dhluong90.bpm.process.spi.ProcessTracing.Span startStepSpan(StoredDefinition definition,
+            String stepKind) {
+        try {
+            io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span = tracing.startStep(definition.tenantId(),
+                    definition.key(), definition.version(), stepKind);
+            return span == null ? io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE : span;
+        } catch (RuntimeException ignored) {
+            return io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE;
+        }
+    }
+
+    private static void endStepSpan(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span, String outcome,
+            Throwable failure) {
+        try {
+            span.end(outcome, failure instanceof ExecutionException e ? e.code() : null, failure);
+        } catch (RuntimeException ignored) {
+            // a tracer never fails a step
+        }
+    }
+
     /** Counts instance and incident events once their transaction has committed (PRE-084). */
     private void countCommitted(ProcessEventPublisher.Event event) {
         io.github.dhluong90.bpm.process.spi.ProcessMetrics sink = metrics;
@@ -5471,25 +5531,39 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }
                 Queued item = queue.poll();
                 Command command = item.command();
-                if (item.call() != null) {
-                    Effect.InvokeService call = item.call();
-                    if (!waitsOnLocalCall(state, call)) {
-                        // The branch ended while the call waited its turn: nothing to run, nothing to apply, but the
-                        // trail says so, so an operator sees that the handler was not called (PRE-374).
-                        history.add(new HistoryEntry("STEP_SKIPPED", call.nodeId(), call.tokenId(), call.attemptId(),
-                                null, clock.instant(), Map.of("reason", "branch ended")));
-                        continue;
-                    }
-                    command = new Command.AsyncResult(call.tokenId(), call.attemptId(),
-                            invokeLocal(state, call, as, history));
-                }
-                long appliedAt = System.nanoTime();
+                var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command));
+                String spanOutcome = "OK";
+                Throwable spanFailure = null;
                 Transition t;
+                long appliedAt;
                 try {
-                    t = compiled.kernel().apply(state, command, clock);
-                } catch (RuntimeException e) {
-                    metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
+                    if (item.call() != null) {
+                        Effect.InvokeService call = item.call();
+                        if (!waitsOnLocalCall(state, call)) {
+                            // The branch ended while the call waited its turn: nothing to run, nothing to apply, but the
+                            // trail says so, so an operator sees that the handler was not called (PRE-374).
+                            history.add(new HistoryEntry("STEP_SKIPPED", call.nodeId(), call.tokenId(), call.attemptId(),
+                                    null, clock.instant(), Map.of("reason", "branch ended")));
+                            spanOutcome = "SKIPPED";
+                            continue;
+                        }
+                        command = new Command.AsyncResult(call.tokenId(), call.attemptId(),
+                                invokeLocal(state, call, as, history));
+                    }
+                    appliedAt = System.nanoTime();
+                    try {
+                        t = compiled.kernel().apply(state, command, clock);
+                    } catch (RuntimeException e) {
+                        metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
+                        throw e;
+                    }
+                } catch (RuntimeException | Error e) {
+                    // An Error ends the span too: a scope left open would parent the next unit of work, of any tenant.
+                    spanOutcome = "FAILED";
+                    spanFailure = e;
                     throw e;
+                } finally {
+                    endStepSpan(span, spanOutcome, spanFailure);
                 }
                 Duration kernelTime = Duration.ofNanos(System.nanoTime() - appliedAt);
                 String commandKind = stepKind(command);

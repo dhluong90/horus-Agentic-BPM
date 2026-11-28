@@ -76,4 +76,12 @@ public interface ProcessMetrics {
      */
     default void timerLag(Duration lag) {
     }
+
+    /**
+     * A message correlation was refused and delivered nothing.
+     *
+     * @param reason {@code NOT_CORRELATED} (no instance waits and no process starts on it) or {@code AMBIGUOUS}
+     */
+    default void messageRefused(String reason) {
+    }
 }

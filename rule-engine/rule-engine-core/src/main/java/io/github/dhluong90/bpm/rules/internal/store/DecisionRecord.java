@@ -27,9 +27,9 @@ import java.time.Instant;
  * @param functionVersions the host functions the rule set calls, each as {@code name@version} in name order, comma
  *     separated, with the version label registered when the decision ran (RLE-058); null when it calls none
  * @param budgetLimit the evaluation limit the decision reached, {@code STEPS} or {@code TIME}, for an
- *     {@code EVALUATION_BUDGET_EXCEEDED} failure; null otherwise (RLE-229). With the two limits below this is the
+ *     {@code EVALUATION_BUDGET_EXCEEDED} failure; null otherwise (RLE-233). With the two limits below this is the
  *     stored outcome that a replay uses instead of the clock
- * @param stepBudget the step budget the decision ran with, or null for a row written before it was recorded (RLE-229)
+ * @param stepBudget the step budget the decision ran with, or null for a row written before it was recorded (RLE-233)
  * @param timeoutMillis the time backstop in milliseconds the decision ran with, or null as above
  */
 public record DecisionRecord(

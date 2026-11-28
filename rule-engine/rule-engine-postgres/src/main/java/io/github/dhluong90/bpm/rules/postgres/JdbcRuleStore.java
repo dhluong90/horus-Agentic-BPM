@@ -617,7 +617,8 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
                 instant(rs, "created_at"), instant(rs, "retired_at"), copiedFrom,
-                retirementRequest(rs), rs.getString("approval_seal"), rs.getString("source_file_name"));
+                retirementRequest(rs), rs.getString("approval_seal"), instant(rs, "legacy_backfilled_at"),
+                rs.getString("source_file_name"));
     }
 
     /** The pending four-eyes retirement of a version row, or null; the columns are set together. */

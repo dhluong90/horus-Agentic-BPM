@@ -2610,7 +2610,7 @@ components:
       required: false
       description: |
         The name of the file the document was read from, kept with the version and shown on its details and
-        history (`RLE-228`). Display metadata only: it is outside `canonicalHash`, `sourceHash` and the approval
+        history (`RLE-232`). Display metadata only: it is outside `canonicalHash`, `sourceHash` and the approval
         seal, is not part of the idempotent request, and is never used as a path. Send it percent-encoded as UTF-8
         (`Bi%E1%BB%83u%20ph%C3%AD.yaml`) so a name with accents travels in an ASCII header. The engine keeps the
         part after the last `/` or `\`, drops control characters, and refuses a name of more than 255 characters
@@ -2793,7 +2793,7 @@ components:
           maxLength: 255
           description: |
             The name of the file the version was imported from, when the import sent `X-Source-File-Name`; absent
-            otherwise (`RLE-228`). Display metadata outside every hash. A restore keeps the name of the version it
+            otherwise (`RLE-232`). Display metadata outside every hash. A restore keeps the name of the version it
             copies.
         retireRequestedBy:
           type: [string, 'null']
@@ -2979,7 +2979,7 @@ components:
           description: The time of the log row, which places it in its monthly partition; equal to `evaluatedAt`
         durationMicros: { type: integer, format: int64 }
         # Present when the decision failed with EVALUATION_BUDGET_EXCEEDED: the evaluation limit it reached, STEPS or
-        # TIME (RLE-229). Absent otherwise, and on decisions logged before it was recorded.
+        # TIME (RLE-233). Absent otherwise, and on decisions logged before it was recorded.
         limit:
           $ref: '#/components/schemas/EvaluationLimit'
     RuleSetPage:
@@ -3087,7 +3087,7 @@ components:
       properties:
         action:
           type: string
-          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED, DISCARDED, RESEALED]
+          enum: [CREATED, REQUESTED, APPROVED, REJECTED, WITHDRAWN, DRAFT_UPDATED, RETIRE_REQUESTED, RETIRE_CANCELLED, RETIRED, DISCARDED, RESEALED, LEGACY_SEALED]
         fromStatus:
           type: [string, 'null']
           enum: [DRAFT, PENDING_APPROVAL, PUBLISHED, RETIRED, DISCARDED, null]
@@ -3115,7 +3115,7 @@ components:
         sourceFileName:
           type: string
           maxLength: 255
-          description: On the `CREATED` entry of an import, and on `DRAFT_UPDATED`, the file name the import sent, when it sent one (`RLE-228`)
+          description: On the `CREATED` entry of an import, and on `DRAFT_UPDATED`, the file name the import sent, when it sent one (`RLE-232`)
         retireRequestedBy:
           type: [string, 'null']
           description: Present on a `RETIRED` entry only; in `four-eyes` mode the requester whose request the actor confirmed, else null (`RLE-038`)
@@ -4296,7 +4296,7 @@ components:
             version in force. Set by the engine on the decision row; never read from a request.
         durationMicros: { type: integer, format: int64 }
         # Present when the decision failed with EVALUATION_BUDGET_EXCEEDED: the evaluation limit it reached, STEPS or
-        # TIME (RLE-229). Absent otherwise, and on decisions logged before it was recorded.
+        # TIME (RLE-233). Absent otherwise, and on decisions logged before it was recorded.
         limit:
           $ref: '#/components/schemas/EvaluationLimit'
     BatchRequest:

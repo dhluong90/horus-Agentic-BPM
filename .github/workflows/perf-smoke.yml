@@ -1,0 +1,47 @@
+name: Load smoke
+
+# #656: a short load run against the compose stack (the example host on PostgreSQL), compared with perf/baseline.json.
+# The limits are wide (perf/check_regression.py), so a shared runner does not trip them; a large regression does.
+# Nightly, on demand, and for a pull request that touches perf/.
+on:
+  schedule:
+    - cron: "45 2 * * *"
+  pull_request:
+    paths:
+      - "perf/**"
+      - ".github/workflows/perf-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Load smoke against the baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Build the stack, run the load, compare with the baseline
+        run: perf/smoke.sh
+
+      - name: Upload the measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-smoke
+          path: perf/results/
+          if-no-files-found: ignore
+          retention-days: 14

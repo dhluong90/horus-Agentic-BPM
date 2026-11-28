@@ -19,7 +19,7 @@ package io.github.dhluong90.bpm.expr.internal;
  * @param stepBudget steps one decision may take, 1 to {@value #STEP_BUDGET_MAX}
  * @param timeoutMillis longest time one decision may evaluate, 1 to {@value #TIMEOUT_MILLIS_MAX}
  * @param timed whether the wall-clock backstop is checked; false only for {@link #deterministic}, which a replay of a
- *     logged decision uses so that the clock of the replaying machine never decides the outcome (RLE-229)
+ *     logged decision uses so that the clock of the replaying machine never decides the outcome (RLE-233)
  */
 public record EvaluationLimits(int stepBudget, int timeoutMillis, boolean timed) {
 
