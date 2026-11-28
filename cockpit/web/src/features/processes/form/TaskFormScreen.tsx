@@ -1,5 +1,5 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { Task, TaskForm } from '../../../api/processes/schemas';
+import type { ActivityEntry, Task, TaskForm } from '../../../api/processes/schemas';
 import { toHostError } from '../../../api/hostError';
 import { AreaError, EmptyState, LoadingRows, PageHead } from '../../../components/PageParts';
 import { useI18n, type Locale } from '../../../i18n/I18nProvider';
@@ -8,10 +8,11 @@ import { useHostLink } from '../../federation/HostScope';
 import { StatusMark, taskTitle } from '../../tasks/parts';
 import { formatDateTime } from '../../rules/model/dates';
 import { groupWhileTyping } from '../../rules/model/money';
+import { usePersonName } from '../../../app/people';
 import { useProcessesSession } from '../api/processesContext';
-import { useClaimTask, useCompleteForm, useTaskForm } from '../api/useProcesses';
+import { useClaimTask, useCompleteForm, useInstanceActivities, useTaskForm } from '../api/useProcesses';
 import { ReviewMeta, useReviewCrumbs } from '../review/ReviewParts';
-import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, type Drafts, type FormField, type Problem } from './model';
+import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, pathLabel, recordedRows, submissionRows, type Drafts, type FormField, type Problem } from './model';
 
 /*
  * A task completed through the form its process declares (CKP-021). The engine owns the form and checks the result;
@@ -42,7 +43,7 @@ export function TaskFormScreen({ task }: { task: Task }) {
   const none = host?.kind === 'problem' && host.code === 'FORM_NOT_DECLARED';
   return (
     <section className="workspace review taskform" aria-labelledby="taskform-title" aria-busy={form.isPending}>
-      <PageHead id="taskform-title" title={title} subtitle={t('form.subtitle')} action={<StatusMark status={task.status} claimedBy={task.claimedBy} />} />
+      <PageHead id="taskform-title" title={title} subtitle={t(task.status === 'COMPLETED' ? 'form.subtitleDone' : 'form.subtitle')} action={<StatusMark status={task.status} claimedBy={task.claimedBy} />} />
       <ReviewMeta task={task} createdKey="form.created" />
       {form.isPending ? (
         <article className="card"><LoadingRows rows={4} /></article>
@@ -52,6 +53,8 @@ export function TaskFormScreen({ task }: { task: Task }) {
         <article className="card"><AreaError error={form.error} onRetry={() => { void form.refetch(); }} /></article>
       ) : form.data.link !== undefined ? (
         <LinkOut task={task} link={form.data.link} title={title} />
+      ) : task.status === 'COMPLETED' ? (
+        <RecordedDecision task={task} form={form.data} title={title} />
       ) : (
         <FormBody task={task} form={form.data} title={title} />
       )}
@@ -62,11 +65,12 @@ export function TaskFormScreen({ task }: { task: Task }) {
 /** Why this user cannot work the task now, in words; undefined when they can. */
 function useWhyNot(task: Task): string | undefined {
   const { t, locale } = useI18n();
+  const person = usePersonName();
   const { userId } = useProcessesSession();
   const allowed = new Set(task.allowedActions);
-  if (task.status === 'COMPLETED') return t('form.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' });
+  if (task.status === 'COMPLETED') return t('form.dock.completed', { who: person(task.completedBy ?? ''), when: formatDateTime(task.completedAt, locale) ?? '' });
   if (task.status === 'CANCELLED') return t('form.dock.cancelled');
-  if (task.status === 'CLAIMED' && task.claimedBy !== userId) return t('form.dock.claimedByOther', { who: task.claimedBy ?? '' });
+  if (task.status === 'CLAIMED' && task.claimedBy !== userId) return t('form.dock.claimedByOther', { who: person(task.claimedBy ?? '') });
   if (task.status === 'OPEN' && !allowed.has('claim')) return task.fourEyes ? t('form.dock.fourEyes', { who: task.assignee.replace(/^(role|group|user):/, '').replace(/[_-]/g, ' ').toLowerCase() }) : t('form.dock.notAssigned');
   if (task.status === 'CLAIMED' && !allowed.has('complete')) return t('form.dock.cannotComplete');
   return undefined;
@@ -98,6 +102,59 @@ function LinkOut({ task, link, title }: { task: Task; link: string; title: strin
         {claim.isError ? <div className="review-dock__error"><AreaError error={claim.error} onRetry={() => { claim.reset(); }} /></div> : null}
       </section>
     </>
+  );
+}
+
+/**
+ * The stored submission of a completed task, from the instance's history: the last `TASK_COMPLETED` of its step, the
+ * one nearest the task's own completion time. Undefined when the engine recorded none (a task completed before #663).
+ */
+function submissionOf(entries: readonly ActivityEntry[], task: Task): ActivityEntry | undefined {
+  const at = task.completedAt == null ? Number.NaN : Date.parse(task.completedAt);
+  const distance = (entry: ActivityEntry) => (Number.isNaN(at) ? 0 : Math.abs(Date.parse(entry.occurredAt) - at));
+  return entries
+    .filter((entry) => entry.type === 'TASK_COMPLETED' && entry.nodeId === task.nodeId && entry.submission !== undefined)
+    .reduce<ActivityEntry | undefined>((best, entry) => (best === undefined || distance(entry) <= distance(best) ? entry : best), undefined);
+}
+
+/** A completed task: the decision as it was recorded, by whom and when, read-only. Masked fields read "Hidden". */
+function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; title: string }) {
+  const { t, locale } = useI18n();
+  const hostLink = useHostLink();
+  const person = usePersonName();
+  const history = useInstanceActivities(task.instanceId, true);
+  const content = form.form;
+  const stored = history.data === undefined ? undefined : submissionOf(history.data.entries, task);
+  const words = useMemo(() => ({ yes: t('review.yes'), no: t('review.no'), when: (iso: string) => formatDateTime(iso, locale) }), [t, locale]);
+  const rows = useMemo(() => {
+    if (content === undefined) return [];
+    if (stored?.submission !== undefined) return submissionRows(content, stored.submission, locale, words);
+    return recordedRows(fieldsOf(content, locale), content.data, locale, words);
+  }, [content, stored, locale, words]);
+  if (history.isPending) return <article className="card"><LoadingRows rows={4} /></article>;
+  const recorded = stored?.submission !== undefined;
+  const left = stored?.submission !== undefined ? stored.unrecordedFields ?? [] : [];
+  return (
+    <article className="card taskform__card taskform__recorded" aria-labelledby="taskform-recorded">
+      <h2 id="taskform-recorded" className="card__title">{t(recorded ? 'form.decision' : 'form.recorded')}</h2>
+      <p className="taskform__signed" title={task.completedBy ?? undefined}>{t('form.completedAt', { who: person(task.completedBy ?? ''), when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
+      {recorded ? null : <p className="muted taskform__note">{t('form.noSubmission')}</p>}
+      {rows.length === 0 ? <p className="muted">{t('form.noFields')}</p> : (
+        <dl className="taskform__grid taskform__values" aria-label={title}>
+          {rows.map((row) => (
+            <div key={row.name} className={row.wide ? 'taskform__value taskform__field--wide' : 'taskform__value'}>
+              <dt className="field__label">{row.label}</dt>
+              <dd>
+                {row.masked ? <span className="masked__tag"><span aria-hidden="true">◍</span> {t(recorded ? 'form.hidden' : 'form.masked')}</span>
+                  : row.text !== undefined ? <>{row.text}{row.consequence !== undefined ? <span className="taskform__effect muted">{row.consequence}</span> : null}</> : <span className="muted"><span aria-hidden="true">—</span><span className="sr-only">{t(recorded ? 'form.notSubmitted' : 'form.notRecorded')}</span></span>}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      )}
+      {left.length > 0 ? <p className="muted taskform__note">{t('form.unrecorded', { fields: left.map((path) => (content === undefined ? path : pathLabel(content, path, locale))).join(', ') })}</p> : null}
+      <a className="link-action" href={hostLink({ name: 'tasks', view: 'mine' })}>{t('form.dock.back')} <span aria-hidden="true">→</span></a>
+    </article>
   );
 }
 
@@ -188,7 +245,7 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
         {working ? (
           <div className="review-dock__foot">
             <div className="review-dock__messages" role="status">
-              {tried && problemsCount > 0 ? <p className="field__error">{t('form.dock.fix', { count: String(problemsCount) })}</p> : null}
+              {tried && problemsCount > 0 ? <p className="field__error">{t(problemsCount === 1 ? 'form.dock.fix.one' : 'form.dock.fix.other', { count: String(problemsCount) })}</p> : null}
               {fields.some((field) => field.masked) ? <p className="muted">{t('form.dock.masked')}</p> : null}
             </div>
             <button type="submit" form={formId} className="btn btn--primary" disabled={complete.isPending} aria-busy={complete.isPending}>

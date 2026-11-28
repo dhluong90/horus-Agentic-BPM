@@ -395,6 +395,10 @@ export const activityEntry = z
     }).loose().optional(),
     /** The `NODE_COMPLETED` of a script step: the variable it set, as recorded when it ran (#518). */
     resultVariable: z.string().optional(),
+    /** The `TASK_COMPLETED` of a task with a form (#663): the values as stored; a masked field is `{"masked": true}`. */
+    submission: z.record(z.string(), z.unknown()).optional(),
+    /** Paths the submission held that the form does not declare; their values are not stored (#663). */
+    unrecordedFields: z.array(z.string()).optional(),
   })
   .loose();
 export type ActivityEntry = z.infer<typeof activityEntry>;
