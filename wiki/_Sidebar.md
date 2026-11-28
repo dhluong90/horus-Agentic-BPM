@@ -27,6 +27,7 @@
 
 **Rule Engine**
 - [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]]
+- [[Rule Engine: import a DMN table|Rule-Engine-Importing-DMN]]
 - [[Rule Engine: publish a version|Rule-Engine-Versioning-and-Publishing]]
 - [[Rule Engine: simulate and test|Rule-Engine-Simulation-and-Testing]]
 - [[Rule Engine: use the decision log|Rule-Engine-Decision-Log-and-Audit]]
@@ -56,6 +57,7 @@
 
 **Project status**
 - [[Feature status|Feature-Status]]
+- [[Standards conformance numbers|Standards-Conformance]]
 - [[Roadmap]]
 - [[Release notes|Release-Notes]]
 

@@ -21,5 +21,7 @@
     "validate-age": true,
     "max-allowed-built-age": "120h"
   },
-  "ignore": []
+  "ignore": [
+    {"vulnerability": "CVE-2026-133325", "package": {"name": "tomcat-embed-core", "version": "11.0.29"}, "reason": "Only Tomcat clustering with TLS-PSK is affected; the examples and image configure no cluster and no fixed release is on Maven Central. Reviewed by An, expires 2026-12-11"}
+  ]
 }

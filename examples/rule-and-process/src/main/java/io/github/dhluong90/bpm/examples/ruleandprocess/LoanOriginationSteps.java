@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.function.Function;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Profile;
 
 /**
  * The service steps and the screening agent of the {@code loan-origination} demo model. Local stand-ins with no network
@@ -98,8 +99,13 @@ class LoanOriginationSteps {
                 : HandlerResult.completed(of("journalId", "JE-PAY-" + suffix(call))));
     }
 
-    /** The screening agent: clear, unless {@code simulatePepHit} or {@code simulateFraud} is true. It never decides. */
+    /**
+     * The screening agent: clear, unless {@code simulatePepHit} or {@code simulateFraud} is true. It never decides.
+     * Dev profile only: it answers from start variables, so it must never load in production, where the host registers
+     * its own {@code kyc.screen} adapter.
+     */
     @Bean
+    @Profile("dev")
     AgentAdapter kycScreeningAgent() {
         return new AgentAdapter() {
             @Override

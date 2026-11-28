@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:horus-bpm:schema:event:processes.compensation.step-completed.v1",
+  "title": "processes.compensation.step-completed.v1",
+  "description": "One undo step of a compensation finished: the forward step that was undone and the handler that ran. Handed to the host publisher in the transaction of the state change it reports, newest undone step first. Additive changes only within v1 (DESIGN section 6.4).",
+  "type": "object",
+  "required": [
+    "eventId",
+    "eventType",
+    "occurredAt",
+    "tenantId",
+    "correlationId",
+    "causationId",
+    "producer",
+    "schemaVersion",
+    "payload"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "description": "Stable id of this event, 26 characters; consumers de-duplicate by it",
+      "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+    },
+    "eventType": {
+      "const": "processes.compensation.step-completed.v1"
+    },
+    "occurredAt": {
+      "type": "string",
+      "description": "The engine clock time of the change, ISO 8601 UTC",
+      "format": "date-time"
+    },
+    "tenantId": {
+      "type": "string",
+      "description": "The tenant, from the authenticated context; consumers must filter by it"
+    },
+    "correlationId": {
+      "type": "string",
+      "description": "The request's X-Correlation-Id; for work a job starts, the id the job carries; otherwise the event id",
+      "pattern": "^[A-Za-z0-9._:-]{1,128}$"
+    },
+    "causationId": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The id of the command (Idempotency-Key) or job that caused the change, or null"
+    },
+    "producer": {
+      "const": "horus-process-engine"
+    },
+    "schemaVersion": {
+      "const": 1
+    },
+    "payload": {
+      "type": "object",
+      "required": [
+        "instanceId",
+        "scopeId",
+        "nodeId",
+        "handler",
+        "outcome"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "instanceId": {
+          "type": "string"
+        },
+        "scopeId": {
+          "type": "string",
+          "description": "The scope token whose compensation this step belongs to"
+        },
+        "nodeId": {
+          "type": "string",
+          "description": "The forward step that was undone"
+        },
+        "handler": {
+          "type": "string",
+          "description": "The compensation handler (adapter or local step name) that ran"
+        },
+        "outcome": {
+          "enum": [
+            "COMPLETED",
+            "COMPLETED_MANUALLY"
+          ],
+          "description": "COMPLETED_MANUALLY: an approver marked the undo done by hand"
+        },
+        "seq": {
+          "type": "integer",
+          "description": "Position of the step on the saga's undo stack, as pushed"
+        },
+        "attemptId": {
+          "type": "string",
+          "description": "The undo attempt; absent for a manual completion"
+        },
+        "definitionKey": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "businessKey": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

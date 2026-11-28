@@ -6,6 +6,7 @@ Run: python3 tools/test_rescan_test_images.py   (or -v for each name)
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import sys
 import unittest
@@ -60,6 +61,22 @@ class RescanTestImagesTest(unittest.TestCase):
         body = rescan.issue_body(PGBOUNCER, rows, "")
         self.assertIn(f"{400 - rescan.MAX_ROWS} more in the `rescan-test-images` artifact", body)
         self.assertLess(len(body), 65536)
+
+    def test_a_waiver_holds_until_its_expiry_date_and_only_for_its_image(self) -> None:
+        waivers = [{"image": PLAYWRIGHT, "issue": 549, "reason": "test-only", "owner": "devops", "expires": "2026-12-27"}]
+        self.assertIsNotNone(rescan.active_waiver(PLAYWRIGHT, datetime.date(2026, 12, 27), waivers))
+        self.assertIsNone(rescan.active_waiver(PLAYWRIGHT, datetime.date(2026, 12, 28), waivers))
+        self.assertIsNone(rescan.active_waiver(PGBOUNCER, datetime.date(2026, 11, 28), waivers))
+
+    def test_the_waiver_file_names_a_pinned_image_a_reason_an_issue_and_an_expiry(self) -> None:
+        import json
+        pinned = set(rescan.pinned_images())
+        for waiver in json.loads(rescan.WAIVERS.read_text(encoding="utf-8")):
+            with self.subTest(image=waiver["image"]):
+                self.assertIn(waiver["image"], pinned)
+                self.assertIn("never shipped", waiver["reason"])
+                self.assertIsInstance(waiver["issue"], int)
+                self.assertEqual("2026-12-27", waiver["expires"])
 
 
 if __name__ == "__main__":

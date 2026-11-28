@@ -63,6 +63,12 @@
     <spring-boot-4.version>4.1.2</spring-boot-4.version>
     <spring-boot.version>${spring-boot-4.version}</spring-boot.version>
     <!--
+      Tomcat patched ahead of the Spring Boot BOM (#622): 4.1.2 and 4.1.3 manage 11.0.27, which carries
+      critical and high advisories the nightly vulnerability gate (TR-SEC-06) rejects. Fixed in 11.0.29.
+      Remove this property when a Spring Boot release manages 11.0.29 or later.
+    -->
+    <tomcat.version>11.0.29</tomcat.version>
+    <!--
       TR-EMB-02: the other lines tested on the jars built with spring-boot-4.version. -Dspring-boot.line
       switches the runtime classpath of the tests (profiles below, and the CI matrix):
         absent or 4.x  newest 4.x minor (the build line)
@@ -89,10 +95,10 @@
       sets the PostgreSQL image per leg (14, 16 and 18), also pinned; tools/check-image-pins.py refuses
       an image reference without a digest.
     -->
-    <!-- postgres:16-alpine, PostgreSQL 16.16, resolved 20 Nov 2026 (the image docker-compose.yml pins). -->
-    <bpm.test.postgres.image>postgres@sha256:1d5b02d3a9941fbd52437db4107f8c52d6297dac553ca1e5c299ebb3756b4857</bpm.test.postgres.image>
-    <!-- edoburu/pgbouncer:v1.26.1-p0, resolved 20 Nov 2026. -->
-    <bpm.test.pgbouncer.image>edoburu/pgbouncer@sha256:488422e38cff912895d0d65d8963fcd306e6ac589a724398b6eb8e294e94d624</bpm.test.pgbouncer.image>
+    <!-- postgres:16-alpine, PostgreSQL 16.16, resolved 27 Nov 2026 from the registry and Docker Hub, rebuilt 22 Nov (the image docker-compose.yml pins). -->
+    <bpm.test.postgres.image>postgres@sha256:f2f98726820d0342055351c6e9d36e705f5bfffb3dd53ff556325114b08afb6d</bpm.test.postgres.image>
+    <!-- ghcr.io/cloudnative-pg/pgbouncer:1.26.1-202611251233-trixie (PgBouncer 1.26.1, Debian trixie), resolved 27 Nov 2026 from the registry; the floating tag 1.26.1-trixie gave the same digest. Reads pgbouncer.ini and userlist.txt, not environment variables (#548). -->
+    <bpm.test.pgbouncer.image>ghcr.io/cloudnative-pg/pgbouncer@sha256:9f648625e11f67f5171f1edd31648c7d02a1a4a5e1b8adf7d4a9db30dce8c22b</bpm.test.pgbouncer.image>
     <!-- JUnit tags of tests that apply to one Spring Boot line only; the 3.5 profile swaps the value. -->
     <excludedGroups>spring-boot-3.5-only</excludedGroups>
     <archunit.version>1.5.1</archunit.version>
@@ -137,6 +143,25 @@
   <dependencyManagement>
     <dependencies>
       <!-- Modules in this reactor refer to each other with ${project.version}; bpm-bom is for hosts. -->
+      <!--
+        Tomcat (#622): the Spring Boot BOM below sets its own versions, and a property cannot override an
+        imported BOM, so the patched version is managed here, ahead of the import.
+      -->
+      <dependency>
+        <groupId>org.apache.tomcat.embed</groupId>
+        <artifactId>tomcat-embed-core</artifactId>
+        <version>${tomcat.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.tomcat.embed</groupId>
+        <artifactId>tomcat-embed-el</artifactId>
+        <version>${tomcat.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.apache.tomcat.embed</groupId>
+        <artifactId>tomcat-embed-websocket</artifactId>
+        <version>${tomcat.version}</version>
+      </dependency>
       <dependency>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-dependencies</artifactId>
@@ -521,6 +546,8 @@
       </activation>
       <properties>
         <spring-boot.version>${spring-boot-3.5.version}</spring-boot.version>
+        <!-- Tomcat 10.1 is the servlet container of Spring Boot 3.5; 10.1.62 fixes the advisories above. -->
+        <tomcat.version>10.1.62</tomcat.version>
         <!-- Tests of something that exists on Spring Boot 4 only; none today (the health check is on both lines, #116). -->
         <excludedGroups>spring-boot-4-only</excludedGroups>
         <!-- This profile runs compiled tests only; main code is never recompiled against 3.5. -->

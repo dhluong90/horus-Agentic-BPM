@@ -205,6 +205,17 @@ Codes of expression problems, in `when` and `then` cells. Each is refused at imp
 
 New codes may be added; a client should show `message` for a code it does not know.
 
+A DMN import adds these codes to the same entries (`ruleId` and `column` are `null`; the line is in `message`). See [[How to import a DMN decision table|Rule-Engine-Importing-DMN]].
+
+| `code` | Meaning |
+|---|---|
+| `DMN_RULE_ID_COLLISION` | Two rule ids map to the same v1 id |
+| `DMN_RULE_SET_NAME` | No rule set name can be made from the decision id or name |
+| `DMN_TYPE_UNSUPPORTED` | A type that has no v1 form: `time`, `Any`, a duration, a type with a constraint, a structured column, a collection of structures, a type that refers to itself or is not defined |
+| `DMN_ALLOWED_VALUES_UNSUPPORTED` | Allowed or output values that are a range or a comparison, not a list of constants, or on a list input |
+| `DMN_OUTPUT_NOT_ALLOWED` | A rule's output literal is not in the output values the table lists |
+| `DMN_AGGREGATION_UNSUPPORTED` | An aggregation on a table that is not `COLLECT`, an unknown aggregation, or one on a table with several outputs |
+
 Under strict mode (`decision-log.require-explicit-mask: true`) an input that declares no `mask` is one entry with `ruleId: null` and `column` the input name, at import, draft replacement, publication request and approval: `[{ "ruleId": null, "column": "nationalId", "message": "declares no mask, and decision-log.require-explicit-mask requires every input to declare mask: true or mask: false" }]`. Add `mask: true`, or `mask: false` if the input holds no personal data.
 
 ### PAYLOAD_TOO_LARGE
@@ -246,7 +257,7 @@ Under strict mode (`decision-log.require-explicit-mask: true`) an input that dec
 `422`. `POST /decisions/{id}:replay` for a decision that used a masked input (`mask: true`) with a value, or that called a host function whose version label is not the one registered now. The decision log keeps a masked value only as `masked`, so the decision cannot be evaluated again; a function with another version could give another result. `detail` names the inputs, or the function and both version labels, never their values. Explain the decision from its log entry instead. Nothing is written.
 
 ### EVALUATION_ERROR
-`422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED`, `FUNCTION_FAILED` or `FUNCTION_CHANGED`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.
+`422`. Evaluation failed: `detail` names `CURRENCY_MISMATCH`, `DIVISION_BY_ZERO`, `REGEX_TIMEOUT`, `EVALUATION_BUDGET_EXCEEDED`, `FUNCTION_FAILED` or `FUNCTION_CHANGED`. The decision is logged with this outcome. When the rule set masks an input and the tenant has no masking key, the decision is refused without being evaluated: the row has `error_code = MASKING_KEY_MISSING` and no inputs, and `detail` names `horus.bpm.rules.masking.hmac-key`. When the tenant's key id was first recorded with other key bytes (a wrong secret restored under a known key id), the decision is refused the same way with `error_code = MASKING_KEY_MISMATCH`; `detail` carries only the code and the rule set, never a key, a key id or a check value (the server log names the key id and withholds the check values). When an output reads an input that the tenant's masking default masks, the decision is refused the same way with `error_code = MASKED_INPUT_IN_OUTPUT`; an output that reads an input declared `mask: true` is refused at import instead.
 
 - `REGEX_TIMEOUT`: a `matches()` read more than `evaluation.regex-max-reads` characters (default 1,000,000), the `matches()` calls of one decision together read more than `evaluation.regex-max-reads-per-decision` (default 5,000,000; `detail` names that setting), the decisions of one request of many items (a simulation) together read more than `evaluation.regex-max-reads-per-request` (default 50,000,000; `detail` names that setting, and the items after it are reported `REGEX_TIMEOUT: not evaluated`), or a `matches()` ran longer than `evaluation.regex-timeout-ms` (default 50 ms), and was stopped. `detail` starts with `REGEX_TIMEOUT:` and the decision row has `error_code = REGEX_TIMEOUT`. Retrying the same input fails the same way; simplify the pattern (avoid nested quantifiers such as `(a+?)+?`).
 - `REGEX_INPUT_TOO_LONG`: the text given to `matches()` is longer than `evaluation.regex-max-input-length` (default 4,096); the match was not run. `detail` starts with `REGEX_INPUT_TOO_LONG:` and so does the row's `error_code`.

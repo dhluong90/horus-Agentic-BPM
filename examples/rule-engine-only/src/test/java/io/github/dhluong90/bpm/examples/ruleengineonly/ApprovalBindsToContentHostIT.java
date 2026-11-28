@@ -203,7 +203,7 @@ class ApprovalBindsToContentHostIT {
     }
 
     URI uri(String path) {
-        return URI.create("http://localhost:" + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path);
+        return URI.create("http://127.0.0.1:" + environment.getProperty("local.server.port") + "/api/bpm/rules/v1" + path);
     }
 
     static byte[] resource(String path) {

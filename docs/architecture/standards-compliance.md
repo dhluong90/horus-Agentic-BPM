@@ -455,7 +455,7 @@ Each conflict with its options and the recommendation. None needs a principle to
 
 BPMN uses `implementation` (default `##WebService`) and `operationRef` (a WSDL operation); vendor files carry `camunda:class`, `camunda:delegateExpression`, `camunda:expression`, `flowable:class` or `zeebe:taskDefinition`, several of which mean "load a class" or "evaluate a method-call expression".
 
-**Recommendation.** A service task binds only to a handler registered through `StepRegistry`, by name: `horus:handler`, or `implementation="urn:horus-bpm:handler:<name>"`, or an `operationRef` whose operation name equals a registered handler. Importer options map vendor attributes to handler names as strings and never evaluate them: `delegateExpression="${kycCheck}"` becomes handler `kycCheck` if registered; a `zeebe:taskDefinition` or external task topic becomes a remote handler of that name; `camunda:class` and any method-call expression are refused (`422 BPMN_IMPLEMENTATION_UNSUPPORTED`). The import report lists every mapping for the approver. No reflection, no class loading (`TR-SEC-01`, `TR-STD-16`).
+**Recommendation.** A service task binds only to a handler registered through `StepRegistry`, by name: `horus:handler` (the form `implementation="urn:horus-bpm:handler:<name>"` is planned for 1.1, #632, and the reader refuses it until then), or an `operationRef` whose operation name equals a registered handler. Importer options map vendor attributes to handler names as strings and never evaluate them: `delegateExpression="${kycCheck}"` becomes handler `kycCheck` if registered; a `zeebe:taskDefinition` or external task topic becomes a remote handler of that name; `camunda:class` and any method-call expression are refused (`422 BPMN_IMPLEMENTATION_UNSUPPORTED`). The import report lists every mapping for the approver. No reflection, no class loading (`TR-SEC-01`, `TR-STD-16`).
 
 ### 7.3 FEEL determinism
 
@@ -555,6 +555,8 @@ P1 to P4 and P6 to P9 were decided on 2026-11-19; P5 (release dates) is with the
 | 10.4 Differential FEEL testing | v1 and HORUS FEEL agree with a reference FEEL | The project's seeded generator (PD-090) generates expressions and inputs, and a failure prints its seed; results compared with `camunda/feel-scala` (Apache 2.0) in test scope only. From M1 it checks that every v1 expression's FEEL translation gives the same result, null cases included (PD-058); from S1 it checks the HORUS FEEL engine | `TR-STD-02`, `TR-STD-27` |
 | 10.5 Graph invariants | No lost tokens, joins fire exactly once, every token ends or waits | Property tests over generated BPMN graphs with all S1 to S3 elements | `TR-STD-11` |
 
+Sections 10.1 and 10.2 run daily in the `Conformance` workflow (`tools/conformance`, #203, #204): the pinned suites are fetched with the archive SHA-256 checked, run by the test classes `DmnTckConformanceRun` and `MiwgRoundTripRun` (build-time test data; there is no separate `rule-engine-tck` module), and a ratchet fails the run only when a number falls below `tools/conformance/baseline.json`. [How to read the numbers](../../wiki/Standards-Conformance.md).
+
 ## 11. Staging after 1.0
 
 ![Staging](images/standards-staging.svg)
@@ -584,6 +586,8 @@ Published per release (`TR-STD-05`). The claim is "BPMN 2.0.2 Process Execution 
 | DMN external functions (Java, PMML) | Refused; host functions through `RuleFunctionRegistry` | Principles 3 and 4 |
 | FEEL evaluation without bounds | Step budget and recursion depth | Principle 3 |
 | FEEL errors as `null` | Per-model `errorMode`; guardrails fail closed | Banking fail-closed rule |
+| `startQuantity` and `completionQuantity` other than 1 on an activity | Refused with `422 BPMN_UNSUPPORTED_ELEMENT`, stage `not planned` | A token carries no quantity; ignoring the value would run the step differently from the model |
+| `implementation` other than `##unspecified` on a task | Refused with `422 BPMN_UNSUPPORTED_ELEMENT`, stage `not planned`; bind the step with `horus:handler` | No engine network I/O (principles 1 and 4) |
 | Choreography and conversation | Imported with that part kept untouched in the stored source document and a warning naming it; not displayed or executed | Not targeted (PD-065) |
 | DMN vendor `extensionElements`, foreign attributes and DMNDI on export | Accepted on import and kept only in the stored source document; not read, never executed, and not written back by DMN export, so an exported file has no diagram and no vendor extensions | DMNDI round trip arrives in stage S3 (section 6.2); until then the source document (`?include=source`) keeps them byte for byte |
 

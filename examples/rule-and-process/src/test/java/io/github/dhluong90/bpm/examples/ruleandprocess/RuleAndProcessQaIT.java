@@ -295,7 +295,7 @@ class RuleAndProcessQaIT {
         long rowsBefore = definitionRows();
 
         // When the version is exported and the document imported again
-        HttpResponse<String> exported = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+        HttpResponse<String> exported = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port
                 + "/api/bpm/processes/v1/definitions/card-fee-review/versions/" + latest + "/export?format=bpmn"))
                 .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
         assertThat(exported.statusCode()).as(exported.body()).isEqualTo(200);
@@ -329,7 +329,7 @@ class RuleAndProcessQaIT {
         long outboxBefore = jdbc.sql("SELECT count(*) FROM event_outbox").query(Long.class).single();
 
         // When a bank-a user asks for v99
-        HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port
+        HttpResponse<String> answer = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port
                 + "/api/bpm/processes/v1/definitions/card-fee-review/versions/99/export?format=bpmn"))
                 .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
 
@@ -438,7 +438,7 @@ class RuleAndProcessQaIT {
     }
 
     private JsonNode get(String user, String path) throws Exception {
-        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpResponse<String> response = HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).GET().build(), HttpResponse.BodyHandlers.ofString());
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
         return JSON.readTree(response.body());
@@ -451,7 +451,7 @@ class RuleAndProcessQaIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, String ifMatch,
             String idempotencyKey, String contentType) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic(user)).header("Content-Type", contentType)
                 .method(method, HttpRequest.BodyPublishers.ofString(body));
         // An approval or rejection must name the lock version it was decided on (#234); these tests approve a version
