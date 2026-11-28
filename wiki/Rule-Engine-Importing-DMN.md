@@ -21,6 +21,7 @@ What the import does:
 
 - The file is kept byte for byte as the source document, diagram and vendor extensions included (`?include=source`).
 - Rule ids and labels come from the file. A DMN `number` becomes `decimal`, `integer` stays `integer`. DMN has no money type, so a fee imported from DMN has no currency; write the output as `money` in a new draft when you need one.
+- A rule id that does not start with a letter, such as `_5f3a1` written by some modellers, becomes `r_5f3a1`; the original is kept in the rule description as `(DMN id _5f3a1)` and export writes it back.
 - Extension elements and attributes of other namespaces change neither the table nor its hash.
 - Export with `?format=dmn` and import again gives the same canonical hash. The same behaviour written in YAML and in DMN has one hash.
 - A table imported from DMN evaluates in `strict` error mode.
@@ -50,7 +51,8 @@ Everything outside the list above is refused with `422` and a message that names
 | `expressionLanguage` other than FEEL | `EXPRESSION_LANGUAGE_UNSUPPORTED` |
 | A CMMN file | `CMMN_UNSUPPORTED` |
 | A decision id such as `Decision_1` | Refused: give the decision a kebab-case id |
-| A rule id that does not start with a letter, such as `_5f3a...` (written by some tools) | Refused naming the rule: rename the id in the tool |
+| Two rule ids that map to the same id, such as `_a1` and `r_a1` | `DMN_RULE_ID_COLLISION`, naming both ids |
+| A rule id with a space or a non-ASCII letter | Refused naming the rule |
 | `horus:errorMode="spec"` | Refused, stage S1 |
 | A DTD or external entity, nesting deeper than 32, text over 65,536 characters | Refused naming the limit |
 | A file over 1,048,576 bytes | `413 PAYLOAD_TOO_LARGE` |

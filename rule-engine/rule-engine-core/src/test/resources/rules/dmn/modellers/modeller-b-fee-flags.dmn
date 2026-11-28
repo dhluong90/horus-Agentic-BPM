@@ -1,17 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="https://www.omg.org/spec/DMN/20211108/MODEL/" xmlns:feel="https://www.omg.org/spec/DMN/20211108/FEEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20211108/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/" xmlns:triso="http://www.trisotech.com/2015/triso/modeling" xmlns:trisofeed="http://trisotech.com/feed" exporter="Trisotech Digital Enterprise Suite" exporterVersion="7.2.1" id="_5f3a8c1e-2b7d-4e9a-9c11-0d6f4a7b1e22" name="fee-flags" namespace="http://www.trisotech.com/definitions/_5f3a8c1e-2b7d-4e9a-9c11-0d6f4a7b1e22" triso:logoChoice="Default">
+<definitions xmlns="https://www.omg.org/spec/DMN/20211108/MODEL/" xmlns:feel="https://www.omg.org/spec/DMN/20211108/FEEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20211108/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:di="http://www.omg.org/spec/DMN/20180521/DI/" xmlns:ext="http://example.org/modeller-b/modeling" xmlns:feed="http://example.org/modeller-b/feed" exporter="Modeller B" exporterVersion="7.2.1" id="_5f3a8c1e-2b7d-4e9a-9c11-0d6f4a7b1e22" name="fee-flags" namespace="http://modeller-b.example.org/definitions/_5f3a8c1e-2b7d-4e9a-9c11-0d6f4a7b1e22" ext:logoChoice="Default">
   <extensionElements>
-    <trisofeed:modelMetadata trisofeed:lastModified="2026-10-02T04:11:09Z"/>
+    <feed:modelMetadata feed:lastModified="2026-10-02T04:11:09Z"/>
   </extensionElements>
-  <inputData id="_i1" name="txType" triso:displayName="Transaction type">
+  <inputData id="_i1" name="txType" ext:displayName="Transaction type">
     <variable id="_i1v" name="txType" typeRef="string"/>
   </inputData>
-  <decision id="fee-flags" name="Fee flags" triso:displayName="Fee flags">
+  <decision id="fee-flags" name="Fee flags" ext:displayName="Fee flags">
     <variable id="_dv" name="Fee flags"/>
     <informationRequirement id="_ir1">
       <requiredInput href="#_i1"/>
     </informationRequirement>
-    <decisionTable id="_t1" hitPolicy="COLLECT" triso:useGlobalRule="false">
+    <decisionTable id="_t1" hitPolicy="COLLECT" ext:useGlobalRule="false">
       <input id="_in1" label="Transaction type">
         <inputExpression id="_ie1" typeRef="string"><text>txType</text></inputExpression>
       </input>
@@ -19,17 +19,17 @@
         <inputExpression id="_ie2" typeRef="number"><text>amount</text></inputExpression>
       </input>
       <output id="_o1" label="Flag" name="flag" typeRef="string"/>
-      <rule id="Rule_r1">
+      <rule id="_r1">
         <inputEntry id="_r1a"><text>"ATM", "POS"</text></inputEntry>
         <inputEntry id="_r1b"><text>&gt; 5000000</text></inputEntry>
         <outputEntry id="_r1o"><text>"LARGE_CASH"</text></outputEntry>
       </rule>
-      <rule id="Rule_r2">
+      <rule id="_r2">
         <inputEntry id="_r2a"><text>not("TRANSFER")</text></inputEntry>
         <inputEntry id="_r2b"><text>-</text></inputEntry>
         <outputEntry id="_r2o"><text>"CARD_PRESENT"</text></outputEntry>
       </rule>
-      <rule id="Rule_r3">
+      <rule id="_r3">
         <inputEntry id="_r3a"><text>-</text></inputEntry>
         <inputEntry id="_r3b"><text>&gt;= 20000000</text></inputEntry>
         <outputEntry id="_r3o"><text>"REPORT_TO_AML"</text></outputEntry>

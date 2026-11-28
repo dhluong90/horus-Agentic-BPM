@@ -1,5 +1,7 @@
-Modeller corpus for RLE-078. Each `.dmn` is one decision table in the style a widely used DMN tool writes
-(KIE/Drools DMN 1.2, Trisotech DMN 1.4, Camunda Modeler 5 DMN 1.3), with vendor attributes, extension elements,
-information requirements and a diagram. The `.expected.json` next to it lists inputs, matched rule ids and outputs.
-The expected values are worked by hand from the DMN 1.5 decision table rules (the tools themselves are not run
-in CI); replace them with a tool's own evaluation when one is at hand.
+Modeller corpus for RLE-078. Each `.dmn` is one decision table in the style a widely used DMN modeller writes,
+with extension attributes of its own namespace, extension elements, information requirements and a diagram:
+`modeller-a` (DMN 1.2, `UNIQUE`, ids that start with an underscore), `modeller-b` (DMN 1.4, `COLLECT`, ids that start
+with an underscore) and `modeller-c` (DMN 1.3, `FIRST`, date and boolean inputs, two outputs). The `.expected.json`
+next to each lists inputs, matched rule ids and outputs. Rule ids that start with an underscore are mapped on import
+(RLE-082), so the expected ids are the mapped ones. The expected values are worked by hand from the DMN 1.5 decision
+table rules; replace them with a modeller's own evaluation when one is at hand.

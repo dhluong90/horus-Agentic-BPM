@@ -3,9 +3,10 @@ package io.github.dhluong90.bpm.rules.internal.dmn.ruleset;
 import io.github.dhluong90.bpm.rules.api.UnsupportedElement;
 import io.github.dhluong90.bpm.rules.api.UnsupportedStandardException;
 import io.github.dhluong90.bpm.rules.api.ValidationFailedException;
+import io.github.dhluong90.bpm.rules.api.Violation;
 import io.github.dhluong90.bpm.rules.internal.json.EngineJson;
 import java.math.BigDecimal;
-import java.util.HashSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -202,7 +203,7 @@ public final class DmnReader {
         if (outputNames.isEmpty()) {
             throw invalid("The decision table has no <output>", table);
         }
-        Set<String> ruleIds = new HashSet<>();
+        Map<String, String> ruleIds = new HashMap<>();
         int position = 0;
         for (XmlTree rule : table.children("rule")) {
             position++;
@@ -290,15 +291,45 @@ public final class DmnReader {
         return name;
     }
 
-    private static ObjectNode readRule(XmlTree rule, int position, String feel, List<String> inputNames,
-            List<String> outputNames, int annotations, Set<String> ruleIds) {
-        String id = rule.attribute("id").orElse("R" + position);
-        if (!RULE_ID.matcher(id).matches()) {
-            throw invalid("Rule id " + Quote.of(id) + " must start with a letter and use letters, digits, '-' or '_'"
-                    + " (at most 64 characters)", rule);
+    /** The note an import appends to the description of a rule whose DMN id had to be mapped; export reads it back. */
+    static final String ID_MARKER_OPEN = "(DMN id ";
+
+    /** A DMN id a tool may write: letters, digits, underscore, hyphen and dot, up to 200 characters. */
+    private static final Pattern DMN_ID = Pattern.compile("^[A-Za-z0-9_.-]{1,200}$");
+
+    /**
+     * Maps a DMN rule id to a v1 rule id, deterministically (RLE-082). A valid id is unchanged. Otherwise characters
+     * outside letters, digits, underscore and hyphen are removed, {@code r} is put in front when the result does not
+     * start with a letter ({@code _5f3a} becomes {@code r_5f3a}) and the result is cut at 64 characters.
+     *
+     * @param id the id in the file
+     * @return the v1 id, or empty when the id is not one a tool writes
+     */
+    static Optional<String> mapRuleId(String id) {
+        if (RULE_ID.matcher(id).matches()) {
+            return Optional.of(id);
         }
-        if (!ruleIds.add(id)) {
+        if (!DMN_ID.matcher(id).matches()) {
+            return Optional.empty();
+        }
+        String kept = id.replaceAll("[^A-Za-z0-9_-]", "");
+        String mapped = Character.isLetter(kept.isEmpty() ? '0' : kept.charAt(0)) ? kept : "r" + kept;
+        return Optional.of(mapped.length() > 64 ? mapped.substring(0, 64) : mapped);
+    }
+
+    private static ObjectNode readRule(XmlTree rule, int position, String feel, List<String> inputNames,
+            List<String> outputNames, int annotations, Map<String, String> ruleIds) {
+        String original = rule.attribute("id").orElse("R" + position);
+        String id = mapRuleId(original).orElseThrow(() -> invalid("Rule id " + Quote.of(original)
+                + " must start with a letter and use letters, digits, '-' or '_' (at most 64 characters)", rule));
+        String earlier = ruleIds.put(id, original);
+        if (earlier != null && earlier.equals(original)) {
             throw invalid("Duplicate rule id '" + id + "'", rule);
+        }
+        if (earlier != null) {
+            throw new ValidationFailedException(List.of(new Violation(id, null, "Rule ids " + Quote.of(earlier)
+                    + " and " + Quote.of(original) + " both become " + Quote.of(id) + " (line " + rule.line()
+                    + "); give one of them another id in the modeller", "DMN_RULE_ID_COLLISION", rule.line(), null)));
         }
         List<XmlTree> inputEntries = rule.children("inputEntry");
         List<XmlTree> outputEntries = rule.children("outputEntry");
@@ -324,6 +355,9 @@ public final class DmnReader {
                         + " keep one, it becomes the rule description", entry);
             }
             description = Optional.of(text);
+        }
+        if (!original.equals(id)) {
+            description = Optional.of(description.map(d -> d + " ").orElse("") + ID_MARKER_OPEN + original + ")");
         }
         description.ifPresent(d -> node.put("description", d));
         ObjectNode explain = explainTexts(rule, "explain");

@@ -37,7 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
 class DmnImportSpecTest {
 
     static final String MODELLER = "/rules/dmn/card-fee-modeller.dmn";
-    static final List<String> CORPUS = List.of("kie-loan-rate", "trisotech-fee-flags", "camunda-8-overdraft");
+    static final List<String> CORPUS = List.of("modeller-a-loan-rate", "modeller-b-fee-flags", "modeller-c-overdraft");
 
     final InMemoryStores stores = new InMemoryStores();
     final TestCaller caller = new TestCaller("bank-a", "lan");
@@ -236,6 +236,51 @@ class DmnImportSpecTest {
                 .isEqualTo(fromDmn.canonicalHash());
         assertRefused(withMode.formatted("spec"), "horus:errorMode spec is added in stage S1");
         assertRefused(withMode.formatted("lenient"), "horus:errorMode must be strict or spec");
+    }
+
+    @Test
+    void RLE_082_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written() {
+        // Given a table whose rules carry ids that start with an underscore
+        String dmn = new String(CardFee.resource(MODELLER), StandardCharsets.UTF_8)
+                .replace("DecisionRule_0fk2x7a", "_5f3a1").replace("DecisionRule_1lh0wd3", "_9c2b7");
+
+        // When it is imported, exported and imported again
+        RuleSetVersion v1 = engines.versionService().importRuleSet(
+                new ImportRequest(SourceFormat.DMN_XML, dmn.getBytes(StandardCharsets.UTF_8), null));
+        String canonical = engines.versionService().export("card-fee", 1, SourceFormat.JSON);
+        String exported = engines.versionService().export("card-fee", 1, SourceFormat.DMN_XML);
+        RuleSetVersion v2 = engines.versionService().importVersion("card-fee",
+                new ImportRequest(SourceFormat.DMN_XML, exported.getBytes(StandardCharsets.UTF_8), null));
+
+        // Then: mapped ids with the original in the description, the original id back in the export, one hash
+        assertThat(canonical).contains("\"id\":\"r_5f3a1\"", "\"id\":\"r_9c2b7\"",
+                "Gold customers pay nothing (DMN id _5f3a1)", "(DMN id _9c2b7)");
+        assertThat(exported).contains("<rule id=\"_5f3a1\">", "<rule id=\"_9c2b7\">", "Gold customers pay nothing")
+                .doesNotContain("r_5f3a1", "DMN id");
+        assertThat(v2.canonicalHash()).isEqualTo(v1.canonicalHash());
+        caller.become("bank-a", "bob");
+        engines.versionService().requestPublish("card-fee", 1, WriteOptions.none());
+        caller.become("bank-a", "carol");
+        engines.versionService().approve("card-fee", 1, new WriteOptions(null, 1L, null));
+        assertThat(decide("card-fee", Map.of("tier", "SILVER", "txCount", 3)).matchedRuleIds()).containsExactly("r_9c2b7");
+    }
+
+    @Test
+    void RLE_082_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code() {
+        String dmn = new String(CardFee.resource(MODELLER), StandardCharsets.UTF_8)
+                .replace("DecisionRule_0fk2x7a", "_a1").replace("DecisionRule_1lh0wd3", "r_a1");
+
+        assertThatThrownBy(() -> engines.versionService().importRuleSet(
+                new ImportRequest(SourceFormat.DMN_XML, dmn.getBytes(StandardCharsets.UTF_8), null)))
+                .isInstanceOfSatisfying(ValidationFailedException.class, e -> {
+                    assertThat(e.violations()).singleElement().satisfies(v -> {
+                        assertThat(v.code()).isEqualTo("DMN_RULE_ID_COLLISION");
+                        assertThat(v.message()).contains("'_a1'", "'r_a1'", "(line ");
+                    });
+                });
+        assertThat(stores.versions).isEmpty();
+        String space = dmn.replace("_a1\"", "a b\"");
+        assertRefused(space.replace("r_a1", "x"), "must start with a letter");
     }
 
     // ------------------------------------------------------------------ helpers

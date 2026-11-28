@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:modeler="http://camunda.org/schema/modeler/1.0" xmlns:camunda="http://camunda.org/schema/1.0/dmn" xmlns:biodi="http://bpmn.io/schema/dmn/biodi/2.0" id="Definitions_1p6j2xk" name="Overdraft" namespace="http://camunda.org/schema/1.0/dmn" exporter="Camunda Modeler" exporterVersion="5.22.0" modeler:executionPlatform="Camunda Cloud" modeler:executionPlatformVersion="8.5.0">
+<definitions xmlns="https://www.omg.org/spec/DMN/20191111/MODEL/" xmlns:dmndi="https://www.omg.org/spec/DMN/20191111/DMNDI/" xmlns:dc="http://www.omg.org/spec/DMN/20180521/DC/" xmlns:modeler="http://example.org/modeller-c/modeler/1.0" xmlns:ext="http://example.org/modeller-c/dmn/1.0" xmlns:diag="http://example.org/modeller-c/diagram/2.0" id="Definitions_1p6j2xk" name="Overdraft" namespace="http://example.org/modeller-c/dmn/1.0" exporter="Modeller C" exporterVersion="5.22.0" modeler:executionPlatform="Platform C" modeler:executionPlatformVersion="8.5.0">
   <decision id="overdraft-approval" name="Overdraft approval">
     <decisionTable id="DecisionTable_0v1c3dd" hitPolicy="FIRST">
-      <input id="Input_1" label="Salary account" biodi:width="192">
+      <input id="Input_1" label="Salary account" diag:width="192">
         <inputExpression id="InputExpression_1" typeRef="boolean"><text>hasSalaryAccount</text></inputExpression>
       </input>
-      <input id="InputClause_1abc9q" label="Opened on" camunda:inputVariable="openedOn">
+      <input id="InputClause_1abc9q" label="Opened on" ext:inputVariable="openedOn">
         <inputExpression id="LiteralExpression_0z8w1xa" typeRef="date"><text>openedOn</text></inputExpression>
       </input>
       <input id="InputClause_0k4m7re" label="Branch">

@@ -1290,14 +1290,14 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Traces to:** `TR-STD-25`, `TR-STD-01`, #121
 - **Milestone:** M3
 - **Kind:** semantics
-- **Given:** Tenant `bank-a`; caller `lan` holds `rules:author`. `card-fee-modeller.dmn` (DMN 1.3, as Camunda Modeler writes it: generated rule ids, labels, an empty cell, DMNDI) has decision id `card-fee`, inputs `tier` (string) and `txCount` (integer), output `fee` (number) and hit policy `FIRST`; rows `"GOLD"` gives 0, `>= 3` gives 10000, `-` gives 50000. The corpus `rules/dmn/modellers/` holds one table each in the style of KIE/Drools (DMN 1.2, `UNIQUE`), Trisotech (DMN 1.4, `COLLECT`) and Camunda Modeler 5 (DMN 1.3, `FIRST`, date and boolean inputs, two outputs), each with an `.expected.json` of inputs, matched rule ids and outputs.
+- **Given:** Tenant `bank-a`; caller `lan` holds `rules:author`. `card-fee-modeller.dmn` (DMN 1.3, as a widely used modeller writes it: generated rule ids, labels, an empty cell, DMNDI) has decision id `card-fee`, inputs `tier` (string) and `txCount` (integer), output `fee` (number) and hit policy `FIRST`; rows `"GOLD"` gives 0, `>= 3` gives 10000, `-` gives 50000. The corpus `rules/dmn/modellers/` holds one table each in the style of KIE/Drools (DMN 1.2, `UNIQUE`), Trisotech (DMN 1.4, `COLLECT`) and Camunda Modeler 5 (DMN 1.3, `FIRST`, date and boolean inputs, two outputs), each with an `.expected.json` of inputs, matched rule ids and outputs.
 - **When:** `lan` imports `card-fee-modeller.dmn`, then each corpus file; the first is exported as DMN and imported again as v2; a second person approves each; each expected case is evaluated.
 - **Then:**
   - `card-fee` v1 is a `DRAFT` with `sourceFormat: DMN_XML` and the file kept byte for byte with its `sourceHash`, DMNDI included. Nothing is published by an import.
   - Rule ids are those of the file, labels are kept, a DMN `number` becomes `decimal`.
   - `{ tier: GOLD, txCount: 5 }` gives `fee 0`, `{ tier: SILVER, txCount: 3 }` gives 10000, `{ tier: SILVER, txCount: 2 }` gives 50000.
   - Every corpus file imports and gives exactly its expected outputs and matched rules; export as DMN and import again keeps the canonical hash (`RLE-045`). Extension elements and foreign attributes change neither the table nor the hash.
-  - A rule id must start with a letter (`RLE-024`): a tool that writes ids such as `_5f3a...` has them refused by name at import, and the author renames them.
+  - A rule id that does not start with a letter is mapped on import (`RLE-082`).
 - **Example:** `card-fee-modeller.dmn -> card-fee v1 DRAFT, fee 10000 for SILVER with 3 transactions`.
 - **Test ID:** `RLE_078_a_modeller_decision_table_imports_as_a_draft_and_evaluates_as_expected`
 
@@ -1338,6 +1338,21 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
   - `strict` keeps the hash. `spec` is refused with its line and "is added in stage S1" and any other value is refused, never read as if absent.
 - **Example:** `horus:errorMode="spec" -> 422 "horus:errorMode spec is added in stage S1" (line 2)`.
 - **Test ID:** `RLE_081_imported_model_records_its_error_mode_and_keeps_hash_identity`
+
+### RLE-082 A DMN rule id that does not start with a letter is mapped on import, and export gives the original id back
+- **Traces to:** `TR-STD-25`, `RLE-024`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A table whose rules have the ids `_5f3a1` and `_9c2b7` (a modeller writes ids that start with an underscore), and a second table whose rules `_a1` and `r_a1` both exist. The v1 rule id pattern `^[A-Za-z][A-Za-z0-9_-]{0,63}$` (`RLE-024`) is unchanged for YAML, JSON and CSV.
+- **When:** Each table is imported as DMN, evaluated, exported as DMN and imported again.
+- **Then:**
+  - The mapping is made in the DMN reader only and is deterministic: a valid id is kept; otherwise characters other than letters, digits, `_` and `-` are removed, `r` is put in front when the result does not start with a letter, and the result is cut at 64 characters. `_5f3a1` becomes `r_5f3a1`.
+  - The original id is kept in the rule description as a trailing note `(DMN id _5f3a1)`, so the diff, the decision log and the cockpit show where the row came from.
+  - Two ids that map to the same id are refused with `422 VALIDATION_FAILED`, problem code `DMN_RULE_ID_COLLISION`, naming both ids and the line; nothing is stored. Two rules with the same id stay `Duplicate rule id`.
+  - Export writes the original id and the description without the note; importing that file again gives the same canonical hash.
+  - An id with other characters (a space, a non-ASCII letter) is refused as before.
+- **Example:** `_5f3a1 -> r_5f3a1 with description "(DMN id _5f3a1)"; _a1 with r_a1 -> DMN_RULE_ID_COLLISION`.
+- **Test ID:** `RLE_082_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written`, `RLE_082_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code`
 
 ## Host-Registered Functions (RE-F-27, PD-119)
 
