@@ -571,7 +571,7 @@ function Timeline({ graph, activities }: { graph: DiagramGraph; activities: Inst
                     {isProblemEntry(entry) ? <span aria-hidden="true">✕ </span> : null}{t(entryKey(entry.type), { counter: String(entry.instances?.loopCounter ?? '') })}
                     {entry.instances !== undefined ? <span className="muted timeline__note"> · {progressWords(entry.instances, t)}</span> : null}
                   </td>
-                  <td className={trail(entry.nodeId).length > 0 ? 'timeline__step timeline__step--nested' : 'timeline__step'} data-depth={trail(entry.nodeId).length}>
+                  <td className={trail(entry.nodeId).length > 0 ? 'timeline__cell timeline__cell--nested' : 'timeline__cell'} data-depth={trail(entry.nodeId).length}>
                     {trail(entry.nodeId).length > 0 ? <span className="muted timeline__trail">{trail(entry.nodeId).join(' › ')} › </span> : null}
                     {entry.nodeId !== null ? names.get(entry.nodeId) ?? t('instance.timeline.otherStep') : <span className="muted" aria-label={t('rulesArea.none')}>—</span>}
                     {entry.type === 'NODE_COMPLETED' && entry.resultVariable !== undefined

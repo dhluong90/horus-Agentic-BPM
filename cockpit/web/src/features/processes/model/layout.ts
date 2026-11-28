@@ -119,6 +119,26 @@ export function wrapText(text: string, maxWidth: number, charWidth: number): str
   return lines.length > 0 ? lines : [''];
 }
 
+/**
+ * Wrap for a type label (#609): a line breaks only at a space or just after a hyphen, never inside a word. A word that is
+ * wider than the line stays whole on its own line rather than being cut in two.
+ */
+export function wrapWords(text: string, maxWidth: number, charWidth: number): string[] {
+  const perLine = Math.max(4, Math.floor(maxWidth / charWidth));
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/).filter((part) => part !== '')) {
+    const parts = word.match(/[^-]+-?|-/g) ?? [word];
+    parts.forEach((part, index) => {
+      const joined = index === 0 ? (line === '' ? part : `${line} ${part}`) : line + part;
+      if (line === '' || joined.length <= perLine) line = joined;
+      else { lines.push(line); line = part; }
+    });
+  }
+  if (line !== '') lines.push(line);
+  return lines.length > 0 ? lines : [''];
+}
+
 /** Events and gateways get their symbol; every other node, and any type this cockpit does not know, a box. */
 export function shapeOf(type: string): Shape {
   if (!isKnownNodeType(type)) return 'task';
@@ -139,7 +159,7 @@ function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
   const name = node.name ?? node.id;
   if (shape === 'task') {
     const lines = wrapText(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
-    const typeLines = wrapText(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
+    const typeLines = wrapWords(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
     const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW;
     return { width: TASK_WIDTH, height: Math.max(TASK_MIN_HEIGHT, content), lines, typeLines };
   }

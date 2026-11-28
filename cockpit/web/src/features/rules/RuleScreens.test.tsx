@@ -190,10 +190,12 @@ describe('four eyes', () => {
     expect(approve).toHaveAccessibleDescription(/Approve is unavailable\. You requested this change\. Another approver must decide\./);
   });
 
-  it('CKP_511_a_disabled_approve_says_why_in_a_short_tooltip_and_no_amber_paragraph', async () => {
+  it('CKP_511_a_disabled_approve_says_why_in_plain_text_and_no_amber_paragraph', async () => {
     open('#/rules/card-fee/2');
     const approve = await screen.findByRole('button', { name: 'Approve and publish' });
-    expect(approve.parentElement).toHaveAttribute('data-tip', 'You requested this. Another approver decides.');
+    // #609: the self-approval reason is visible text beside the button, not only a tooltip.
+    expect(await screen.findByText('You requested this. Another approver decides.')).toBeVisible();
+    expect(approve.parentElement).not.toHaveAttribute('data-tip');
     expect(approve.closest('.decision')?.querySelector('.gate__reason')).toBeNull();
     // The dock is the sticky one of the changes view: the decision card stays on screen while the diff scrolls.
     expect(approve.closest('.decision')).toHaveClass('decision--dock');
