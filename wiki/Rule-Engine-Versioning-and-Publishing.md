@@ -7,6 +7,7 @@ Change rules without a deployment while the engine enforces maker-checker and ke
 - States and the meaning of maker-checker: [[Concepts]].
 - Two identities: one with `rules:author` (the maker, `alice` below) and a different one with `rules:approve` (the checker, `bob`). Permissions are listed in [[Rule Engine Configuration]].
 - Every mutating call below accepts an `Idempotency-Key` header; replaying the same key returns the original response (ADR-0006).
+- An import may send `X-Source-File-Name`, the name of the file it read (1.1, `RLE-228`). The name is kept on the version, shown on its details and on its `CREATED` history entry, and carried by the created event. It is display metadata: it changes neither hash nor the approval seal, so the same file under another name has the same hashes. Percent-encode it as UTF-8 (`Bi%E1%BB%83u%20ph%C3%AD.yaml`); the engine keeps the part after the last `/` or `\`, and a name over 255 characters is `400 INPUT_INVALID`. An import without the header works as before. The cockpit does not send it yet.
 
 ![Version lifecycle](https://raw.githubusercontent.com/wiki/dhluong90/horus-Agentic-BPM/images/version-lifecycle.svg)
 

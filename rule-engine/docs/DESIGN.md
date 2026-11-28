@@ -97,7 +97,7 @@ Source: [`diagrams/version-lifecycle.mmd`](diagrams/version-lifecycle.mmd).
 
 | From State | Command / Trigger | Guard | To State | Side Effect / Event |
 |---|---|---|---|---|
-| *(none)* | `POST /rule-sets` (new rule set) or `POST /rule-sets/{name}/versions` (document, or `?copyOf={v}`) | Valid schema; document `ruleSet` equals `{name}`; `rules:author`; with `?copyOf` the source version exists in the caller's tenant and the copy passes today's import checks (`RLE-062`, `RLE-063`) | `DRAFT` | Next `version_num`; canonical JSON and hash stored; `effectiveFrom` of the document moved to `effective_from` (section 3.1); history row `CREATED` (with `copied_from` on a restore); emit `rules.version.created.v1` (minimal outbox row from #1; `copiedFrom` on a restore) |
+| *(none)* | `POST /rule-sets` (new rule set) or `POST /rule-sets/{name}/versions` (document, or `?copyOf={v}`) | Valid schema; document `ruleSet` equals `{name}`; `rules:author`; with `?copyOf` the source version exists in the caller's tenant and the copy passes today's import checks (`RLE-062`, `RLE-063`) | `DRAFT` | Next `version_num`; canonical JSON and hash stored; `effectiveFrom` of the document moved to `effective_from` (section 3.1); history row `CREATED` (with `copied_from` on a restore, and `source_file_name` on an import that named its file, `RLE-228`); emit `rules.version.created.v1` (minimal outbox row from #1; `copiedFrom` on a restore, `sourceFileName` on a named import) |
 | `DRAFT` | `replaceDraft` (`PUT /rule-sets/{name}/versions/{v}`, #165, `RLE-047`) | `rules:author`; caller is the draft's author (`created_by`), else `403 PERMISSION_DENIED` with a detail pointing to importing their own document as a new version (`POST .../rule-sets/{name}/versions`); `authoring.cockpit-drafts` on, else `403 DRAFT_AUTHORING_DISABLED`; the import checks; `lockVersion` matches (`If-Match`, required); `Idempotency-Key` required | `DRAFT` | Canonical JSON and hash, source document, format and hash, hit policy, `effective_from` and the `rle_rule` rows replaced in one transaction; `lock_version + 1`; version number, author and `created_at` kept; history row `DRAFT_UPDATED` with actor, the `lockVersion` after and the canonical hash before and after (migration `V6`); emit `rules.version.draft-updated.v1`. What is approved is still the canonical hash frozen at `requestPublish` |
 | `DRAFT` | `validateDraft` (`POST /rule-sets/{name}/versions/{v}:validate`, #82, `RLE-090`, PD-113) | `rules:author`; `authoring.cockpit-drafts` on; the same checks as `replaceDraft` (one shared method, so the two cannot differ); no `Idempotency-Key`, no `If-Match` | `DRAFT` | None: no version write, history row, event or idempotency record. A refused document is `200` with `valid: false` and `problems` (rule, column, stable `code`, `message` by language from the explanation catalogue, never the cell text), not `422`; a valid one lists one reading per rule, with a masked input's test left out |
 | `DRAFT` | `discard` (`POST /rule-sets/{name}/versions/{v}:discard`, #418, `RLE-098`) | `rules:author`; caller is the draft's author (`created_by`), else `403 PERMISSION_DENIED`; `lockVersion` matches (`If-Match`, required); `Idempotency-Key` required; not refused when `authoring.cockpit-drafts` is off (no content comes in); optional reason | `DISCARDED` | Nothing is deleted: the row, its rules, document and hashes stay; `lock_version + 1`; history row `DISCARDED` (actor, reason); emit `rules.version.discarded.v1`. The version leaves `GET .../versions` and the rule set summary, its number is never used again, and it stays in the history views. `DISCARDED` is terminal; only a `DRAFT` can be discarded, so an approved version is never removed |
@@ -818,6 +818,7 @@ CREATE TABLE rle_version (
   source_hash       CHAR(64)    NOT NULL,        -- SHA-256 of the raw request bytes, before any decoding
   lock_version      BIGINT      NOT NULL DEFAULT 0,
   created_by        TEXT,                        -- author (V2); null for versions written before V2
+  source_file_name  TEXT         CHECK (source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')),  -- V3 (RLE-228): the file an import came from, display metadata; outside canonical_hash, source_hash and the approval seal; a restore keeps the copied version's name
   requested_by      TEXT,
   requested_at      TIMESTAMPTZ,
   approved_by       TEXT,
@@ -863,6 +864,7 @@ CREATE TABLE rle_version_history (
   occurred_at       TIMESTAMPTZ NOT NULL,
   canonical_hash          CHAR(64),             -- V6: DRAFT_UPDATED rows only, the hash after the replacement
   previous_canonical_hash CHAR(64),             -- V6: DRAFT_UPDATED rows only, the hash before it
+  source_file_name  TEXT         CHECK (source_file_name IS NULL OR (length(source_file_name) BETWEEN 1 AND 255 AND source_file_name !~ '[\x01-\x1f\x7f/\\]')),  -- V3 (RLE-228): CREATED rows of an import and DRAFT_UPDATED rows, the name the import sent
   effective_from    TIMESTAMPTZ,                 -- V2 (RLE-223): REQUESTED and APPROVED rows, the date asked for and approved; canonical_hash on those rows is the hash approved
   PRIMARY KEY (tenant_id, id),
   FOREIGN KEY (tenant_id, version_id) REFERENCES rle_version (tenant_id, id),
@@ -917,6 +919,9 @@ CREATE TABLE rle_decision (
   -- V25 (RLE-058, PD-119): the host functions the rule set calls, 'segmentOf@2027.2', comma separated in name order;
   -- null when it calls none and for rows written before V25. Additive and nullable, so no row is rewritten.
   function_versions TEXT       CHECK (function_versions IS NULL OR length(function_versions) BETWEEN 3 AND 8192),
+  -- V3 (RLE-229): the evaluation limit a decision reached, 'STEPS' or 'TIME', for EVALUATION_BUDGET_EXCEEDED; null otherwise and for earlier
+  -- rows. Nullable and unconstrained, so adding it rewrites no partition and a later kind needs no migration. Rollback: ALTER TABLE rle_decision DROP COLUMN budget_limit.
+  budget_limit      TEXT,
   PRIMARY KEY (tenant_id, created_at, id)
 ) PARTITION BY RANGE (created_at);
 

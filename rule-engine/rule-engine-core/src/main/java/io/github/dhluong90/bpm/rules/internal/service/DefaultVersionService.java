@@ -153,7 +153,8 @@ public final class DefaultVersionService implements VersionService {
         String operation = targetRuleSet == null ? "import-rule-set" : "import-version";
         String requestHash = Hashes.sha256Parts(operation, actor, targetRuleSet, request.format().name(), Hashes.sha256(source));
         return context.idempotent(tenant, operation, request.idempotencyKey(), requestHash, 201,
-                () -> doImport(tenant, actor, targetRuleSet, request.format(), source, correlationId),
+                () -> doImport(tenant, actor, targetRuleSet, request.format(), source, correlationId,
+                        request.sourceFileName()),
                 version -> EngineValues.write(EngineValues.version(version)),
                 EngineValues::versionFromJson);
     }
@@ -217,7 +218,7 @@ public final class DefaultVersionService implements VersionService {
         StoredVersion copy = new StoredVersion(tenant, Ulid.next(now), source.ruleSetId(), ruleSet, number,
                 VersionStatus.DRAFT, source.hitPolicy(), null, source.canonicalJson(), source.canonicalHash(),
                 source.sourceFormat(), source.sourceDocument(), source.sourceHash(), 0, null, null, null, null, null,
-                actor, now, null, from);
+                actor, now, null, from).withSourceFileName(source.sourceFileName());
         store.insertVersion(copy);
         store.appendHistory(new HistoryRow(tenant, Ulid.next(now), copy.id(), LifecycleAction.CREATED, null,
                 VersionStatus.DRAFT, actor, null, copy.lockVersion(), now, null, null, null, null, null, List.of(),
@@ -250,7 +251,8 @@ public final class DefaultVersionService implements VersionService {
             try {
                 document = CsvTable.read(from.canonicalJson(), source).getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 // the same checks as an imported document; a problem on a masked column never quotes its cell
-                return doImportChecked(tenant, actor, ruleSet, SourceFormat.JSON, document, correlationId);
+                return doImportChecked(tenant, actor, ruleSet, SourceFormat.JSON, document, correlationId,
+                        request.sourceFileName());
             } catch (ValidationFailedException refused) {
                 throw unquoted(tenant, from.canonicalJson(), refused);
             }
@@ -280,16 +282,16 @@ public final class DefaultVersionService implements VersionService {
     }
 
     private RuleSetVersion doImport(String tenant, String actor, String targetRuleSet, SourceFormat format, byte[] source,
-            String correlationId) {
+            String correlationId, String sourceFileName) {
         if (format != SourceFormat.YAML && format != SourceFormat.DMN_XML) {
             throw new InputInvalidException("Only YAML and DMN XML import are available in this release");
         }
-        return doImportChecked(tenant, actor, targetRuleSet, format, source, correlationId);
+        return doImportChecked(tenant, actor, targetRuleSet, format, source, correlationId, sourceFileName);
     }
 
     /** The import of a document that is already known to be one the engine itself wrote, such as a spreadsheet's rows. */
     private RuleSetVersion doImportChecked(String tenant, String actor, String targetRuleSet, SourceFormat format,
-            byte[] source, String correlationId) {
+            byte[] source, String correlationId, String sourceFileName) {
         String sourceText = utf8(source);
         ParsedRuleSet parsed = checkedParsed(format, source);
         requireMaskDeclarations(tenant, parsed.canonicalJson());
@@ -312,10 +314,17 @@ public final class DefaultVersionService implements VersionService {
         StoredVersion version = new StoredVersion(tenant, Ulid.next(now), ruleSetId, name, number, VersionStatus.DRAFT,
                 parsed.model().decision().table().hitPolicy().name(), parsed.model().effectiveFrom(),
                 parsed.canonicalJson(), parsed.canonicalHash(), format, sourceText, Hashes.sha256(source), 0,
-                null, null, null, null, null, actor, now);
+                null, null, null, null, null, actor, now).withSourceFileName(sourceFileName);
         store.insertVersion(version);
-        history(version, LifecycleAction.CREATED, null, actor, null, now);
-        event(tenant, EVENT_CREATED, version, actor, now, correlationId, payload -> { });
+        // RLE-228: the file name is display metadata; it is on the version, its CREATED history row and the event.
+        store.appendHistory(new HistoryRow(tenant, Ulid.next(now), version.id(), LifecycleAction.CREATED, null,
+                version.status(), actor, null, version.lockVersion(), now, null, null, null, null, null, List.of(),
+                List.of(), null, null, null, sourceFileName));
+        event(tenant, EVENT_CREATED, version, actor, now, correlationId, payload -> {
+            if (sourceFileName != null) {
+                payload.put("sourceFileName", sourceFileName);
+            }
+        });
         return view(version, false);
     }
 
@@ -352,13 +361,14 @@ public final class DefaultVersionService implements VersionService {
             ParsedRuleSet parsed = checkedDraftDocument(tenant, ruleSet, request.format(), source);
             StoredVersion updated = current.replaced(parsed.model().decision().table().hitPolicy().name(),
                     parsed.model().effectiveFrom(), parsed.canonicalJson(), parsed.canonicalHash(), request.format(),
-                    sourceText, Hashes.sha256(source));
+                    sourceText, Hashes.sha256(source), request.sourceFileName());
             store.replaceDraft(updated, current.lockVersion());
             // Every content change leaves an immutable audit row with both hashes (architecture decision on #234).
             Instant now = context.clock().instant();
             store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.DRAFT_UPDATED,
-                    VersionStatus.DRAFT, VersionStatus.DRAFT, actor, null, updated.lockVersion(), now,
-                    updated.canonicalHash(), current.canonicalHash()));
+                    VersionStatus.DRAFT, VersionStatus.DRAFT, actor, null, updated.lockVersion(), now, null, null, null,
+                    updated.canonicalHash(), current.canonicalHash(), List.of(), List.of(), null, null, null,
+                    updated.sourceFileName()));
             event(tenant, EVENT_DRAFT_UPDATED, updated, actor, now, correlationId, payload -> payload
                     .put("updatedBy", actor)
                     .put("lockVersion", updated.lockVersion())

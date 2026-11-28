@@ -76,6 +76,11 @@
       "description": "Present only when the draft restores an earlier version (POST .../versions?copyOf=): the version it was copied from. Additive within v1.",
       "type": "integer",
       "minimum": 1
+    },
+    "sourceFileName": {
+      "description": "Present only when the import named the file it read the document from (X-Source-File-Name): the bare display name, at most 255 characters. Display metadata, outside every hash. Additive within v1.",
+      "type": "string",
+      "maxLength": 255
     }
   },
   "examples": [

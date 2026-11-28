@@ -134,6 +134,8 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-224 | `RLE_224_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written`, `RLE_224_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code` | Unit, service | M3 | `TR-STD-25` | Implemented (#121): `DmnImportSpecTest` (`_5f3a1` becomes `r_5f3a1`, export restores it, same hash; collision refused with `DMN_RULE_ID_COLLISION`) |
 | RLE-225 | `RLE_225_an_item_definition_of_a_string_with_allowed_values_types_the_column_and_closes_its_set` and eight more | Unit | M3 | `TR-STD-25`, `TR-STD-04` | Implemented: `DmnItemDefinitionTest` (aliases, allowed values, collections, structures, output values, refusals with `DMN_TYPE_UNSUPPORTED`, `DMN_ALLOWED_VALUES_UNSUPPORTED`, `DMN_OUTPUT_NOT_ALLOWED`) |
 | RLE-226 | `RLE_226_a_rule_set_name_is_made_from_the_decision_id` and three more | Unit | M3 | `TR-STD-25` | Implemented: `DmnItemDefinitionTest` (generated id, camel case, spaces, unnamed single output, unnamed pair refused) |
+| RLE-228 | `RLE_228_*` in `ImportFileNameAndBudgetLimitPostgresIT`, `ImportRequestFileNameTest`, `SourceFileNameHeaderTest` | Unit, Testcontainers | M3 | `TR-STD-01`, `TR-AUD-01` | Implemented (#357) |
+| RLE-229 | `RLE_229_*` in `ImportFileNameAndBudgetLimitPostgresIT`, `RuleEngineSchemaMigratorIT`; `RLE_082_*` in `EvaluationStepBudgetSettingTest` | Unit, Testcontainers | M3 | `TR-SEC-01`, `TR-AUD-01` | Implemented (#360) |
 | RLE-227 | `RLE_227_collect_sum_adds_the_matched_rules` and five more | Unit | M3 | `TR-STD-25` | Implemented: `DmnItemDefinitionTest` (SUM, COUNT, MIN, MAX, export round trip, refusals with `DMN_AGGREGATION_UNSUPPORTED`) |
 
 ## Compatibility matrix

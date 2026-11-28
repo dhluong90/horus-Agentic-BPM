@@ -78,6 +78,11 @@ class EvaluationStepBudgetSettingTest {
         assertThat(stores.decisions).hasSize(2);
         assertThat(stores.decisions.get(0).outcome()).isEqualTo("EVALUATION_ERROR");
         assertThat(stores.decisions.get(0).errorCode()).isEqualTo("EVALUATION_BUDGET_EXCEEDED");
+        // RLE-229: the row keeps the limit the decision reached, and the read of it returns it; the passing one has none
+        assertThat(stores.decisions.get(0).budgetLimit()).isEqualTo("STEPS");
+        assertThat(stores.decisions.get(1).budgetLimit()).isNull();
+        assertThat(DefaultDecisionLogService.view(stores.decisions.get(0)).limit()).isEqualTo("STEPS");
+        assertThat(DefaultDecisionLogService.view(stores.decisions.get(1)).limit()).isNull();
         assertThat(roomy.outcome()).isInstanceOfSatisfying(DecisionResult.Matched.class,
                 matched -> assertThat(matched.outputs().get("points")).hasToString("12"));
     }

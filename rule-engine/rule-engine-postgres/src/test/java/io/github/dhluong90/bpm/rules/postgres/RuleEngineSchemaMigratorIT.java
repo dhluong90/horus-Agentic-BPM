@@ -36,8 +36,8 @@ class RuleEngineSchemaMigratorIT {
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
         assertThat(result.initialVersion()).isNull();
-        assertThat(result.currentVersion()).isEqualTo("2");
-        assertThat(result.migrationsExecuted()).isEqualTo(2);
+        assertThat(result.currentVersion()).isEqualTo("3");
+        assertThat(result.migrationsExecuted()).isEqualTo(3);
         assertThat(rootTables(db)).containsExactlyInAnyOrder(
                 "rle_schema_history",
                 "rle_rule_set",
@@ -57,6 +57,26 @@ class RuleEngineSchemaMigratorIT {
     }
 
     @Test
+    void RLE_229_V3_adds_nullable_columns_and_its_documented_rollback_step_removes_them() {
+        DataSource db = migratedDatabase();
+        JdbcClient jdbc = JdbcClient.create(db);
+        String columns = "SELECT table_name || '.' || column_name FROM information_schema.columns WHERE "
+                + "(column_name = 'source_file_name' AND table_name IN ('rle_version', 'rle_version_history')) "
+                + "OR (column_name = 'budget_limit' AND table_name = 'rle_decision') ORDER BY 1";
+        assertThat(jdbc.sql(columns).query(String.class).list()).containsExactly("rle_decision.budget_limit",
+                "rle_version.source_file_name", "rle_version_history.source_file_name");
+        assertThat(jdbc.sql("SELECT count(*) FROM information_schema.columns WHERE is_nullable = 'NO' AND "
+                + "column_name IN ('source_file_name', 'budget_limit')").query(Long.class).single()).isZero();
+
+        // The rollback step written at the top of V3, run by hand
+        jdbc.sql("ALTER TABLE rle_version_history DROP COLUMN source_file_name").update();
+        jdbc.sql("ALTER TABLE rle_version DROP COLUMN source_file_name").update();
+        jdbc.sql("ALTER TABLE rle_decision DROP COLUMN budget_limit").update();
+
+        assertThat(jdbc.sql(columns).query(String.class).list()).isEmpty();
+    }
+
+    @Test
     void a_database_made_by_a_build_before_the_baseline_is_refused_with_a_request_to_reset() {
         DataSource db = freshDatabase();
         new RuleEngineSchemaMigrator(db).migrate();
@@ -67,7 +87,7 @@ class RuleEngineSchemaMigratorIT {
         assertThatThrownBy(() -> new RuleEngineSchemaMigrator(db).migrate())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("drop the schema and start again");
-        assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single()).isEqualTo(2L);
+        assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single()).isEqualTo(3L);
     }
 
     @Test
@@ -188,10 +208,10 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult result = new RuleEngineSchemaMigrator(db).migrate();
 
-        assertThat(result.currentVersion()).isEqualTo("2");
-        assertThat(result.migrationsExecuted()).isEqualTo(2);
+        assertThat(result.currentVersion()).isEqualTo("3");
+        assertThat(result.migrationsExecuted()).isEqualTo(3);
         assertThat(jdbc.sql("SELECT version FROM rle_schema_history ORDER BY installed_rank").query(String.class).list())
-                .containsExactly("0", "1", "2");
+                .containsExactly("0", "1", "2", "3");
         assertThat(jdbc.sql("SELECT amount_minor FROM loan_application WHERE id = 1").query(Long.class).single())
                 .isEqualTo(800_000_000L);
     }
@@ -204,12 +224,12 @@ class RuleEngineSchemaMigratorIT {
 
         SchemaMigrationResult second = migrator.migrate();
 
-        assertThat(second.initialVersion()).isEqualTo("2");
-        assertThat(second.currentVersion()).isEqualTo("2");
+        assertThat(second.initialVersion()).isEqualTo("3");
+        assertThat(second.currentVersion()).isEqualTo("3");
         assertThat(second.migrationsExecuted()).isZero();
-        assertThat(migrator.currentVersion()).contains("2");
+        assertThat(migrator.currentVersion()).contains("3");
         assertThat(JdbcClient.create(db).sql("SELECT count(*) FROM rle_schema_history").query(Long.class).single())
-                .isEqualTo(2L);
+                .isEqualTo(3L);
     }
 
     @Test
@@ -217,12 +237,12 @@ class RuleEngineSchemaMigratorIT {
         DataSource db = freshDatabase();
         RuleEngineSchemaMigrator migrator = new RuleEngineSchemaMigrator(db);
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 2));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus(null, 3));
         assertThat(migrator.status().isCurrent()).isFalse();
 
         migrator.migrate();
 
-        assertThat(migrator.status()).isEqualTo(new SchemaStatus("2", 0));
+        assertThat(migrator.status()).isEqualTo(new SchemaStatus("3", 0));
         assertThat(migrator.status().isCurrent()).isTrue();
     }
 

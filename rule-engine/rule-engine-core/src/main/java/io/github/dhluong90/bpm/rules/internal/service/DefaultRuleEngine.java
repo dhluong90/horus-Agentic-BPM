@@ -939,7 +939,8 @@ public final class DefaultRuleEngine implements RuleEngine {
                 EngineValues.write(EngineValues.loggedInputs(request.input(), rules.inputs(), maskByDefault, key)),
                 errorCode == null ? EngineValues.write(EngineValues.decision(result).get("outputs")) : null,
                 EngineValues.write(matched), caller, request.correlationId(), at, micros, pinned, onBehalfOf,
-                HostFunctions.format(context.functions().currentVersions(rules.hostFunctions().keySet()))));
+                HostFunctions.format(context.functions().currentVersions(rules.hostFunctions().keySet())),
+                outcome instanceof DecisionResult.Failed failed ? failed.limit() : null));
         return result;
     }
 
