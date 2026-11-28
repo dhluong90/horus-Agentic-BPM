@@ -439,6 +439,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             // #632: a manual undo runs nothing, so it needs none of what a run would need (the content it carries is
             // refused instead, COMPENSATION_ACTIVITY_CONTENT_UNUSED).
             invalid.removeIf(p -> RUN_ONLY_CODES.contains(p.code()) && manualUndoIds.contains(p.elementId()));
+            openBindings.removeIf(p -> RUN_ONLY_CODES.contains(p.code()) && manualUndoIds.contains(p.elementId()));
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
