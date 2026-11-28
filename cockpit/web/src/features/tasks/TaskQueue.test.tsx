@@ -69,7 +69,7 @@ describe('CKP-046 claim from Available to me', () => {
     setScenario('tasks-supervisor');
     open(`#/tasks?view=all&task=${QUEUE_TASKS.collateral}`);
     const selected = await screen.findByRole('complementary', { name: 'Collateral valuation' });
-    await within(selected).findByText('Claimed by Hoa Tran', { selector: '.badge' });
+    await within(selected).findByText('Claimed by Hoa Tran', { selector: '.status' });
     // Sau may hand it on, so Reassign is offered; there is no Claim for a task someone else holds.
     expect(within(selected).getByRole('button', { name: 'Reassign' })).toBeEnabled();
     expect(within(selected).queryByRole('button', { name: 'Claim' })).not.toBeInTheDocument();
@@ -121,7 +121,7 @@ describe('CKP-048 reassign with a reason', () => {
 
     // A claimed task is delegated.
     window.location.hash = `#/tasks?view=all&task=${QUEUE_TASKS.myCreditReview}`;
-    await waitFor(() => { expect(within(screen.getByRole('complementary', { name: 'Credit review' })).getByText(/Claimed by An Nguyen/, { selector: '.badge' })).toBeInTheDocument(); });
+    await waitFor(() => { expect(within(screen.getByRole('complementary', { name: 'Credit review' })).getByText(/Claimed by An Nguyen/, { selector: '.status' })).toBeInTheDocument(); });
     const claimed = screen.getByRole('complementary', { name: 'Credit review' });
     await userEvent.click(within(claimed).getByRole('button', { name: 'Reassign' }));
     dialog = await screen.findByRole('dialog', { name: 'Reassign Credit review' });

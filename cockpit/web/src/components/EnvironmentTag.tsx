@@ -7,14 +7,14 @@ export function environmentLabel(environment: string, locale: string): string {
 }
 
 /**
- * The environment tag of the service pill. Amber is kept for the Demo tag alone (styleguide section 2); every
- * other environment, Production included, uses the neutral environment tag tokens.
+ * The environment of the service line, as plain text after a middot. Amber text is kept for Demo alone (styleguide
+ * section 2); every other environment, Production included, reads in the muted text colour.
  */
 export function EnvironmentTag({ environment }: { environment: string }) {
   const { locale } = useI18n();
   const demo = environment.trim().toLowerCase() === 'demo';
   return (
-    <span className={demo ? 'tag tag--demo' : 'tag tag--env'} data-testid="environment-tag" aria-hidden="true">
+    <span className={demo ? 'env env--demo' : 'env'} data-testid="environment-tag" aria-hidden="true">
       {environmentLabel(environment, locale)}
     </span>
   );

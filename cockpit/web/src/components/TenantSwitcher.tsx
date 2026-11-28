@@ -39,7 +39,7 @@ export function TenantSwitcher({ tenants, current, names, onSelect }: { tenants:
       <button
         ref={button}
         type="button"
-        className="service-pill service-pill--button tenant-switcher__button"
+        className="service service--button tenant-switcher__button"
         aria-expanded={open}
         aria-controls={menuId}
         data-testid="tenant-switcher"
@@ -47,8 +47,8 @@ export function TenantSwitcher({ tenants, current, names, onSelect }: { tenants:
         onClick={() => { setOpen((value) => !value); }}
       >
         <span className="sr-only">{`${t('header.tenant')}: ${currentName}, ${t('tenant.switch')}`}</span>
-        <span className="service-pill__tenant" aria-hidden="true">{currentName}</span>
-        <svg className="service-pill__caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
+        <span className="service__tenant" aria-hidden="true">{currentName}</span>
+        <svg className="service__caret" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3 4.5 6 7.5 9 4.5" /></svg>
       </button>
       <div className="host-picker__menu" id={menuId} hidden={!open}>
         <p className="host-picker__title" id={`${menuId}-title`}>{t('tenant.menuTitle')}</p>

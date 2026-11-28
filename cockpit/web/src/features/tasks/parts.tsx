@@ -43,7 +43,7 @@ export function useOverdueText(): (overdueBy: string | null | undefined) => stri
 }
 
 /**
- * The deadline state, calm: overdue is an amber pill with a word and an icon; due soon is a word with a clock in the
+ * The deadline state, calm: overdue is amber text with an icon; due soon is a word with a clock in the
  * text colour; on time and no deadline add nothing beside the due time.
  */
 export function SlaMark({ sla, overdueBy }: { sla: SlaState; overdueBy: string | null | undefined }) {
@@ -51,7 +51,7 @@ export function SlaMark({ sla, overdueBy }: { sla: SlaState; overdueBy: string |
   const overdueText = useOverdueText();
   if (sla === 'BREACHED') {
     const time = overdueText(overdueBy);
-    return <span className="badge badge--warn tasks__sla"><span aria-hidden="true">▲</span> {time !== undefined ? t('tasks.sla.overdueBy', { time }) : t('tasks.sla.overdue')}</span>;
+    return <span className="status status--warn"><span aria-hidden="true">▲</span> {time !== undefined ? t('tasks.sla.overdueBy', { time }) : t('tasks.sla.overdue')}</span>;
   }
   if (sla === 'DUE_SOON') return <span className="tasks__soon"><span aria-hidden="true">◷</span> {t('tasks.sla.dueSoon')}</span>;
   return null;
@@ -64,12 +64,12 @@ export function StatusMark({ status, claimedBy }: { status: Task['status']; clai
   if (status === 'CLAIMED') {
     const mine = claimedBy === userId;
     return (
-      <span className={mine ? 'badge badge--accent' : 'badge badge--neutral'}>
+      <span className={mine ? 'status status--accent' : 'status'}>
         <span aria-hidden="true">●</span> {mine ? t('tasks.status.claimedByYou') : t('tasks.status.claimedBy', { who: personName(claimedBy ?? '') })}
       </span>
     );
   }
-  if (status === 'COMPLETED') return <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('tasks.status.completed')}</span>;
-  if (status === 'CANCELLED') return <span className="badge badge--neutral"><span aria-hidden="true">■</span> {t('tasks.status.cancelled')}</span>;
-  return <span className="badge badge--neutral"><span aria-hidden="true">○</span> {t('tasks.status.open')}</span>;
+  if (status === 'COMPLETED') return <span className="status status--ok"><span aria-hidden="true">✓</span> {t('tasks.status.completed')}</span>;
+  if (status === 'CANCELLED') return <span className="status"><span aria-hidden="true">■</span> {t('tasks.status.cancelled')}</span>;
+  return <span className="status"><span aria-hidden="true">○</span> {t('tasks.status.open')}</span>;
 }
