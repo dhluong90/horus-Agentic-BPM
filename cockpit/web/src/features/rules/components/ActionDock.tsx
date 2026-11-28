@@ -11,6 +11,7 @@ import { PersonalDataWarnings } from './PersonalDataWarnings';
 import { RequestPublishDialog, type PublishArgs } from './RequestPublishDialog';
 import { WithdrawDialog } from '../../approvals/WithdrawDialog';
 import { useNames, useWantNames } from '../../processes/api/displayNames';
+import { ErrorModeText } from './ErrorModeText';
 import { ProblemNotice } from './ProblemNotice';
 
 export interface Action<TArgs = void> {
@@ -294,6 +295,12 @@ export function DetailsPanel({ version, importedFrom }: { version: RuleSetVersio
           <dt>{t('details.hitPolicy')}</dt>
           <dd>{t(policyKey)}</dd>
         </div>
+        {version.errorMode !== undefined ? (
+          <div>
+            <dt>{t('errorMode.field')}</dt>
+            <dd><ErrorModeText mode={version.errorMode} explain /></dd>
+          </div>
+        ) : null}
         <div>
           <dt>{t('details.rows')}</dt>
           <dd className="tnum">{version.definition.rules.length}</dd>

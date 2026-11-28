@@ -75,6 +75,8 @@ const lifecycle = {
   version: z.number().int().min(1),
   status: z.enum(VERSION_STATUSES),
   hitPolicy: z.string(),
+  /** How an error in an expression is treated (RLE-236); read as a plain label, absent from an older engine. */
+  errorMode: z.string().optional(),
   effectiveFrom: nullableString,
   lockVersion: z.number().int(),
   canonicalHash: z.string(),

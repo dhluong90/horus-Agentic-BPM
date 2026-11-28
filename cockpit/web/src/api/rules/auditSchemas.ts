@@ -21,6 +21,8 @@ export const loggedDecision = z
     ruleSet: z.string(),
     version: z.number().int(),
     hitPolicy: z.string(),
+    /** The mode the decision was made in; `unknown` for a row logged before modes were stored (RLE-236). */
+    errorMode: z.string().optional(),
     outcome: z.string(),
     errorCode: nullableString,
     inputs: z.record(z.string(), z.unknown()),
