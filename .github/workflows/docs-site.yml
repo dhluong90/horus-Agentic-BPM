@@ -3,9 +3,9 @@ name: Docs site
 on:
   push:
     branches: [main]
-    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", "cockpit/web/scripts/chip-detector.mjs", ".github/workflows/docs-site.yml"]
   pull_request:
-    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", ".github/workflows/docs-site.yml"]
+    paths: ["wiki/**", "site/**", "examples/rule-engine-only/**", "tools/extract-guide-commands.py", "cockpit/web/scripts/check-licences.mjs", "cockpit/web/scripts/axe-site.mjs", "cockpit/web/scripts/chip-detector.mjs", ".github/workflows/docs-site.yml"]
   workflow_dispatch:
 permissions:
   contents: read

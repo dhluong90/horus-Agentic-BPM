@@ -113,14 +113,6 @@
 .status--muted { color: var(--muted); font-weight: 500; }
 /* A count or metric: a tabular number and its muted label. */
 .count { font: var(--type-caption); color: var(--muted); white-space: nowrap; }
-/* Status badges: still used by the rules, approvals and process screens until their pass. */
-.badge {
-  display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 8px; border-radius: var(--radius-pill); font: var(--type-caption); font-weight: 600;
-  background: var(--surface-3); color: var(--ink-2); white-space: nowrap;
-}
-.badge--accent { background: var(--accent-soft); color: var(--accent); }
-.badge--ok { background: var(--ok-soft); color: var(--ok); }
-.badge--muted { color: var(--muted); }
 
 /* ---------- Tables ---------- */
 .qtable { width: 100%; border-collapse: separate; border-spacing: 0; font: var(--type-body); }
@@ -166,8 +158,8 @@
 .facts-list dt { color: var(--muted); font: var(--type-label); }
 .facts-list dd { margin: 0; color: var(--ink); }
 .queue__preview-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-/* The kind of change (rule set or process): a neutral tag, never a status colour. */
-.tag--kind { background: var(--surface-3); color: var(--ink-2); font-weight: 500; }
+/* The kind of change (rule set or process): plain muted text beside the title, never a box or a status colour. */
+.queue-card__kind { font: var(--type-caption); color: var(--muted); white-space: nowrap; }
 /* Disabled is not a colour (styleguide 3): surface-3 fill, muted text, no border; the reason is written above it. */
 .queue__decision .btn:disabled { opacity: 1; background: var(--surface-3); border-color: transparent; color: var(--muted); }
 .queue__decision { display: flex; flex-direction: column; gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
