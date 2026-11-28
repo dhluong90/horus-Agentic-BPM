@@ -78,4 +78,24 @@ class ExpressionArchitectureTest {
                 .because("today() and now() read the evaluation context's clock only (TR-DET-05)")
                 .check(library);
     }
+    @Test
+    void ADR_0028_feel_reads_no_default_locale_or_zone() {
+        noClasses().that().resideInAPackage("io.github.dhluong90.bpm.expr.feel..")
+                .should().callMethod(java.util.Locale.class, "getDefault")
+                .orShould().callMethod(java.time.ZoneId.class, "systemDefault")
+                .orShould().callMethod(java.util.TimeZone.class, "getDefault")
+                .orShould().callMethod(String.class, "toUpperCase")
+                .orShould().callMethod(String.class, "toLowerCase")
+                .orShould().callMethod(String.class, "format", String.class, Object[].class)
+                .because("a result may not depend on the host's locale or zone (ADR-0028 determinism rules)")
+                .check(library);
+    }
+
+    @Test
+    void ADR_0028_feel_contract_does_not_leak_into_api_and_spi() {
+        noClasses().that().resideInAnyPackage("io.github.dhluong90.bpm.expr.api..", "io.github.dhluong90.bpm.expr.spi..")
+                .should().dependOnClassesThat().resideInAPackage("io.github.dhluong90.bpm.expr.feel..")
+                .because("the feel package has no 1.x compatibility promise until the 1.2 gate (ADR-0028)")
+                .check(library);
+    }
 }

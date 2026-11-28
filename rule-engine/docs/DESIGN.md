@@ -303,6 +303,39 @@ Java value mapping in `api` (ADR-0016), fixed now so FEEL types are additive lat
 | FEEL context | `Map<String, Object>` (immutable, insertion order) | S2 |
 | FEEL range | `Range` record | S2 |
 
+### 3.6 FEEL and DMN contracts (ADR-0028)
+
+Five layers, one interface each, so the parser (#197), the evaluator (#198), the built-ins (#199), DMN XML (#200) and tables and graphs (#201, #202) are built in parallel. Interfaces and stubs are in `bpm-expression` (`io.github.dhluong90.bpm.expr.feel`) and in `rule-engine-core` (`rules.internal.dmn`); every stub throws a named "not yet implemented" error with its issue number.
+
+```mermaid
+flowchart LR
+  classDef own fill:#e8f3ec,stroke:#2f6f4f,color:#12301f
+  classDef old fill:#f4f4f4,stroke:#888,color:#222
+  classDef reference fill:#fff7e0,stroke:#b58900,color:#3a2e00
+  SRC["FEEL text"] --> P["FeelParser (#197)"]:::own
+  P -->|"FeelNode, with offsets"| E["FeelEngine (#198)"]:::own
+  B["FeelBuiltins (#199)"]:::own -->|"FeelFunction"| E
+  E -->|"S-FEEL subset lowered"| X["Expr, compiled profile"]:::old
+  E -->|"general profile"| G["Frame walk, step budget"]:::own
+  XML["DMN XML"] --> R["DmnXmlReader (#200)"]:::own
+  R -->|"DmnModel, expressions as text"| C["BoxedExpressionCompiler (#201)"]:::own
+  C --> D["DmnEvaluator, graph (#202)"]:::own
+  C -->|"text + scope"| P
+  C -->|"evaluate"| E
+  D --> C
+  V1["urn:horus-bpm:expr:v1 and feel-1.0-subset, frozen"]:::old --> X
+  TCK["DMN TCK, differential test, replay corpus"]:::reference -.-> E
+  TCK -.-> R
+  TCK -.-> D
+```
+
+Rules that bind every stream:
+- **Values.** Java natural types, `null` is `null`, money is `Money`; the full table is in ADR-0028 section 3. `ValueType` is not extended.
+- **Errors.** `spec` mode turns recoverable errors into `null` and a warning with the node offset; `strict` throws. Step budget, depth, regular expressions, input size and a money currency mismatch fail in both modes.
+- **Determinism.** Clock and zone come from the caller; no default locale or zone; no hash order; own stable sort; tz database version logged with the decision.
+- **Identity.** A stored language id keeps its meaning forever. The full engine is `urn:horus-bpm:expr:feel:1`, preview until the 1.2 gate; the OMG FEEL URI keeps the 1.0 dialect. A published revision never changes behaviour; a changed result is a new revision. v1 hashes are untouched; FEEL text is hashed in the normal form of `FeelPrinter`, frozen per revision by a golden file.
+- **Boundaries.** The DMN layers see FEEL only through the interfaces; the DMN reader does not parse FEEL; built-ins do not import the parser or the engine.
+
 ## 4. Java API and REST contract
 
 ### 4.1 Java API (`io.github.dhluong90.bpm.rules.api`, ADR-0022)
