@@ -106,10 +106,14 @@ class SubsetBpmnReaderTest {
     }
 
     @Test
-    void only_utf8_is_read_so_the_stored_source_is_what_was_parsed() {
+    void a_declared_encoding_is_read_as_declared_so_the_stored_source_is_what_was_parsed() {
         byte[] latin1 = ("<?xml version=\"1.0\" encoding=\"ISO-8859-1\"?>" + HEAD.substring(HEAD.indexOf("?>") + 2)
                 + "<bpmn:startEvent id=\"s\" name=\"caf\u00e9\"/>" + TAIL).getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
-        assertThatThrownBy(() -> reader.read(latin1)).isInstanceOf(BpmnUnsafeXmlException.class);
+        assertThat(reader.read(latin1).flowElements().get(0).name()).isEqualTo("caf\u00e9");
+        // the same bytes under a UTF-8 declaration are not valid UTF-8
+        byte[] mislabelled = new String(latin1, java.nio.charset.StandardCharsets.ISO_8859_1)
+                .replace("ISO-8859-1", "UTF-8").getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        assertThatThrownBy(() -> reader.read(mislabelled)).isInstanceOf(BpmnUnsafeXmlException.class);
     }
 
     @Test

@@ -2828,3 +2828,43 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The reader binds the step to the handler `kyc.check` by name, as `horus:handler` does: the canonical form and the hash are equal for the two files, and the export writes `horus:handler` and no `implementation`. Naming the same handler in both is allowed; two different names are `IMPLEMENTATION_HANDLER_CONFLICT`; a name that is not a letter followed by letters, digits, `_`, `.` or `-` (at most 100) is `IMPLEMENTATION_HANDLER_INVALID`. The engine never loads a class or calls a service from this value. `##WebService`, any other URL or URN, and the urn form on a task that is not a service task stay refused (`BPMN_UNSUPPORTED_ELEMENT`, `not planned`).
 - **Example:** `urn:horus-bpm:handler:kyc.check` -> handler `kyc.check`; `##WebService` -> refused, element `implementation`.
 - **Test ID:** `PRE_385_implementation_urn_names_the_handler_and_gives_the_same_definition_as_horus_handler`, `PRE_385_two_different_names_or_an_invalid_name_are_refused`, `PRE_385_every_other_implementation_value_and_the_urn_on_other_tasks_stay_refused` (`RefusalsLiftedTest`)
+
+### PRE-386 A file may declare an encoding other than UTF-8: ISO-8859-n, windows-125n or US-ASCII
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** contract
+- **Given:** A process file whose declaration says `encoding="ISO-8859-1"` and whose task is named `Kiém tra ho so`, written in those bytes; the same with `windows-1252` and a euro sign; UTF-8 bytes under `US-ASCII`; a `UTF-16` declaration.
+- **When:** Each is imported.
+- **Then:** The bytes are decoded once, strictly, in the declared encoding and the parser reads that text, so the stored source and the parsed document never differ: the task name is `Kiém tra ho so`, and the export is UTF-8 with its own declaration. Bytes that are not valid in the declared encoding, an encoding the JVM does not know, UTF-16 and UTF-32 (which hide the markup from the declaration check), and a byte order mark with a non-UTF-8 declaration are refused with `BPMN_UNSAFE_XML`. A file with no declaration is UTF-8 as before.
+- **Example:** `encoding="ISO-8859-1"`, byte `0xE9` -> `é`; `encoding="UTF-16"` -> `422 BPMN_UNSAFE_XML`.
+- **Test ID:** `PRE_386_a_file_in_iso_8859_1_is_read_as_the_text_it_declares_and_exports_as_utf_8`, `PRE_386_windows_1252_and_us_ascii_declarations_are_read_and_a_mismatch_is_refused` (`ModellerFileReadingTest`), `the_declared_encoding_decides_how_the_bytes_are_read`, `an_encoding_that_hides_the_markup_or_does_not_match_the_bytes_is_refused` (`XmlHardeningTest`)
+
+### PRE-387 A process id that is not a key, a message with no name and a lane set with no id are read; the export restores the process id
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** contract
+- **Given:** A process `_3d1ef204-2d4c-4643-8fc5-c319cc032ec0` and a process `Loan_Review`; two processes `Loan_Review` and `loan-review` in one collaboration; messages `Message_1404332496319` and `_9f` with no name; a message `m1` named `Message_9` beside an unnamed `Message_9`; a `laneSet` with no id.
+- **When:** They are imported, and the first is exported.
+- **Then:** The definition key is the id in lower case with every run of other characters as one hyphen, `p-` in front when it would not start with a letter, at most 100 characters: `p-3d1ef204-2d4c-4643-8fc5-c319cc032ec0`, `loan-review`. The same id always gives the same key; a key that is already kebab-case is never changed. The reader keeps the original id with the process, the export writes it back (the process, its participant `processRef`, the diagram plane), and it is not in the canonical form, so the hash is the same. Two ids that map to one key are `422 VALIDATION_FAILED`, `PROCESS_ID_COLLISION`. A message with no `name` takes its id as the name, with other characters as `_` and `m` in front when it would not start with a letter; if another message has that name the file is refused with `MESSAGE_NAME_COLLISION`. The export writes the name it took; message ids are not restored, because the engine writes a message by its name. A lane set or lane with no id gets `laneSet_line<n>` or `lane_line<n>`.
+- **Example:** `_3d1ef204-...` -> key `p-3d1ef204-...`, export `<process id="_3d1ef204-...">`; `Loan_Review` + `loan-review` -> `PROCESS_ID_COLLISION`.
+- **Test ID:** `PRE_387_a_process_id_that_is_not_a_key_is_mapped_deterministically_and_the_export_restores_it`, `PRE_387_two_processes_that_map_to_one_key_are_refused_and_a_key_is_never_changed`, `PRE_387_a_message_with_no_name_takes_its_mapped_id_and_a_lane_set_without_an_id_is_read` (`ModellerFileReadingTest`)
+
+### PRE-388 A process that does not say isExecutable is executable
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** contract
+- **Given:** A process with no `isExecutable` attribute, and one with `isExecutable="false"`.
+- **When:** Each is imported.
+- **Then:** BPMN leaves the attribute open when it is absent, and a modeller that never writes it is not saying "do not run": the first imports. `isExecutable="false"` is the author's word and stays `NOT_EXECUTABLE`; in a collaboration it is a pool kept for display. `horus:resultVariable` on a user task and `horus:correlationKey` on a message wait stay required: a result with no variable would merge into every process variable, and a message with no key could reach any instance.
+- **Example:** `<process id="kyc-review">` -> imports; `isExecutable="false"` -> `NOT_EXECUTABLE`.
+- **Test ID:** `PRE_388_a_process_that_does_not_say_isExecutable_is_executable_and_false_stays_refused` (`ModellerFileReadingTest`)
+
+### PRE-389 An import and an item definition are ignored with a warning
+- **Traces to:** `TR-STD-04`
+- **Milestone:** M3
+- **Kind:** contract
+- **Given:** A file with `<import importType="http://www.w3.org/2001/XMLSchema" location="types.xsd"/>` and `<itemDefinition id="i1" structureRef="string"/>`.
+- **When:** It is imported.
+- **Then:** The file imports and `warnings` lists `BPMN_IMPORT_IGNORED` and `ITEM_DEFINITION_IGNORED`: the engine's variables are typed by their values and it fetches no other file. The stored source keeps both. `startQuantity` and `completionQuantity` of 1 (the default) were already accepted; any other value stays refused (a token carries no quantity).
+- **Example:** `import` -> warning `BPMN_IMPORT_IGNORED`, `201`.
+- **Test ID:** `PRE_389_an_import_and_an_item_definition_are_ignored_with_a_warning_and_not_refused` (`ModellerFileReadingTest`)

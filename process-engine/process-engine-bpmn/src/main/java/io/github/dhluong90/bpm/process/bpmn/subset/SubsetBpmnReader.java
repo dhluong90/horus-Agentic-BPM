@@ -91,6 +91,7 @@ import io.github.dhluong90.bpm.process.internal.model.foreign.ForeignFragment;
 import io.github.dhluong90.bpm.process.internal.model.horus.CompensateHandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.DecisionRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.OnFailure;
+import io.github.dhluong90.bpm.process.internal.model.horus.OriginalId;
 import io.github.dhluong90.bpm.process.internal.model.horus.HandlerRef;
 import io.github.dhluong90.bpm.process.internal.model.horus.HorusExtension;
 import io.github.dhluong90.bpm.process.internal.json.CanonicalJson;
@@ -253,12 +254,11 @@ public final class SubsetBpmnReader implements DefinitionReader {
             throw new DefinitionTooLargeException("The document has " + source.length + " bytes; at most "
                     + limits.maxBytes() + " are accepted (horus.bpm.processes.definitions.max-bytes)");
         }
-        String text = XmlHardening.utf8(source);
+        String text = XmlHardening.decode(source);
         XMLInputFactory factory = XmlHardening.newInputFactory(limits);
         try {
             XMLStreamReader xml = factory.createXMLStreamReader(new StringReader(text));
             try {
-                XmlHardening.requireUtf8Declaration(xml);
                 Pass pass = new Pass(xml);
                 List<Process> all = pass.document();
                 return new Result(all.get(0), all, pass.warnings);
@@ -335,6 +335,14 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     warn("CHOREOGRAPHY_KEPT_AS_RECEIVED", "A choreography is kept as received and is not run: model each"
                             + " participant as an executable process", local, attr("id"));
                     skip();
+                } else if (BPMN.equals(ns) && ("import".equals(local) || "itemDefinition".equals(local))) {
+                    // The type information of a data item is not used to run a step: the engine's variables are
+                    // typed by their values. Listed as a warning so the approver sees it, never refused.
+                    warn("IMPORT".equals(local.toUpperCase(java.util.Locale.ROOT)) ? "BPMN_IMPORT_IGNORED"
+                            : "ITEM_DEFINITION_IGNORED", "A " + local + " describes the type of data items or points to"
+                            + " another file; it is kept in the stored source and not used to run a step", local,
+                            attr("id"));
+                    skip();
                 } else if (BPMN.equals(ns) && "category".equals(local)) {
                     category();
                 } else if (BPMN.equals(ns) && "error".equals(local)) {
@@ -372,6 +380,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             ref.line()));
                 }
             }
+            checkKeyCollisions();
+            checkDerivedNames();
             List<Process> executable = executableProcesses();
             // #499: the catch events of an instantiating event-based gateway create the instance, so no variable can
             // carry a key for them; they need no horus:correlationKey.
@@ -427,7 +437,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         private static boolean ownsPool(Collaboration c, Process p) {
-            return c.participants().stream().anyMatch(x -> p.id().equals(x.processRef()));
+            return c.participants().stream().anyMatch(x -> p.id().equals(x.processRef())
+                    || p.info() != null && p.info().extensions().first(OriginalId.class)
+                    .filter(o -> o.id().equals(x.processRef())).isPresent());
         }
 
         /** A process as read: executable or not, with where its key was written. */
@@ -466,8 +478,8 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 if (participant.processRef() == null) {
                     continue;
                 }
-                pointed.add(participant.processRef());
-                if (processes.stream().noneMatch(r -> r.process().id().equals(participant.processRef()))) {
+                pointed.add(keyFor(participant.processRef()));
+                if (processes.stream().noneMatch(r -> r.process().id().equals(keyFor(participant.processRef())))) {
                     invalid.add(new DefinitionProblem("PARTICIPANT_PROCESS_MISSING", "The participant points to process '"
                             + safe(participant.processRef()) + "', which this file does not hold", "participant",
                             safe(participant.id()), 1));
@@ -609,6 +621,12 @@ public final class SubsetBpmnReader implements DefinitionReader {
             String messageId = id();
             String messageName = attr("name");
             int at = line();
+            if (messageName == null && messageId != null && !messageId.startsWith("_missing_")) {
+                // A modeller may leave a message unnamed: its id stands for the name, mapped to the letters, digits
+                // and '_', '.', ':', '-' a message name has, starting with a letter. Two that map alike are refused.
+                messageName = nameOfId(messageId);
+                derivedMessageNames.add(messageName);
+            }
             if (messageName == null || !MESSAGE_NAME.matcher(messageName).matches()) {
                 invalid.add(new DefinitionProblem("MESSAGE_NAME_INVALID", "A message needs a name of 1 to 100"
                         + " letters, digits, '_', '.', ':' or '-', starting with a letter", "message",
@@ -617,6 +635,27 @@ public final class SubsetBpmnReader implements DefinitionReader {
                 messageNames.put(messageId, messageName);
             }
             children("message", messageId, false);
+        }
+
+        private final List<String> derivedMessageNames = new ArrayList<>();
+
+        private static String nameOfId(String id) {
+            String name = id.replaceAll("[^A-Za-z0-9_.:-]", "_");
+            if (name.isEmpty() || !Character.isLetter(name.charAt(0))) {
+                name = "m" + name;
+            }
+            return name.length() > 100 ? name.substring(0, 100) : name;
+        }
+
+        /** A message name derived from an id that another message's name equals makes two messages one. */
+        private void checkDerivedNames() {
+            for (String derived : derivedMessageNames) {
+                if (messageNames.values().stream().filter(derived::equals).count() > 1) {
+                    invalid.add(new DefinitionProblem("MESSAGE_NAME_COLLISION", "The unnamed message that takes its name"
+                            + " '" + safe(derived) + "' from its id has the name of another message; name one of them",
+                            "message", safe(derived), 1));
+                }
+            }
         }
 
         /** Replaces the message reference of every message element by the message's name. */
@@ -725,10 +764,24 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         private Read process() throws XMLStreamException {
-            String key = attr("id");
+            String rawId = attr("id");
+            String key = rawId;
+            List<HorusExtension> processExt = new ArrayList<>();
+            if (rawId != null && !KEY.matcher(rawId).matches()) {
+                // Modellers write ids such as _3d1ef204-... or Process_1; the id is the definition key, so it is
+                // mapped to a kebab-case key, deterministically, and the export writes the original back.
+                String mapped = keyOf(rawId);
+                if (mapped != null) {
+                    key = mapped;
+                    processKeys.put(rawId, mapped);
+                    processExt.add(new OriginalId(rawId));
+                }
+            }
             String name = attr("name");
             int line = line();
-            boolean executable = "true".equals(attr("isExecutable"));
+            // BPMN leaves isExecutable open when it is absent; a process that does not say it is not executable is read as
+            // executable, so a file from a modeller that never writes the attribute imports.
+            boolean executable = !"false".equals(attr("isExecutable"));
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
             laneSink = new ArrayList<>();
@@ -740,9 +793,49 @@ public final class SubsetBpmnReader implements DefinitionReader {
                             + " take the group from", "userTask", safe(taskId), at)));
             pendingAssignee.clear();
             Process read = withRefs(new Process(key == null ? "_missing_" + line : key, name, ProcessType.NONE,
-                    executable, false, elements, artifacts, laneSink, null));
+                    executable, false, elements, artifacts, laneSink, processExt.isEmpty() ? null
+                    : info(processExt, List.of())));
             laneSink = null;
             return new Read(read, executable, line);
+        }
+
+        /** Process ids that were mapped to a definition key: original id to key (collisions are checked at the end). */
+        private final Map<String, String> processKeys = new HashMap<>();
+
+        /** @return the process key a modeller id maps to, or null when nothing of it is left */
+        private static String keyOf(String id) {
+            String key = id.toLowerCase(java.util.Locale.ROOT).replaceAll("[^a-z0-9]+", "-").replaceAll("^-+|-+$", "");
+            if (key.isEmpty()) {
+                return null;
+            }
+            if (!Character.isLetter(key.charAt(0))) {
+                key = "p-" + key;
+            }
+            if (key.length() > 100) {
+                key = key.substring(0, 100).replaceAll("-+$", "");
+            }
+            return key;
+        }
+
+        /** The key a process reference (a participant's {@code processRef}) stands for. */
+        private String keyFor(String ref) {
+            return ref == null ? null : processKeys.getOrDefault(ref, ref);
+        }
+
+        /** Two processes that map to one key, or a mapped key that another process already has, are refused. */
+        private void checkKeyCollisions() {
+            Map<String, String> owner = new HashMap<>();
+            for (Read read : processes) {
+                String key = read.process().id();
+                String raw = read.process().info() == null ? null : read.process().info().extensions()
+                        .first(OriginalId.class).map(OriginalId::id).orElse(null);
+                String previous = owner.put(key, raw == null ? key : raw);
+                if (previous != null && (raw != null || !previous.equals(key))) {
+                    invalid.add(new DefinitionProblem("PROCESS_ID_COLLISION", "Process ids '" + safe(previous) + "' and '"
+                            + safe(raw == null ? key : raw) + "' both map to the definition key '" + safe(key)
+                            + "'; rename one of them", "process", safe(raw == null ? key : raw), read.line()));
+                }
+            }
         }
 
         /** User tasks of the process being read that name no assignee: id to line. */
@@ -797,7 +890,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
 
         /** A {@code laneSet}: kept for display and as a work group hint, never as an assignment (#497). */
         private LaneSet laneSet() throws XMLStreamException {
-            String id = id();
+            String id = optionalId("laneSet");
             String name = attr("name");
             List<Lane> lanes = new ArrayList<>();
             while (nextChild()) {
@@ -811,7 +904,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
         }
 
         private Lane lane() throws XMLStreamException {
-            String id = id();
+            String id = optionalId("lane");
             String name = attr("name");
             List<String> refs = new ArrayList<>();
             LaneSet child = null;
@@ -879,7 +972,7 @@ public final class SubsetBpmnReader implements DefinitionReader {
             Map<String, String> poolOfProcess = new HashMap<>();
             for (Participant participant : collaboration.participants()) {
                 if (participant.processRef() != null) {
-                    poolOfProcess.put(participant.processRef(), participant.id());
+                    poolOfProcess.put(keyFor(participant.processRef()), participant.id());
                 }
             }
             Map<String, FlowNode> nodes = new HashMap<>();
@@ -3127,6 +3220,16 @@ public final class SubsetBpmnReader implements DefinitionReader {
                     || event == XMLStreamConstants.ENTITY_DECLARATION) {
                 throw new BpmnUnsafeXmlException("DOCTYPE and entity declarations are not accepted (line " + line() + ")");
             }
+        }
+
+        /** An id that BPMN leaves optional (a lane set, a lane): when absent, one is made from the line. */
+        private String optionalId(String kind) {
+            String id = attr("id");
+            if (id == null) {
+                String made = kind + "_line" + line();
+                return ids.add(made) ? made : made + "_" + ids.size();
+            }
+            return id();
         }
 
         private String id() {
