@@ -205,6 +205,17 @@ Codes of expression problems, in `when` and `then` cells. Each is refused at imp
 
 New codes may be added; a client should show `message` for a code it does not know.
 
+A DMN import adds these codes to the same entries (`ruleId` and `column` are `null`; the line is in `message`). See [[How to import a DMN decision table|Rule-Engine-Importing-DMN]].
+
+| `code` | Meaning |
+|---|---|
+| `DMN_RULE_ID_COLLISION` | Two rule ids map to the same v1 id |
+| `DMN_RULE_SET_NAME` | No rule set name can be made from the decision id or name |
+| `DMN_TYPE_UNSUPPORTED` | A type that has no v1 form: `time`, `Any`, a duration, a type with a constraint, a structured column, a collection of structures, a type that refers to itself or is not defined |
+| `DMN_ALLOWED_VALUES_UNSUPPORTED` | Allowed or output values that are a range or a comparison, not a list of constants, or on a list input |
+| `DMN_OUTPUT_NOT_ALLOWED` | A rule's output literal is not in the output values the table lists |
+| `DMN_AGGREGATION_UNSUPPORTED` | An aggregation on a table that is not `COLLECT`, an unknown aggregation, or one on a table with several outputs |
+
 Under strict mode (`decision-log.require-explicit-mask: true`) an input that declares no `mask` is one entry with `ruleId: null` and `column` the input name, at import, draft replacement, publication request and approval: `[{ "ruleId": null, "column": "nationalId", "message": "declares no mask, and decision-log.require-explicit-mask requires every input to declare mask: true or mask: false" }]`. Add `mask: true`, or `mask: false` if the input holds no personal data.
 
 ### PAYLOAD_TOO_LARGE

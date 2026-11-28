@@ -288,25 +288,24 @@ class DmnRuleSetTest {
 
         assertRefused(table(input, rule).replace("hitPolicy=\"FIRST\"", "hitPolicy=\"PRIORITY\""),
                 "Hit policy PRIORITY arrives in stage S1");
-        assertRefused(table(input, rule).replace("hitPolicy=\"FIRST\"", "hitPolicy=\"COLLECT\" aggregation=\"SUM\""),
-                "Hit policy COLLECT with aggregation SUM arrives in stage S1");
         assertRefused(table(input, rule.replace("<text>true</text></outputEntry>", "<text>age * 2</text></outputEntry>")),
                 "Rule R1, output ok: 'age * 2'");
         assertRefused(table(input.replace("<text>age</text>", "<text>applicant.age</text>"), rule),
                 "Input expression 'applicant.age' must be a plain input name");
         assertRefused(table(input.replace("typeRef=\"number\"", "typeRef=\"tAge\""), rule),
-                "typeRef 'tAge' of input 'age' is not supported; item definitions arrive in stage S1");
+                "typeRef 'tAge' of input 'age' has no schema version 1 type");
         assertUnsupported(table(input, rule).replace("<decision ", "<businessKnowledgeModel id=\"bkm1\" name=\"b\"/><decision "),
                 "<businessKnowledgeModel id=\"bkm1\"> is not supported; it is added in stage S2");
-        assertUnsupported(table(input, rule).replace("<decision ", "<itemDefinition id=\"tAge\" name=\"tAge\"/><decision "),
-                "<itemDefinition id=\"tAge\"> is not supported; it is added in stage S1");
+        assertRefused(table(input.replace("typeRef=\"number\"", "typeRef=\"tAge\""), rule)
+                        .replace("<decision ", "<itemDefinition id=\"tAge\" name=\"tAge\"/><decision "),
+                "Item definition 'tAge' of input 'age' has neither a typeRef nor components");
         assertUnsupported(DMN15 + "<decision id=\"a\" name=\"a\"><literalExpression><text>1</text></literalExpression></decision>"
                 + "</definitions>", "<literalExpression id=\"a\"> is not supported; it is added in stage S1");
         assertRefused(table(input, rule).replace("</definitions>", "<decision id=\"second\" name=\"second\"/></definitions>"),
                 "More than one <decision>");
-        assertRefused(table(input, rule).replace("id=\"rate-check\"", "id=\"Decision_1\"").replace("name=\"rate-check\"", "name=\"Rate check\"")
-                        .replace("id=\"d\" name=\"d\"", "id=\"Definitions_1\" name=\"DRD\""),
-                "give the decision a kebab-case id such as card-fee");
+        assertRefused(table(input, rule).replace("id=\"rate-check\"", "id=\"___\"").replace("name=\"rate-check\"", "name=\"!!\"")
+                        .replace("id=\"d\" name=\"d\"", "id=\"_\" name=\"?\""),
+                "No rule set name can be made from the decision id '___'");
         assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.DMN_XML, utf8(table(input, rule)
                 .replace("<inputExpression ", "<inputExpression expressionLanguage=\"javascript\" "))))
                 .isInstanceOf(UnsupportedStandardException.class)
