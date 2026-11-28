@@ -192,7 +192,19 @@ gh attestation verify cockpit-spring-boot-starter-1.0.0.jar --repo $R \
 grep '\.jar$' SHA256SUMS | sed -E 's#  .*/#  #' | sort | diff - sbom-subjects.txt
 ```
 
-For every release, run both commands on the cockpit starter jar from the published Release, plus the first one on a copy with one byte changed, and record the output in the release issue.
+The gate above runs the same checks on every file during the tag run (#258 recorded them by hand once, on `v1.0.0`). For every release, also run both commands on the cockpit starter jar from the published Release, plus the first one on a copy with one byte changed, and record the output in the release issue.
+
+### The gate in the release workflow
+
+The last step of the job `attest` runs `tools/release/verify-release-attestations.sh` on the archive it just signed (`TR-SEC-06`, #664). Because `github-release` needs `attest`, a failure here leaves no Release. The script runs the two commands above on every file, not only the cockpit starter:
+
+- every jar and POM must have a provenance statement signed by `release.yml` at this tag;
+- every jar must have a CycloneDX statement with the same signer and tag, whose subject digests are exactly the staged jars and whose content equals `bom-release.json`;
+- `bom-release.json` must exist and be a CycloneDX document with components.
+
+A missing, unsigned, wrong-tag or mismatched statement prints the file and exits `1`. The attestation service can lag a few seconds behind the signature, so each statement is tried up to five times, ten seconds apart.
+
+Dry run, with no tag and no signing: `tools/release/test-release-verify.sh` runs the script against a fake GitHub CLI and fixture archives, and the job "Release guard tests" runs it on every pull request that changes the release files. To try the real command against a published Release, download its jars, POMs and `bom-release.json` into one folder and run `REPO=dhluong90/horus-Agentic-BPM SOURCE_REF=refs/tags/v1.0.0 tools/release/verify-release-attestations.sh <folder>`. That only reads; it never creates a tag.
 
 ## After a release: weekly rescan
 
