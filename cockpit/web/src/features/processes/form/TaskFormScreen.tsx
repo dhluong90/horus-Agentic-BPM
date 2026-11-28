@@ -115,7 +115,7 @@ function RecordedDecision({ task, form, title }: { task: Task; form: TaskForm; t
   return (
     <article className="card taskform__card taskform__recorded" aria-labelledby="taskform-recorded">
       <h2 id="taskform-recorded" className="card__title">{t('form.recorded')}</h2>
-      <p className="taskform__signed">{t('form.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
+      <p className="taskform__signed">{t('form.completedAt', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' })}</p>
       {rows.length === 0 ? <p className="muted">{t('form.noFields')}</p> : (
         <dl className="taskform__grid taskform__values" aria-label={title}>
           {rows.map((row) => (

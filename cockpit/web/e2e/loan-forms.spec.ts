@@ -140,25 +140,26 @@ for (const size of SIZES) {
     await openLoanTask(page, 'approval', size, 'en');
     await page.getByRole('radio', { name: 'Approve', exact: true }).check();
     await page.getByRole('button', { name: 'Complete task' }).click();
-    const record = page.getByRole('article', { name: 'Recorded decision' });
+    const record = page.getByRole('article', { name: 'Current values' });
     await expect(record).toBeVisible();
     // Who and when, then the decision as submitted, with no form and no action to take.
-    await expect(record).toContainText(/Completed by an, /);
+    await expect(record).toContainText(/Completed by an at /);
     await expect(record.locator('dt', { hasText: 'Your decision' })).toBeVisible();
     await expect(record.locator('dd').first()).toHaveText('Approve');
+    await expect(page.getByText('Values now on the case, not as submitted.')).toBeVisible();
     await expect(page.getByRole('form')).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Complete task' })).toHaveCount(0);
     await expect(record.getByText('APPROVED', { exact: true })).toHaveCount(0);
     await expect(record.getByText('***')).toHaveCount(0);
     expect(await noHorizontalScroll(page)).toBe(true);
-    await page.screenshot({ path: `${SHOTS}/completed-${String(size.width)}.png`, fullPage: false });
+    await page.screenshot({ path: `${SHOTS}/completed-${String(size.width)}-v2.png`, fullPage: false });
   });
 }
 
 test('TR_UI_623_a_completed_task_reads_in_vietnamese', async ({ page }) => {
   await openLoanTask(page, 'approval', { width: 1440, height: 900 }, 'vi', (task) => ({ ...task, status: 'COMPLETED', completedBy: 'an', completedAt: '2026-11-20T03:20:00Z', allowedActions: [] }));
-  const record = page.getByRole('article', { name: 'Quyết định đã ghi nhận' });
+  const record = page.getByRole('article', { name: 'Giá trị hiện tại' });
   await expect(record).toBeVisible();
-  await expect(record).toContainText('an đã hoàn thành');
+  await expect(record).toContainText('an đã hoàn thành lúc');
   await expect(page.getByRole('form')).toHaveCount(0);
 });

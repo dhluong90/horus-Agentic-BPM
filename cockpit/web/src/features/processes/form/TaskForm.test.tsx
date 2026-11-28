@@ -47,11 +47,12 @@ describe('CKP-021 a task is completed through its declared form', () => {
     await userEvent.type(reason, 'Income is not verified');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
-    expect(await screen.findByText(/^Completed by an,/)).toBeInTheDocument();
+    expect(await screen.findByText(/^Completed by an at /)).toBeInTheDocument();
     expect(completions()).toHaveLength(1);
-    // The completed task is the auditor's record: the decision as submitted, read-only, with no form and no action.
-    const recorded = await screen.findByRole('article', { name: 'Recorded decision' });
+    // A completed task shows the values now on the case, read-only, with an honest note and no form or action.
+    const recorded = await screen.findByRole('article', { name: 'Current values' });
     expect(screen.queryByRole('form')).not.toBeInTheDocument();
+    expect(screen.getByText('Values now on the case, not as submitted.')).toBeInTheDocument();
     expect(within(recorded).getByText('Decision')).toBeInTheDocument();
     expect(within(recorded).getByText('REJECT')).toBeInTheDocument();
     expect(within(recorded).getByText('250,000,000 VND')).toBeInTheDocument();
