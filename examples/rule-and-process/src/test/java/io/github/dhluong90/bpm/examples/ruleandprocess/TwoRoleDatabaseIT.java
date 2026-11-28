@@ -19,6 +19,8 @@ import java.util.Base64;
 import java.util.List;
 import javax.sql.DataSource;
 import org.junit.jupiter.api.Test;
+import org.springframework.boot.WebApplicationType;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -33,8 +35,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
 
 /**
  * Two database roles (issue 700). The roles come from {@code deploy/postgres/app-role-grants.sql}, the script an
- * operator runs. The host migrates as {@code horus_owner} (its own Flyway, and both engines) and serves traffic as
- * {@code horus_app}, with {@code role-check=enforce} so the host does not start if the app role could own a table.
+ * operator runs. A separate migration step runs as {@code horus_owner} (the host's own Flyway, and both engines); the host
+ * serves traffic as {@code horus_app} and holds no owner setting, with {@code role-check=enforce} so the host does not start if the app role could own a table.
  * The test then works through the host (a card application over HTTP) and tries, as the app role, every way to
  * switch off a trigger or change the audit and seal tables.
  */
@@ -63,20 +65,29 @@ class TwoRoleDatabaseIT {
                 Statement statement = admin.createStatement()) {
             statement.execute(script());
         }
+        migrateAsOwner(url);
+        // The serving host gets the application role only: no owner settings, no migrations of its own.
         registry.add("spring.datasource.url", () -> url);
         registry.add("spring.datasource.username", () -> APP);
         registry.add("spring.datasource.password", () -> APP_PASSWORD);
-        registry.add("spring.flyway.url", () -> url);
-        registry.add("spring.flyway.user", () -> OWNER);
-        registry.add("spring.flyway.password", () -> OWNER_PASSWORD);
+        registry.add("spring.flyway.enabled", () -> "false");
         for (String engine : List.of("rules", "processes")) {
-            String prefix = "horus.bpm." + engine + ".database.";
-            registry.add(prefix + "owner-url", () -> url);
-            registry.add(prefix + "owner-username", () -> OWNER);
-            registry.add(prefix + "owner-password", () -> OWNER_PASSWORD);
-            registry.add(prefix + "app-role", () -> APP);
-            registry.add(prefix + "role-check", () -> "enforce");
+            String prefix = "horus.bpm." + engine + ".";
+            registry.add(prefix + "migrate-on-start", () -> "false");
+            registry.add(prefix + "database.role-check", () -> "enforce");
         }
+    }
+
+    /**
+     * The migration step: the same application, connected as the owner, which migrates the host's tables and both
+     * engines, grants the application role its rights and ends. The serving host below never sees the owner's password.
+     */
+    static void migrateAsOwner(String url) {
+        new SpringApplicationBuilder(RuleAndProcessApplication.class).web(WebApplicationType.SERVLET).profiles("dev")
+                .run("--server.port=0", "--spring.datasource.url=" + url, "--spring.datasource.username=" + OWNER,
+                        "--spring.datasource.password=" + OWNER_PASSWORD, "--HORUS_DEMO_PASSWORD=it-pass",
+                        "--horus.bpm.rules.database.app-role=" + APP, "--horus.bpm.processes.database.app-role=" + APP)
+                .close();
     }
 
     /** The operator's script with the psql variables filled in. */
@@ -187,5 +198,33 @@ class TwoRoleDatabaseIT {
         // and the owner could in fact switch a trigger off, which is what the app role must never be able to do
         assertThat(JdbcClient.create(owner).sql("SELECT has_table_privilege('pre_history', 'TRIGGER')")
                 .query(Boolean.class).single()).isTrue();
+    }
+
+    private static String url() {
+        return POSTGRES.getJdbcUrl().replaceFirst("/[^/?]+(\\?|$)", "/" + DATABASE + "$1");
+    }
+
+    /** Outside the dev profile an unset role-check is enforce: a serving role that owns the tables stops the start. */
+    @Test
+    void outside_dev_a_serving_role_that_owns_the_tables_refuses_to_start_with_a_named_code() {
+        assertThatThrownBy(() -> new SpringApplicationBuilder(RuleAndProcessApplication.class)
+                .web(WebApplicationType.SERVLET)
+                .run("--server.port=0", "--spring.datasource.url=" + url(), "--spring.datasource.username=" + OWNER,
+                        "--spring.datasource.password=" + OWNER_PASSWORD, "--spring.flyway.enabled=false",
+                        "--horus.bpm.rules.migrate-on-start=false", "--horus.bpm.processes.migrate-on-start=false",
+                        "--HORUS_DEMO_PASSWORD=it-pass").close())
+                .hasStackTraceContaining("HORUS-DB-ROLE-001");
+    }
+
+    /** The documented opt-out outside dev starts, and says so loudly (HORUS-DB-ROLE-002, logged at ERROR). */
+    @Test
+    void outside_dev_the_opt_out_starts_the_host() {
+        new SpringApplicationBuilder(RuleAndProcessApplication.class)
+                .web(WebApplicationType.SERVLET)
+                .run("--server.port=0", "--spring.datasource.url=" + url(), "--spring.datasource.username=" + OWNER,
+                        "--spring.datasource.password=" + OWNER_PASSWORD, "--spring.flyway.enabled=false",
+                        "--horus.bpm.rules.migrate-on-start=false", "--horus.bpm.processes.migrate-on-start=false",
+                        "--horus.bpm.rules.database.role-check=warn", "--horus.bpm.processes.database.role-check=warn",
+                        "--HORUS_DEMO_PASSWORD=it-pass").close();
     }
 }

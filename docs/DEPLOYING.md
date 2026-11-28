@@ -419,21 +419,26 @@ The compose file runs the production shape: two roles, neither a superuser.
 
 | Role | Does | Cannot |
 |---|---|---|
-| `horus_owner` | Owns the database and its tables. Runs the migrations of the host and of both engines, and the Rule Engine's decision log partition step. Used on connections opened for that work and closed after it | Serve a request |
+| `horus_owner` | Owns the database and its tables. Runs the migrations of the host and of both engines and the decision log partition step, in a separate migration step that ends when it is done | Serve a request |
 | `horus` | Serves every request through `spring.datasource` | Own a table, `ALTER`, `DROP` or `TRUNCATE` one, hold `TRIGGER`, `CREATE` in the schema, or touch a trigger |
 
 The split matters because a table owner can run `ALTER TABLE ... DISABLE TRIGGER`, which switches off the append-only audit triggers and the approval seal. The application role cannot.
 
-On its first start PostgreSQL runs [`deploy/postgres/initdb/10-application-role.sh`](../deploy/postgres/initdb/10-application-role.sh), which runs [`deploy/postgres/app-role-grants.sql`](../deploy/postgres/app-role-grants.sql). The host reads the owner's password from `secrets/db_owner_password` and the application role's from `secrets/db_password`. These variables, set in `docker-compose.yml`, make the host use both:
+On its first start PostgreSQL runs [`deploy/postgres/initdb/10-application-role.sh`](../deploy/postgres/initdb/10-application-role.sh), which runs [`deploy/postgres/app-role-grants.sql`](../deploy/postgres/app-role-grants.sql).
 
-| Variable | Value in compose | Role |
+The serving host never receives the owner's password. The compose file has a one-shot service, `migrate`, built from the same image, which connects as `horus_owner`, runs `HORUS_BPM_MIGRATE_ONLY=true` and ends with exit code 0 once the schema is current, the decision log partitions exist and `horus` has its grants. Only `migrate` mounts `secrets/db_owner_password`. The `host` service waits for `migrate` to complete (`service_completed_successfully`), then starts with the application role only:
+
+| Variable | `migrate` | `host` |
 |---|---|---|
-| `HORUS_DB_URL`, `HORUS_DB_USERNAME`, `HORUS_DB_PASSWORD` | `horus` | requests |
-| `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` | `horus_owner` | the host's own migrations |
-| `HORUS_BPM_RULES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD` | `horus_owner` | Rule Engine migrations and partitions |
-| `HORUS_BPM_PROCESSES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD` | `horus_owner` | Process Engine migrations |
-| `HORUS_BPM_RULES_DATABASE_APP_ROLE`, `HORUS_BPM_PROCESSES_DATABASE_APP_ROLE` | `horus` | the role each engine grants its data rights to after a migration |
-| `HORUS_BPM_RULES_DATABASE_ROLE_CHECK`, `HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK` | `enforce` | the host does not start if `horus` owns an engine table, holds `TRIGGER` or is a superuser |
+| `HORUS_DB_URL`, `HORUS_DB_USERNAME`, `HORUS_DB_PASSWORD` | `horus_owner` and the owner secret | `horus` and the application secret |
+| `HORUS_BPM_MIGRATE_ONLY` | `true` | unset |
+| `HORUS_BPM_RULES_DATABASE_APP_ROLE`, `HORUS_BPM_PROCESSES_DATABASE_APP_ROLE` | `horus`: the role each engine grants its data rights to after a migration | unset |
+| `SPRING_FLYWAY_ENABLED`, `HORUS_BPM_RULES_MIGRATE_ON_START`, `HORUS_BPM_PROCESSES_MIGRATE_ON_START` | default | `false` |
+| `HORUS_BPM_RULES_DATABASE_ROLE_CHECK`, `HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK` | not run | `enforce` (also the default outside the `dev` profile) |
+
+With the check on `enforce`, the host does not start if `horus` owns an engine table, holds `TRIGGER` or is a superuser. The log line starts with `HORUS-DB-ROLE-001`. Setting the check to `warn` or `off` outside the `dev` profile is an opt-out: the host starts and logs `HORUS-DB-ROLE-002` at ERROR on every start. Do not use it in production.
+
+Run the step again after every upgrade (`docker compose up -d` does it) and at least every few months (`docker compose run --rm migrate`), so the decision log has partitions for the coming months. The serving host cannot create them.
 
 After a start, confirm the split from the database. Expected: `horus_owner` owns the tables, and `horus` owns none.
 
@@ -444,7 +449,7 @@ docker compose exec postgres psql -U horus -d horus -c "ALTER TABLE pre_history 
 
 The first prints one line, `horus_owner|<number of tables>`. The second prints `ERROR:  must be owner of table pre_history`.
 
-For your own PostgreSQL, run the script once as an administrator (the command is in its header and in the [operations runbook](../wiki/Operations-Runbook.md#database-roles)), give the host the variables above, and keep the `enforce` check on. A database created before this change has one role that owns everything: reset the volume (`docker compose down -v`, below); the host refuses to start against it while the check is `enforce`. The soak test's compose file ([`perf/soak`](../perf/soak)) keeps one role on purpose.
+For your own PostgreSQL, run the script once as an administrator (the command is in its header and in the [operations runbook](../wiki/Operations-Runbook.md#database-roles)), run the same image once as a migration step with the owner credentials and `HORUS_BPM_MIGRATE_ONLY=true` (a Helm pre-install and pre-upgrade Job, an init container or a CI job), give the serving pods the application role only, and keep the `enforce` check on. A database created before this change has one role that owns everything: reset the volume (`docker compose down -v`, below); the host refuses to start against it while the check is `enforce`. The soak test's compose file ([`perf/soak`](../perf/soak)) keeps one role on purpose.
 
 ### Run without demo users
 

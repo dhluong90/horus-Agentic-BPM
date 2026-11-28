@@ -36,7 +36,10 @@ final class DatabaseRoles {
 
     /**
      * Checks the runtime role. {@code warn} logs one WARN, {@code enforce} refuses to start, {@code off} does
-     * nothing; unset is {@code warn} outside the {@code dev} profile and {@code off} inside it.
+     * nothing; unset is {@code enforce} outside the {@code dev} profile and {@code off} inside it. The refusal carries the
+     * code {@code HORUS-DB-ROLE-001}. Choosing {@code warn} or {@code off} outside {@code dev} is the documented
+     * opt-out and logs {@code HORUS-DB-ROLE-002} at ERROR on every start. A run with {@code horus.bpm.migrate-only}
+     * skips the check: that step runs as the schema owner by design.
      *
      * @param check the check on the runtime data source
      * @param database the settings
@@ -47,10 +50,18 @@ final class DatabaseRoles {
     static void verify(DatabaseRoleCheck check, RuleEngineProperties.Database database, Environment environment, Log log) {
         String mode = database.roleCheck() == null ? "" : database.roleCheck().strip().toLowerCase(java.util.Locale.ROOT);
         if (mode.isEmpty()) {
-            mode = environment.matchesProfiles("dev") ? "off" : "warn";
+            mode = environment.matchesProfiles("dev") ? "off" : "enforce";
+        }
+        if (environment.getProperty("horus.bpm.migrate-only", Boolean.class, false)) {
+            return;
         }
         if (!List.of("off", "warn", "enforce").contains(mode)) {
             throw new IllegalStateException("horus.bpm.rules.database.role-check must be warn, enforce or off, was " + mode);
+        }
+        boolean dev = environment.matchesProfiles("dev");
+        if (!dev && !mode.equals("enforce")) {
+            log.error("HORUS-DB-ROLE-002: horus.bpm.%s.database.role-check=%s outside the dev profile. The check that the serving database role cannot switch off the append-only and seal triggers is relaxed. This is not for production; set role-check=enforce."
+                    .formatted("rules", mode));
         }
         if (mode.equals("off")) {
             return;
@@ -68,7 +79,7 @@ final class DatabaseRoles {
         if (problems.isEmpty()) {
             return;
         }
-        String message = String.join("; ", problems) + ". It can switch off the append-only and seal triggers. Run the "
+        String message = "HORUS-DB-ROLE-001: " + String.join("; ", problems) + ". It can switch off the append-only and seal triggers. Run the "
                 + "application as a role that owns nothing and migrate as a separate owner "
                 + "(horus.bpm.rules.database.owner-*, docs/DEPLOYING.md, section Two database roles).";
         if (mode.equals("enforce")) {

@@ -41,25 +41,29 @@ public final class DatabaseRoleCheck {
         if (superuser) {
             found.add("the database role " + role + " is a superuser");
         }
-        List<String> owned = jdbc.sql("""
-                SELECT tablename FROM pg_tables
+        Tables owned = jdbc.sql("""
+                SELECT count(*) AS n, min(tablename) AS first FROM pg_tables
                 WHERE schemaname = current_schema() AND tablename LIKE 'pre\\_%'
-                  AND pg_has_role(current_user, tableowner, 'MEMBER') ORDER BY tablename
-                """).query(String.class).list();
-        if (!owned.isEmpty()) {
-            found.add("the database role " + role + " owns " + owned.size() + " pre_* table(s), for example "
-                    + owned.get(0) + ", and so can disable their triggers");
+                  AND pg_has_role(current_user, tableowner, 'MEMBER')
+                """).query((rs, row) -> new Tables(rs.getInt("n"), rs.getString("first"))).single();
+        if (owned.count() > 0) {
+            found.add("the database role " + role + " owns " + owned.count() + " pre_* table(s), for example "
+                    + owned.first() + ", and so can disable their triggers");
         }
-        List<String> trigger = jdbc.sql("""
-                SELECT tablename FROM pg_tables
+        Tables trigger = jdbc.sql("""
+                SELECT count(*) AS n, min(tablename) AS first FROM pg_tables
                 WHERE schemaname = current_schema() AND tablename LIKE 'pre\\_%'
                   AND has_table_privilege(current_user, quote_ident(schemaname) || '.' || quote_ident(tablename), 'TRIGGER')
-                  AND NOT pg_has_role(current_user, tableowner, 'MEMBER') ORDER BY tablename
-                """).query(String.class).list();
-        if (!trigger.isEmpty()) {
-            found.add("the database role " + role + " holds TRIGGER on " + trigger.size() + " pre_* table(s), for example "
-                    + trigger.get(0));
+                  AND NOT pg_has_role(current_user, tableowner, 'MEMBER')
+                """).query((rs, row) -> new Tables(rs.getInt("n"), rs.getString("first"))).single();
+        if (trigger.count() > 0) {
+            found.add("the database role " + role + " holds TRIGGER on " + trigger.count() + " pre_* table(s), for example "
+                    + trigger.first());
         }
         return List.copyOf(found);
+    }
+
+    /** A count of tables and the first name, so the check reads one row. */
+    private record Tables(int count, String first) {
     }
 }

@@ -126,7 +126,7 @@ WHERE i.inhparent = 'rle_decision'::regclass ORDER BY 1 DESC LIMIT 3;
 
 The host log has a warning from `horus-rle-partitions` that names the month and the cause. `GET /actuator/health` shows `partitionMaintenanceLastSuccess`.
 
-**Remedy.** If the application role is not the table owner, give the host the owner settings (see [the partition step](#the-decision-log-partition-step)): the roll-over then creates the month as the owner and moves the rows into it in the same transaction. Otherwise fix the cause in the log and restart the host: it creates the missing months at start-up.
+**Remedy.** If the application role is not the table owner, run the migration step again ([the partition step](#the-decision-log-partition-step)): it creates the month as the owner and moves the rows into it in the same transaction. Otherwise fix the cause in the log and restart the host: it creates the missing months at start-up.
 
 ### HorusUnkeyedSealAccepted
 
@@ -327,10 +327,10 @@ A replica that already holds the version in its cache serves it until the cache 
 
 | Role | Used by | Rights |
 |---|---|---|
-| `horus_owner` | Migrations and the decision log partition step, on a connection opened for each run and closed after it. Never used for a request | Owns the tables. Not a superuser |
+| `horus_owner` | The migration step only: migrations and the decision log partitions. Never used for a request, and never given to a serving host | Owns the tables. Not a superuser |
 | the application role (`horus` in the compose file, `horus_app` below) | Every request | `SELECT`, `INSERT`, `UPDATE`, `DELETE` on the engine tables, minus `UPDATE` and `DELETE` on the append-only ones. No ownership, no `ALTER`, `TRUNCATE` or `TRIGGER`, no `CREATE` in the schema |
 
-The single-role set-up (one role in `spring.datasource`, nothing under `horus.bpm.*.database`, no `db_owner_password` secret in the compose file) still works and is **not for production**: that one role owns the tables and can switch off the append-only triggers. It is for a laptop walkthrough only. The compose file in the repository uses two roles.
+The single-role set-up is **not for production**: see [the single-role mode](#the-single-role-mode-development-only). The compose file in the repository uses two roles.
 
 ### Create the roles
 
@@ -345,20 +345,27 @@ psql --no-psqlrc --set ON_ERROR_STOP=1 --dbname horus \
 
 Take the passwords from your secret store. Neither role is a superuser, and `horus_app` is not a member of `horus_owner`.
 
-### Point the host at both roles
+### Run the migration as a separate step
 
-The host connects as the application role. Give each engine the owner's connection and the name of the application role. The engine migrates as the owner, then grants the application role what it needs. The host's own Flyway takes `spring.flyway.*`.
+The serving host connects as the application role and receives no owner credentials. The owner's password goes to one step that migrates and ends. It is the same image, started with `HORUS_BPM_MIGRATE_ONLY=true` and connected as `horus_owner`. It migrates the host's own tables and both engines, grants the application role its rights, creates the decision log partitions and exits with code 0. Run it as a Helm `pre-install,pre-upgrade` Job, an init container or a one-shot compose service. The compose file in the repository has the service `migrate`; `host` starts only after it completed.
 
-| What | Variable (or property) |
-|---|---|
-| Requests | `HORUS_DB_URL`, `HORUS_DB_USERNAME`, `HORUS_DB_PASSWORD` (the application role) |
-| The host's own migrations | `SPRING_FLYWAY_URL`, `SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD` (the owner) |
-| Rule Engine | `HORUS_BPM_RULES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD`, `..._APP_ROLE`, `..._ROLE_CHECK` |
-| Process Engine | `HORUS_BPM_PROCESSES_DATABASE_OWNER_URL`, `..._OWNER_USERNAME`, `..._OWNER_PASSWORD`, `..._APP_ROLE`, `..._ROLE_CHECK` |
+| Setting | Migration step | Serving host |
+|---|---|---|
+| `HORUS_DB_URL`, `HORUS_DB_USERNAME`, `HORUS_DB_PASSWORD` | `horus_owner`, owner secret | application role, application secret |
+| `HORUS_BPM_MIGRATE_ONLY` | `true` | unset |
+| `HORUS_BPM_RULES_DATABASE_APP_ROLE`, `HORUS_BPM_PROCESSES_DATABASE_APP_ROLE` | the application role's name | unset |
+| `SPRING_FLYWAY_ENABLED`, `HORUS_BPM_RULES_MIGRATE_ON_START`, `HORUS_BPM_PROCESSES_MIGRATE_ON_START` | default | `false` |
+| `HORUS_BPM_RULES_DATABASE_ROLE_CHECK`, `HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK` | not run | unset (`enforce`) |
 
-Set `ROLE_CHECK` to `enforce` in production: the host then refuses to start if its request role owns an engine table, holds `TRIGGER` on one or is a superuser. The default `warn` logs one warning at start-up; the `dev` profile skips the check. The compose file in the repository shows every variable, with the passwords read from mounted secret files.
+Mount the owner secret in the migration step only. Check that the serving pods carry no owner value: `kubectl get pod <pod> -o yaml` and `docker compose config` show none of it.
 
-Every copy of the host may carry the owner settings. A copy runs migrations at start-up under Flyway's lock, as before, and the owner's connection lives only for that run. If you would rather keep the owner's password off the running hosts, run one copy with the owner settings, wait for `/actuator/health` to report `UP`, and start the others without them and with `HORUS_BPM_RULES_MIGRATE_ON_START=false` and `HORUS_BPM_PROCESSES_MIGRATE_ON_START=false`. The decision log partition step then needs the owner: see [the partition step](#the-decision-log-partition-step).
+### The role check
+
+At start-up the serving host checks its own role. Outside the `dev` profile the check is `enforce` unless you change it. The host stops, with a log line that begins `HORUS-DB-ROLE-001`, when its role owns an engine table (`rle_*`, `pre_*`), holds `TRIGGER` on one, or is a superuser. The only way round it is an explicit opt-out: set `HORUS_BPM_RULES_DATABASE_ROLE_CHECK` and `HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK` to `warn` (log the problem and start) or `off`. Outside `dev` either value logs `HORUS-DB-ROLE-002` at ERROR on every start. Do not use it in production. In the `dev` profile the default is `off`. The migration step skips the check, because it runs as the owner by design.
+
+### The single-role mode (development only)
+
+One role that owns the tables, with no migration step and no `..._APP_ROLE`, still runs under the `dev` profile. It is **not for production**: that role can switch off the append-only and seal triggers. Outside `dev` the host refuses to start with it (`HORUS-DB-ROLE-001`) unless you set the opt-out above.
 
 ### What the engine grants
 
@@ -415,9 +422,7 @@ The repository's integration test `TwoRoleDatabaseIT` runs these and 17 more sta
 
 ### The decision log partition step
 
-The engine's daily roll-over creates the monthly `rle_decision_YYYY_MM` partitions and drops expired ones. Both are DDL. With the owner settings in place the Rule Engine runs this step as `horus_owner`, on a connection it opens for the run and closes after it, so months are created and expired months are dropped and recorded in `rle_decision_log_drop` as before. The application role never runs DDL.
-
-A host started without the owner settings but with a request role that owns nothing cannot run the step: the roll-over logs a warning, retries each day, and decisions go to `rle_decision_default` until the month exists (the alert [HorusDecisionLogDefaultPartitionRows](#horusdecisionlogdefaultpartitionrows) fires). Set the owner settings on at least one copy of the host.
+The engine's roll-over creates the monthly `rle_decision_YYYY_MM` partitions and drops expired ones. Both are DDL, so only the owner can do them. The migration step does it as the owner: it creates the current month and the months ahead (`horus.bpm.rules.decision-log.partitions-ahead`) and applies the retention. The serving host cannot, so its daily roll-over logs a warning and decisions go to `rle_decision_default` once the last created month has passed (the alert [HorusDecisionLogDefaultPartitionRows](#horusdecisionlogdefaultpartitionrows) fires). Run the migration step again at least every `partitions-ahead` minus one month. Schedule it: a Kubernetes CronJob with the Job's template, or `docker compose run --rm migrate` from cron.
 
 ## Backup, restore and recovery
 
@@ -557,7 +562,7 @@ This is the path from 1.0.0 to the next release. The upgrade test proves it on a
 
 1. Read the release notes for the target version. They list every migration.
 2. Take a backup and check that you can restore it ([Backup, restore and recovery](#backup-restore-and-recovery)). This is the way back: migrations are not reversed.
-3. Run the migrations as the owner role (see [Database roles](#point-the-host-at-both-roles)), or let the first host do it with the default `migrate-on-start`.
+3. Run the migrations as the owner role (see [Database roles](#run-the-migration-as-a-separate-step)): run the migration step with the new image before rolling the hosts.
 4. With the two-role set-up there is nothing to run: each engine grants the application role its rights after every migration, as the owner. Run the [grant checks](#check-the-grants) afterwards. A table added by the host's own migrations gets its rights from the default privileges that `app-role-grants.sql` sets; tighten it by hand if it must be append-only.
 5. Roll the hosts, one at a time, waiting for `UP` each time.
 6. Run the checks below.

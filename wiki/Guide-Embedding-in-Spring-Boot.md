@@ -24,9 +24,9 @@ Either engine works alone. You also need a `DataSource`, Spring Security (the ho
 | `horus.bpm.processes.security.role-permissions` | none | The same, for process permissions |
 | `horus.bpm.processes.enabled` | `true` | Turn the Process Engine off |
 | `horus.bpm.processes.migrate-on-start` | `true` | Run the engine's own migrations at start-up |
-| `horus.bpm.processes.database.owner-url`, `.owner-username`, `.owner-password` | unset | The schema owner's connection. Set the username to migrate as this role while requests use the host's `DataSource`, a role that owns nothing. The password comes from a secret |
+| `horus.bpm.processes.database.owner-url`, `.owner-username`, `.owner-password` | unset | The schema owner's connection. For an embedding host that migrates itself as this role while requests use a `DataSource` that owns nothing. Do not set it on a serving host that must not hold the owner password: run the migration as a separate step with `horus.bpm.migrate-only=true` instead ([Operations runbook](Operations-Runbook#run-the-migration-as-a-separate-step)) |
 | `horus.bpm.processes.database.app-role` | unset | The role the host's `DataSource` connects as; after each migration the engine grants it data rights on the `pre_*` tables and takes `UPDATE` and `DELETE` away on the append-only ones |
-| `horus.bpm.processes.database.role-check` | `warn` (`off` in `dev`) | `warn` logs, `enforce` stops the start, `off` skips: whether the request role owns a `pre_*` table, holds `TRIGGER` on one or is a superuser |
+| `horus.bpm.processes.database.role-check` | `enforce` (`off` in `dev`) | `enforce` stops the start with `HORUS-DB-ROLE-001`, `warn` logs and `off` skips; both opt-outs log `HORUS-DB-ROLE-002` at ERROR outside `dev`: whether the request role owns a `pre_*` table, holds `TRIGGER` on one or is a superuser |
 | `horus.bpm.processes.definitions.locations` | none | BPMN files to import at start-up |
 | `horus.bpm.processes.definitions.startup-tenants` | none | Tenants for that import. Empty means no import |
 | `horus.bpm.processes.definitions.auto-approve` | `false` | Import as `ACTIVE` without approval. `dev` profile only |

@@ -56,6 +56,20 @@ import org.springframework.transaction.PlatformTransactionManager;
 @Import(RuleEngineServicesConfiguration.class)
 public class RuleEngineAutoConfiguration {
 
+    /**
+     * Ends the process once the schema is current, when the host runs as the migration step ({@code horus.bpm.migrate-only=true}, #700).
+     * That step connects as the schema owner; the serving hosts never receive the owner's password.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "horus.bpm", name = "migrate-only", havingValue = "true")
+    org.springframework.boot.ApplicationRunner ruleEngineMigrateOnlyExit(org.springframework.context.ConfigurableApplicationContext context) {
+        return args -> {
+            org.apache.commons.logging.LogFactory.getLog(RuleEngineAutoConfiguration.class)
+                    .info("horus.bpm.migrate-only: the Rule Engine schema is current; exiting");
+            System.exit(org.springframework.boot.SpringApplication.exit(context, () -> 0));
+        };
+    }
+
     @Bean
     @ConditionalOnMissingBean
     RuleEngineSchemaMigrator ruleEngineSchemaMigrator(DataSource dataSource, RuleEngineProperties properties) {

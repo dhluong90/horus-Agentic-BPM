@@ -57,6 +57,42 @@ services:
           memory: 512M
           pids: 256
 
+  # The migration step: the same image, connected as the schema owner. It migrates the host's own tables and both engines,
+  # creates the decision log partitions, grants the application role its rights and exits. It is the only service that
+  # receives the owner's password. Run it again (docker compose run --rm migrate) after an upgrade and at least every
+  # few months, to create the next decision log partitions. docs/DEPLOYING.md, "Two database roles".
+  migrate:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile
+      args:
+        EXAMPLE: ${HORUS_EXAMPLE:-rule-engine-only}
+    image: horus-bpm/${HORUS_EXAMPLE:-rule-engine-only}:local
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
+      HORUS_DB_USERNAME: horus_owner
+      HORUS_BPM_MIGRATE_ONLY: "true"
+      HORUS_BPM_RULES_DATABASE_APP_ROLE: horus
+      HORUS_BPM_PROCESSES_DATABASE_APP_ROLE: horus
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_PROFILES_ACTIVE: ""
+    secrets:
+      - source: db_owner_password
+        target: HORUS_DB_PASSWORD
+      - source: demo_password
+        target: HORUS_DEMO_PASSWORD
+    restart: "no"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
   host:
     build:
       context: .
@@ -68,27 +104,21 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
-      # Requests: the application role. It owns nothing and holds no ALTER or TRIGGER right.
+      # Requests: the application role. It owns nothing and holds no ALTER or TRIGGER right. This service gets no owner
+      # setting and no owner secret; the migrate service below migrates and then ends.
       HORUS_DB_URL: jdbc:postgresql://postgres:5432/horus
       HORUS_DB_USERNAME: horus
-      # Migrations: the schema owner, for the host's own Flyway and for each engine. Its password is a mounted file, read as
-      # the property HORUS_DB_OWNER_PASSWORD; "$$" keeps compose from reading the placeholder.
-      SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/horus
-      SPRING_FLYWAY_USER: horus_owner
-      SPRING_FLYWAY_PASSWORD: $${HORUS_DB_OWNER_PASSWORD}
-      HORUS_BPM_RULES_DATABASE_OWNER_URL: jdbc:postgresql://postgres:5432/horus
-      HORUS_BPM_RULES_DATABASE_OWNER_USERNAME: horus_owner
-      HORUS_BPM_RULES_DATABASE_OWNER_PASSWORD: $${HORUS_DB_OWNER_PASSWORD}
-      HORUS_BPM_RULES_DATABASE_APP_ROLE: horus
+      SPRING_FLYWAY_ENABLED: "false"
+      HORUS_BPM_RULES_MIGRATE_ON_START: "false"
+      HORUS_BPM_PROCESSES_MIGRATE_ON_START: "false"
+      # Outside the dev profile this is the default; it is set here so the file says what it does.
       HORUS_BPM_RULES_DATABASE_ROLE_CHECK: enforce
-      HORUS_BPM_PROCESSES_DATABASE_OWNER_URL: jdbc:postgresql://postgres:5432/horus
-      HORUS_BPM_PROCESSES_DATABASE_OWNER_USERNAME: horus_owner
-      HORUS_BPM_PROCESSES_DATABASE_OWNER_PASSWORD: $${HORUS_DB_OWNER_PASSWORD}
-      HORUS_BPM_PROCESSES_DATABASE_APP_ROLE: horus
       HORUS_BPM_PROCESSES_DATABASE_ROLE_CHECK: enforce
       # Spring Boot reads each file under /run/secrets as a property named after the file, so
-      # ${HORUS_DB_PASSWORD}, ${HORUS_DB_OWNER_PASSWORD} and ${HORUS_DEMO_PASSWORD} resolve from the mounted secrets.
+      # ${HORUS_DB_PASSWORD} and ${HORUS_DEMO_PASSWORD} resolve from the mounted secrets.
       SPRING_CONFIG_IMPORT: configtree:/run/secrets/
       # "dev" turns on the demo users for a local walkthrough; leave it empty anywhere shared.
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-}
@@ -100,8 +130,6 @@ services:
     secrets:
       - source: db_password
         target: HORUS_DB_PASSWORD
-      - source: db_owner_password
-        target: HORUS_DB_OWNER_PASSWORD
       - source: demo_password
         target: HORUS_DEMO_PASSWORD
     ports:

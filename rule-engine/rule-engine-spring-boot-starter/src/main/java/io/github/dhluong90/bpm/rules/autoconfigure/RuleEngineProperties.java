@@ -64,7 +64,7 @@ public record RuleEngineProperties(
      * is not for production, because that role owns the tables and can disable their triggers.
      *
      * @param ownerUrl JDBC URL of the schema owner's connection; required with {@code ownerUsername}
-     * @param ownerUsername the schema owner; set it to turn the two-role setup on. The owner migrates at start-up (and
+     * @param ownerUsername the schema owner; set it to turn the two-role setup on. Do not set it on a serving host: run the migration as a separate step ({@code horus.bpm.migrate-only=true}, connecting as the owner) and give the serving hosts the application role only. The owner migrates at start-up (and
      *     keeps the partition step, when the engine has one) and is not used for requests: its connections are opened
      *     for one run and closed
      * @param ownerPassword the owner's password; supply it from a secret, never from a file in the repository
@@ -72,8 +72,8 @@ public record RuleEngineProperties(
      *     SELECT, INSERT, UPDATE and DELETE on the engine's tables and nothing else. Empty grants nothing: apply
      *     {@code deploy/postgres/app-role-grants.sql} yourself
      * @param roleCheck what start-up does when the role the host serves traffic with owns the engine's tables, holds
-     *     TRIGGER on them or is a superuser: {@code warn} (default) logs one WARN, {@code enforce} stops the start,
-     *     {@code off} skips the check. In the {@code dev} profile the default is {@code off}
+     *     TRIGGER on them or is a superuser: {@code enforce} (default outside the {@code dev} profile) stops the start with the code {@code HORUS-DB-ROLE-001}, {@code warn} logs one WARN,
+     *     {@code off} skips the check. Outside {@code dev}, {@code warn} and {@code off} are an opt-out that logs {@code HORUS-DB-ROLE-002} at ERROR on every start. In the {@code dev} profile the default is {@code off}. The check is skipped when {@code horus.bpm.migrate-only=true}
      */
     public record Database(String ownerUrl, String ownerUsername, String ownerPassword, String appRole,
             @DefaultValue("") String roleCheck) {
