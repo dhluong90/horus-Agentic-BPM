@@ -4,6 +4,7 @@ import { readBpmnGraph } from './bpmnGraph';
 import { placeCollaboration } from './collaborationLayout';
 import { footprint } from './edgeLabels';
 import { layoutGraph } from './layout';
+import { noteBox } from './notes';
 import { nodeTypeLabel } from './nodeLabels';
 
 const graph = readBpmnGraph(SYMBOL_STRUCTURE_BPMN);
@@ -84,5 +85,19 @@ describe('structure symbols (#209)', () => {
       expect(box.x).toBeGreaterThanOrEqual(drawing.pool.x);
       expect(box.x + box.width).toBeLessThanOrEqual(drawing.pool.x + drawing.pool.width);
     }
+  });
+
+  it('CKP_209_a_note_keeps_the_size_of_its_bounds_wraps_on_words_and_ends_with_an_ellipsis_when_it_is_too_long', () => {
+    const text = 'The limit comes from the Rule Engine; an order over it goes to a person.';
+    const roomy = noteBox(text, 190, 72);
+    expect(roomy).toMatchObject({ width: 190, height: 72 });
+    expect(roomy.lines.join(' ')).toBe(text);
+    const tight = noteBox(text, 190, 24);
+    expect(tight.height).toBe(24);
+    expect(tight.lines).toHaveLength(1);
+    expect(tight.lines[0]?.endsWith('…')).toBe(true);
+    expect(noteBox(text, 120, 0).height).toBeGreaterThan(24);
+    const placed = layoutGraph(stored).annotations?.items.find((i) => i.id === 'note-credit');
+    expect(placed).toMatchObject({ width: 190, height: 72, text });
   });
 });

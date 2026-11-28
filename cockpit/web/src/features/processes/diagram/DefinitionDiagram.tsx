@@ -207,16 +207,17 @@ function GroupFrame({ group, kindLabel }: { group: { id: string; label: string |
 }
 
 /** A text annotation: an open bracket on the side that faces what it notes, then its text. */
-function NoteBox({ note, side, kindLabel }: { note: { id: string; lines: readonly string[]; x: number; y: number; width: number; height: number }; side: 'left' | 'right'; kindLabel: string }) {
+function NoteBox({ note, side, kindLabel }: { note: { id: string; text: string; lines: readonly string[]; x: number; y: number; width: number; height: number }; side: 'left' | 'right'; kindLabel: string }) {
   const bracket = side === 'right'
     ? `M${String(note.x + note.width - 10)} ${String(note.y)}H${String(note.x + note.width)}V${String(note.y + note.height)}H${String(note.x + note.width - 10)}`
     : `M${String(note.x + 10)} ${String(note.y)}H${String(note.x)}V${String(note.y + note.height)}H${String(note.x + 10)}`;
-  const text = note.lines.join(' ');
+  const text = note.text;
   return (
     <g className="dg-note" data-note={note.id} role="img" aria-label={`${kindLabel}: ${text}`}>
       <title>{`${kindLabel}: ${text}`}</title>
+      <rect className="dg-note__surface" x={note.x} y={note.y} width={note.width} height={note.height} />
       <path className="dg-note__bracket" d={bracket} />
-      <text aria-hidden="true" className="dg-note__text" x={note.x + 8 + (side === 'left' ? 2 : 0)} y={note.y + 8 + 11}>
+      <text aria-hidden="true" className="dg-note__text" x={note.x + 8 + (side === 'left' ? 2 : 0)} y={note.y + 4 + 11}>
         {note.lines.map((line, index) => <tspan key={index} x={note.x + 8 + (side === 'left' ? 2 : 0)} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT - 2}>{line}</tspan>)}
       </text>
     </g>

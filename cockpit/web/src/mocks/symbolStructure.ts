@@ -46,6 +46,7 @@ export const SYMBOL_STRUCTURE_LAYOUT = {
     'check-credit': { x: 260, y: 200, width: 116, height: 80 },
     invoice: { x: 460, y: 360, width: 116, height: 80 },
     paid: { x: 660, y: 382, width: 36, height: 36 },
+    'note-credit': { x: 400, y: 196, width: 190, height: 72 },
     'note-invoice': { x: 620, y: 300, width: 150, height: 40 },
     'group-fraud': { x: 230, y: 175, width: 380, height: 290 },
   },

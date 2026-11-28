@@ -53,6 +53,6 @@ for (const size of [{ width: 1440, height: 900 }, { width: 1440, height: 1200 }]
     await expect(svg.locator('[data-node="receive-order"]')).toHaveAttribute('data-type', 'receiveTask:instantiate');
     await expect(svg.locator('[data-node="receive-order"]')).toHaveAttribute('aria-label', /starts the process/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    await page.screenshot({ path: `${SHOTS}/structure-${String(size.width)}x${String(size.height)}-v3.png` });
+    await page.screenshot({ path: `${SHOTS}/structure-${String(size.width)}x${String(size.height)}-v4.png` });
   });
 }

@@ -104,7 +104,7 @@ export function applyStoredLayout(layout: Layout, stored: DefinitionLayout, grap
     const box = boxes.get(note.id);
     if (box === undefined) continue;
     const size = noteBox(note.text, box.width ?? 150, box.height ?? 0);
-    items.push({ id: note.id, lines: size.lines, x: box.x, y: box.y, width: size.width, height: size.height });
+    items.push({ id: note.id, text: note.text, lines: size.lines, x: box.x, y: box.y, width: size.width, height: size.height });
   }
   const groups: PlacedGroup[] = [];
   for (const group of graph?.groups ?? []) {

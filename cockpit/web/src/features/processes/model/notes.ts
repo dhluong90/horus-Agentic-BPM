@@ -10,22 +10,33 @@ import { SYMBOL_SIZE, wrapWords, type Layout, type PlacedNode, type Point } from
  * know (BPMN keeps no member list for it), so it is left out of an automatic layout.
  */
 
-export interface PlacedAnnotation { id: string; lines: string[]; x: number; y: number; width: number; height: number }
+export interface PlacedAnnotation { id: string; text: string; lines: string[]; x: number; y: number; width: number; height: number }
 export interface PlacedAnnotationLink { id: string; annotation: string; target: string; points: Point[] }
 export interface PlacedGroup { id: string; label: string | undefined; x: number; y: number; width: number; height: number }
 export interface Notes { items: PlacedAnnotation[]; links: PlacedAnnotationLink[] }
 
 const NOTE_WIDTH = 150;
 const NOTE_PAD = 8;
+const NOTE_PAD_Y = 4;
 const NOTE_LINE = 15;
 const NOTE_CHAR = 6.8;
 const NOTE_GAP = 14;
 
-/** A note's lines and size at the given width (never narrower than a short word). */
-export function noteBox(text: string, width = NOTE_WIDTH, minHeight = 0): { lines: string[]; width: number; height: number } {
+/**
+ * A note's lines and size. With `height` (the diagram's bounds) the box keeps that size: the text wraps at word
+ * boundaries inside the bracket and, if it needs more lines than fit, the last line ends with an ellipsis (the full
+ * text stays in the tooltip). Without `height` the box grows to hold every line.
+ */
+export function noteBox(text: string, width = NOTE_WIDTH, height = 0): { lines: string[]; width: number; height: number } {
   const w = Math.max(60, width);
-  const lines = wrapWords(text, w - 2 * NOTE_PAD, NOTE_CHAR);
-  return { lines, width: w, height: Math.max(minHeight, 2 * NOTE_PAD + lines.length * NOTE_LINE) };
+  const room = w - 2 * NOTE_PAD;
+  const perLine = Math.max(4, Math.floor(room / NOTE_CHAR));
+  const wrapped = wrapWords(text, room, NOTE_CHAR);
+  const rows = height > 0 ? Math.max(1, Math.floor((height - 2 * NOTE_PAD_Y) / NOTE_LINE)) : wrapped.length;
+  const kept = wrapped.slice(0, rows);
+  if (wrapped.length > rows) kept[rows - 1] = `${(kept[rows - 1] ?? '').slice(0, perLine - 1).trimEnd()}…`;
+  const lines = kept.map((line) => (line.length > perLine ? `${line.slice(0, perLine - 1)}…` : line));
+  return { lines, width: w, height: height > 0 ? height : 2 * NOTE_PAD_Y + lines.length * NOTE_LINE };
 }
 
 const apart = (a: Rect, b: Rect, pad = 0) => a.x + a.width + pad <= b.x || b.x + b.width + pad <= a.x || a.y + a.height + pad <= b.y || b.y + b.height + pad <= a.y;
@@ -93,7 +104,7 @@ export function placeNotes(layout: Layout, graph: DiagramGraph): Layout {
     }
     const fallbackY = Math.max(0, ...layout.nodes.map((node) => node.y + node.height)) + NOTE_GAP + items.length * 8;
     const rect = spots.find(free) ?? spots.find((spot) => spot.x >= 4 && spot.y >= 4) ?? { x: 12, y: fallbackY, width: size.width, height: size.height };
-    items.push({ id: note.id, lines: size.lines, x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+    items.push({ id: note.id, text: note.text, lines: size.lines, x: rect.x, y: rect.y, width: rect.width, height: rect.height });
   }
   const links: PlacedAnnotationLink[] = [];
   for (const link of graph.annotationLinks ?? []) {
