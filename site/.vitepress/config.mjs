@@ -26,6 +26,7 @@ export default withMermaid({
     nav: [
       { text: 'Docs', link: '/docs/' },
       { text: 'Cockpit', link: '/Cockpit' },
+      { text: 'Operations', link: '/Operations-Runbook' },
       { text: 'Release notes', link: '/Release-Notes' }
     ],
     socialLinks: [{ icon: 'github', link: repo, ariaLabel: 'GitHub' }],

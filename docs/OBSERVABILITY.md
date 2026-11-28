@@ -74,7 +74,7 @@ Not yet metered, so not on the dashboards: a count of open user tasks (the table
 
 ## Alerts
 
-`deploy/observability/prometheus/rules/horus-bpm.rules.yml` defines the alerts below. Thresholds are pilot starting points: set them to the bank's service levels. Each alert carries a `runbook_url` that points at an anchor of the operations runbook on the wiki, which is written in #661.
+`deploy/observability/prometheus/rules/horus-bpm.rules.yml` defines the alerts below. Thresholds are pilot starting points: set them to the bank's service levels. Each alert carries a `runbook_url` that points at its section of the [operations runbook](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#alerts); the anchor is the alert name in lower case.
 
 | Alert | Fires when | Severity |
 |---|---|---|

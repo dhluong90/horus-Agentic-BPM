@@ -24,6 +24,7 @@ Users never need this folder. Contributors and evaluators start here.
 | [`adr/`](adr/) | Project-wide architecture decision records `ADR-nnnn`, from [`0000-template.md`](adr/0000-template.md) |
 | [`proposals/`](proposals/README.md) | Design proposals for new features, before they reach a PRD and a SPEC |
 | [`DEPLOYING.md`](DEPLOYING.md) | Run an example host with PostgreSQL in docker compose, from a fresh clone, with the image gates |
+| [`OBSERVABILITY.md`](OBSERVABILITY.md), [`DISASTER-RECOVERY.md`](DISASTER-RECOVERY.md) | Meters, alerts and dashboards; backup, restore and the recovery drill. Both feed the wiki [Operations runbook](https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook) |
 | [`roadmap.md`](roadmap.md) | Pointer to the wiki Roadmap |
 
 Each module keeps its own design beside its code:
