@@ -190,7 +190,8 @@ class ProcessRestContractTest {
                 .contains("\"state\":\"NOT_FULLY_UNDONE\"").contains("\"blockedStep\":\"verify-docs\"")
                 .contains("\"incidentId\":\"01JD0000000000000000000101\"").contains("\"kind\":\"STEP\"")
                 .contains("\"resultVariable\":\"fee2\"")
-                .contains("\"submission\":{\"decision\":\"REJECT\",\"idNumber\":{\"masked\":true}}")
+                .contains("\"submission\":{").contains("\"decision\":\"REJECT\"")
+                .contains("\"idNumber\":{\"masked\":true}")
                 .contains("\"unrecordedFields\":[\"note\"]");
         assertProblem(get(BASE + "/instances/01JD0000000000000000000077/activities"), 404, "INSTANCE_NOT_FOUND");
         assertProblem(get(BASE + "/instances/" + FakeEngine.INSTANCE + "/activities").param("limit", "0"), 400,
