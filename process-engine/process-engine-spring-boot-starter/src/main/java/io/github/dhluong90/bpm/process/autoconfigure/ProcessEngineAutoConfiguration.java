@@ -139,11 +139,12 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    ProcessEngineTransactions processEngineTransactions(ObjectProvider<PlatformTransactionManager> transactionManager) {
+    ProcessEngineTransactions processEngineTransactions(ObjectProvider<PlatformTransactionManager> transactionManager,
+            DataSource dataSource) {
         return new ProcessEngineTransactions(transactionManager.getIfUnique(() -> {
             throw new IllegalStateException("The Process Engine needs exactly one PlatformTransactionManager from the "
                     + "host. Add spring-boot-starter-jdbc, or mark one transaction manager @Primary.");
-        }));
+        }), org.springframework.jdbc.core.simple.JdbcClient.create(dataSource));
     }
 
     @Bean
@@ -384,6 +385,8 @@ public class ProcessEngineAutoConfiguration {
                 properties.agents().labels().toLimits(), properties.agents().memory().toLimits(), calendar);
         // PD-110: reassign and delegate ask the host's directory whether the target holds the role or group.
         services.useAssigneeDirectory(directory.getIfUnique(() -> AssigneeDirectory.NONE));
+        // PRE-394: instance and definition lists run in a read-only transaction with a statement timeout.
+        services.useReadTimeout(properties.query().statementTimeout());
         // AUD-10: held start arrivals expire and one definition holds a bounded number.
         services.useStartArrivalSettings(properties.parallelStart().toSettings());
         // #491: the host's outbox port for the messages a process sends; none when the host sends no messages.
@@ -853,6 +856,30 @@ public class ProcessEngineAutoConfiguration {
                 ProcessEngineProperties properties) {
             return new ProcessMaintenanceScheduler.Task("gauge-refresh", properties.metrics().gaugeRefresh(),
                     metrics::refreshGauges);
+        }
+    }
+
+    /**
+     * One span per step in the host's trace (#114, TR-OBS-03), bound only when the host has a Micrometer
+     * {@code Tracer}. Without one the engine does nothing extra and needs no tracing dependency.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.tracing.Tracer")
+    static class ProcessEngineTracingConfiguration {
+
+        /** Binds after every singleton exists, so the host's tracer is found whatever the configuration order. */
+        @Bean
+        @ConditionalOnMissingBean(name = "processEngineTracing")
+        org.springframework.beans.factory.SmartInitializingSingleton processEngineTracing(ProcessServices services,
+                ObjectProvider<io.micrometer.tracing.Tracer> tracer,
+                org.springframework.core.env.Environment environment) {
+            return () -> {
+                io.micrometer.tracing.Tracer bound = tracer.getIfAvailable();
+                if (bound != null) {
+                    services.useTracing(new ProcessEngineTracing(bound,
+                            environment.getProperty("horus.bpm.tracing.tenant-attribute", Boolean.class, true)));
+                }
+            };
         }
     }
 

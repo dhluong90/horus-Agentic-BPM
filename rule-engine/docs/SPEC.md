@@ -1577,3 +1577,16 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Example:** `v1, v2 stamped 2026-11-28T09:00Z, two LEGACY_SEALED rows; insert of v9 with the marker => LEGACY_SEAL_SCOPE; v1 served`
 - **Test IDs:** `RLE_231_a_version_created_after_the_migration_cannot_carry_the_marker_or_its_scope`, `RLE_231_versions_approved_before_the_migration_still_verify_and_each_has_one_audit_entry`
 
+### RLE-228 Each evaluation call is one span with the rule set, its version, the decision id and the outcome
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A host with a Micrometer `Tracer` and a host request span. Inside it the host evaluates `card-fee` version 3, which matches rule `R2`.
+- **When:** The finished spans are read.
+- **Then:**
+  - One span `horus.rule.evaluate` is a child of the request span, with `horus.rule_set` (`card-fee`), `horus.rule_set.version` (`3`), `horus.decision_id`, `horus.outcome` (`MATCHED`, `NO_MATCH`, `FAILED` or `REFUSED`) and, for a match, `horus.matched_count` (`1`).
+  - A refused call or failed evaluation adds `horus.error_code` (and `horus.error_type` for a refusal); the span's error carries the code, never the exception message.
+  - No attribute holds an input or an output value. `horus.tenant_id` is present only when `horus.bpm.tracing.tenant-attribute` is `true` (default).
+  - Without a tracer the engine uses a no-op port and creates no span. A tracer that throws never fails the call.
+- **Example:** `evaluate card-fee v3 -> horus.rule.evaluate MATCHED, matched_count 1, no output value`.
+- **Test ID:** `RLE_228_a_matched_evaluation_is_one_span_with_rule_set_version_decision_and_count_but_no_value`, `RLE_228_a_refused_call_records_an_error_code_and_the_exception_type_never_its_message` (`RuleEngineTracingTest`)

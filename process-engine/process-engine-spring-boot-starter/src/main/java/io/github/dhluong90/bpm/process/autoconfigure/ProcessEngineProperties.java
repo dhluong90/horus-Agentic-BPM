@@ -544,12 +544,19 @@ public record ProcessEngineProperties(
      * @param maxRange longest start-time range of a list query; may be lowered, never raised
      * @param maxRoles most role and group queues one task list reads; a caller with more gets
      *     {@code 400 ROLE_FAN_OUT_EXCEEDED} unless the request names one {@code role} or {@code group} (#408)
+     * @param statementTimeout longest one statement of a list read may run, set with {@code SET LOCAL} in a read-only
+     *     transaction of its own (ADR-0015); a read that exceeds it is answered {@code 503 QUERY_TIMEOUT}, never with
+     *     a partial page. Positive; two seconds by default (#254)
      * @param dueSoonWindow a task due within this time reads {@code slaState: DUE_SOON} in the task list (PD-111,
      *     #472); positive, one hour by default
      */
     public record Query(@DefaultValue("200") int maxPageSize, @DefaultValue("P31D") Duration maxRange,
-            @DefaultValue("100") int maxRoles, @DefaultValue("PT1H") Duration dueSoonWindow) {
+            @DefaultValue("100") int maxRoles, @DefaultValue("PT1H") Duration dueSoonWindow,
+            @DefaultValue("PT2S") Duration statementTimeout) {
         public Query {
+            if (statementTimeout.isNegative() || statementTimeout.isZero()) {
+                throw new IllegalArgumentException("horus.bpm.processes.query.statement-timeout must be positive");
+            }
             if (dueSoonWindow.isNegative() || dueSoonWindow.isZero()) {
                 throw new IllegalArgumentException("horus.bpm.processes.query.due-soon-window must be positive");
             }

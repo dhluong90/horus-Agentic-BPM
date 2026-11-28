@@ -1,0 +1,35 @@
+name: DR drill
+# Backup, restore and recovery drill against the compose stack (docs/DISASTER-RECOVERY.md, #657). Nightly and on demand;
+# the measured RPO and RTO are in the job summary and in the dr-report artifact.
+on:
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - name: Drill
+        env:
+          DR_REPORT: ${{ github.workspace }}/dr-report.json
+        run: deploy/dr/drill.sh
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f dr-report.json ]; then
+            { echo '### DR drill'; echo '```json'; cat dr-report.json; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Keep the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dr-report
+          path: dr-report.json
+          if-no-files-found: ignore
+          retention-days: 30

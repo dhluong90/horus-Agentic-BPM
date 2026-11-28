@@ -13,6 +13,7 @@
 - [[Principles]]
 - [[Architecture]]
 - [[Configuration and extension points|Configuration-and-Extension-Points]]
+- [[Traces|Tracing]]
 
 **Developer guides**
 - [[All guides|Guides]]
@@ -64,4 +65,5 @@
 **Project**
 - [[Contributing]]
 - [[Technical stack|Technical-Stack]]
+- [[Metrics, alerts and dashboards|Metrics-Alerts-and-Dashboards]]
 - [[FAQ]]
