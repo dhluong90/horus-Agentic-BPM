@@ -73,6 +73,10 @@ export const KNOWN_NODE_TYPES = [
   'intermediateThrowEvent:message',
   'receiveTask',
   'sendTask',
+  'intermediateCatchEvent',
+  'intermediateThrowEvent',
+  'intermediateThrowEvent:multiple',
+  'endEvent:multiple',
 ] as const;
 export type KnownNodeType = (typeof KNOWN_NODE_TYPES)[number];
 
@@ -105,6 +109,10 @@ export interface DiagramNode {
   loop?: LoopKind;
   /** For an ad-hoc sub-process (#500): whether its activities may run side by side or one at a time. */
   ordering?: 'parallel' | 'sequential';
+  /** For an event-based gateway: whether it waits for all of its events (`parallel`) and whether it starts the process (`instantiate`). */
+  eventGateway?: { parallel: boolean; instantiate: boolean };
+  /** For an activity that is the undo of another step (`isForCompensation`): drawn with the compensation marker. */
+  compensation?: boolean;
 }
 
 export type LoopKind = 'loop' | 'parallel' | 'sequential';
@@ -120,6 +128,8 @@ export interface DiagramEdge {
   isLink?: boolean;
   /** An association from a compensation boundary event to its compensation activity (#488), drawn dotted; not a sequence flow. */
   isAssociation?: boolean;
+  /** A sequence flow with a condition: drawn with the small diamond at its start when it leaves an activity. */
+  conditional?: boolean;
 }
 
 /** A pool of the collaboration (#497). `self` is the pool of the process this graph shows; the others are black boxes. */
@@ -308,7 +318,7 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
     if (child.localName === 'sequenceFlow') {
       const source = nonEmpty(child.getAttribute('sourceRef'));
       const target = nonEmpty(child.getAttribute('targetRef'));
-      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false });
+      if (source !== undefined && target !== undefined) edges.push({ id, source, target, label: nonEmpty(child.getAttribute('name')), isDefault: false, ...(elementChildren(child).some((c) => c.namespaceURI === BPMN && c.localName === 'conditionExpression') ? { conditional: true } : {}) });
       continue;
     }
     if (child.localName === 'association') {
@@ -336,6 +346,8 @@ function readContainer(container: Element, parentId: string | undefined, nodes: 
       ...(child.localName === 'startEvent' && child.getAttribute('isInterrupting') === 'false' ? { interrupting: false } : {}),
       ...(byEvent !== undefined ? { interrupting: byEvent.interrupting, ...(byEvent.trigger !== undefined ? { trigger: byEvent.trigger } : {}) } : {}),
       ...(link !== undefined ? { linkName: link } : {}),
+      ...(child.localName === 'eventBasedGateway' ? { eventGateway: { parallel: child.getAttribute('eventGatewayType') === 'Parallel', instantiate: child.getAttribute('instantiate') === 'true' } } : {}),
+      ...(child.getAttribute('isForCompensation') === 'true' ? { compensation: true } : {}),
       ...(child.localName === 'adHocSubProcess' ? { ordering: child.getAttribute('ordering') === 'Sequential' ? ('sequential' as const) : ('parallel' as const) } : {}),
     });
     if (isContainer(child) && depth < MAX_NESTING) readContainer(child, id, nodes, edges, defaults, depth + 1);

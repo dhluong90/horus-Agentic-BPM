@@ -9,6 +9,7 @@ import io.github.dhluong90.bpm.rules.api.UnauthenticatedException;
 import io.github.dhluong90.bpm.rules.internal.store.IdempotencyStore;
 import io.github.dhluong90.bpm.rules.internal.store.SimulationReportStore;
 import io.github.dhluong90.bpm.rules.internal.store.TransactionRunner;
+import io.github.dhluong90.bpm.rules.spi.ApprovalSealKey;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -29,11 +30,12 @@ import java.util.function.Supplier;
  * @param masking the masking key and default per tenant (RLE-012)
  * @param functions the host's functions for rule cells (RLE-055 to RLE-058)
  * @param reports the stored simulation reports and which one a publication request carries (RLE-199 to RLE-201)
+ * @param sealKey the key of the approval seal, or none for plain seals (RLE-223)
  */
 public record EngineContext(
         TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
         IdempotencyStore idempotency, EngineSettings settings, MaskingPolicy masking, HostFunctions functions,
-        SimulationReportStore reports) {
+        SimulationReportStore reports, ApprovalSealKey sealKey) {
 
     /** Longest idempotency key accepted. */
     static final int MAX_KEY_LENGTH = 200;
@@ -48,6 +50,27 @@ public record EngineContext(
         Objects.requireNonNull(masking, "masking must not be null");
         Objects.requireNonNull(functions, "functions must not be null");
         Objects.requireNonNull(reports, "reports must not be null");
+        Objects.requireNonNull(sealKey, "sealKey must not be null");
+    }
+
+    /**
+     * Creates a context with plain approval seals.
+     *
+     * @param tenants see the record
+     * @param callers see the record
+     * @param clock see the record
+     * @param transactions see the record
+     * @param idempotency see the record
+     * @param settings see the record
+     * @param masking see the record
+     * @param functions see the record
+     * @param reports see the record
+     */
+    public EngineContext(TenantResolver tenants, CallerResolver callers, Clock clock, TransactionRunner transactions,
+            IdempotencyStore idempotency, EngineSettings settings, MaskingPolicy masking, HostFunctions functions,
+            SimulationReportStore reports) {
+        this(tenants, callers, clock, transactions, idempotency, settings, masking, functions, reports,
+                ApprovalSealKey.none());
     }
 
     /**

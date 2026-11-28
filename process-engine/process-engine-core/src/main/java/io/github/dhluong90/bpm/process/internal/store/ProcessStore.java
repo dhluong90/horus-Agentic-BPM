@@ -409,6 +409,26 @@ public interface ProcessStore {
     void insertDefinition(StoredDefinition definition);
 
     /**
+     * The hashes a version was approved with (#172), written once and never changed.
+     *
+     * @param tenantId the tenant
+     * @param definitionId the version
+     * @param approvedBy who approved it
+     * @param approvedAt when
+     * @param sourceHash the source hash at approval
+     * @param definitionHash the definition hash at approval
+     */
+    record DefinitionApproval(String tenantId, String definitionId, String approvedBy, Instant approvedAt,
+            String sourceHash, String definitionHash) {
+    }
+
+    /** Records the approval of a version, in the transaction of the approval. */
+    void recordApproval(DefinitionApproval approval);
+
+    /** @return the approval record of a version; empty when it was never approved */
+    Optional<DefinitionApproval> approval(String tenant, String definitionId);
+
+    /**
      * Locks every version row of a key ({@code FOR UPDATE}, in version order), so lifecycle commands and the
      * effective-date job of one key serialise.
      *

@@ -1354,6 +1354,50 @@ Behaviour is specified as numbered, testable statements. Every statement maps 1:
 - **Example:** `_5f3a1 -> r_5f3a1 with description "(DMN id _5f3a1)"; _a1 with r_a1 -> DMN_RULE_ID_COLLISION`.
 - **Test ID:** `RLE_224_a_dmn_rule_id_that_starts_with_an_underscore_is_mapped_and_exported_as_written`, `RLE_224_two_ids_that_map_to_the_same_id_are_refused_with_a_named_code`
 
+### RLE-225 A DMN item definition is read as a type, and what has no v1 type is refused with a named code
+- **Traces to:** `TR-STD-25`, `TR-STD-04`, `RLE-079`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A DMN table whose input, output or decision names an `itemDefinition`: an alias of a built-in type with `allowedValues`, a collection of strings, and a structure of components for a decision with several outputs.
+- **When:** The table is imported as DMN.
+- **Then:**
+  - A definition is read where a column or the decision uses it; one that nothing uses never stops the import.
+  - An alias of `string`, `number`, `integer`, `boolean`, `date` or `date and time` gives the v1 type; `isCollection` of a scalar gives `list<T>`. Allowed values on an input become its `allowed` set, a list of strings or integers.
+  - A decision typed by a structure (on the table's `typeRef` or the decision variable) gives its output columns the component types; the output names must be the components, else `DMN_TYPE_UNSUPPORTED`. A single unnamed output of a one-component structure takes the component name.
+  - `outputValues`, or allowed values on an output type, are checked against the literal of every rule at import: a literal outside the set is refused with `DMN_OUTPUT_NOT_ALLOWED`, so no part of the constraint is dropped.
+  - Allowed values are never dropped: those of an alias of an alias reach the input; input values and the allowed values of the input's type both hold (their common values become the set, none in common is refused); the allowed values of a component or of a scalar decision type are checked on the output even when the column has its own type; allowed values on a structure itself are refused with `DMN_ALLOWED_VALUES_UNSUPPORTED`.
+  - Refused with `422 VALIDATION_FAILED` and the problem code `DMN_TYPE_UNSUPPORTED`: a type name that is neither built-in nor defined (`time`, `Any`, durations), a definition with a `typeConstraint` or a `functionItem`, one that refers to itself or nests deeper than 16 levels, a collection of structures or of lists, a structure inside a structure, a structured input or output column, and a definition with neither a `typeRef` nor components. Allowed values that are not a list of constants (a range, a comparison) are refused with `DMN_ALLOWED_VALUES_UNSUPPORTED`, as are allowed values on a list input. `defaultOutputEntry` stays refused as `DMN_UNSUPPORTED_ELEMENT`, stage S1.
+- **Example:** `tEmployment (string, "SALARIED", "SELF_EMPLOYED") -> input employment: string, allowed [SALARIED, SELF_EMPLOYED]`; `tOffer {status: string, limit: number} -> outputs status string, limit decimal`; `typeRef time -> DMN_TYPE_UNSUPPORTED`.
+- **Test ID:** `RLE_225_an_item_definition_of_a_string_with_allowed_values_types_the_column_and_closes_its_set`, `RLE_225_a_collection_item_definition_is_a_list_input`, `RLE_225_a_structure_types_a_decision_with_several_outputs`, `RLE_225_outputs_that_do_not_match_the_components_of_the_decision_structure_are_refused`, `RLE_225_a_built_in_type_with_no_v1_form_is_refused_with_a_named_code`, `RLE_225_a_structured_input_a_type_constraint_and_a_self_reference_are_refused_with_a_named_code`, `RLE_225_an_item_definition_that_no_column_uses_does_not_stop_the_import`, `RLE_225_a_literal_outside_the_output_values_is_refused_and_one_inside_is_kept`, `RLE_225_allowed_values_that_are_a_range_are_refused_not_dropped`
+
+### RLE-226 A DMN rule set name and a single output name are made from the decision when the file gives none that fits
+- **Traces to:** `TR-STD-25`, `RLE-079`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A table whose decision id is a generated one (`_3b2953a3-745f-4d2e-b55d-75c8c5ae653c`), a camel case id (`cardFee`) or a name with spaces, and a table whose single output column has no `name`.
+- **When:** The table is imported as DMN.
+- **Then:**
+  - A decision id or name that is already kebab-case is the rule set name, as before. Otherwise the name is made from the decision id: camel case is split at its humps, runs of other characters become one hyphen, letters are lower case, and `decision-` is put in front when the result does not start with a letter. The decision name, then the names of the definitions, are tried when the id has no letter or digit; the result is cut at 100 characters.
+  - When none gives a name, the import is refused with the problem code `DMN_RULE_SET_NAME`.
+  - A single output column with no `name` is named from the structure's only component, else from the table's `outputLabel`, the decision variable, the decision name or the decision id, with runs of other characters turned into `_` (`Approval Status` becomes `Approval_Status`). Several output columns without names are refused as before.
+- **Example:** `_3b2953a3-745f-4d2e-b55d-75c8c5ae653c -> decision-3b2953a3-745f-4d2e-b55d-75c8c5ae653c; cardFee -> card-fee; output of "Approval Status" -> Approval_Status`.
+- **Test ID:** `RLE_226_a_rule_set_name_is_made_from_the_decision_id`, `RLE_226_a_kebab_case_id_is_kept_as_written`, `RLE_226_a_single_output_with_no_name_takes_the_name_of_the_decision`, `RLE_226_two_unnamed_outputs_are_refused`
+
+### RLE-227 A DMN COLLECT table with SUM, COUNT, MIN or MAX imports as a collect output and exports back
+- **Traces to:** `TR-STD-25`, `RLE-003`, `RLE-079`, #121
+- **Milestone:** M3
+- **Kind:** semantics
+- **Given:** A fee table with hit policy `COLLECT` and `aggregation="SUM"`, and the same table with `COUNT`, `MIN` and `MAX`; monthly fees of 10000 for every customer, 5000 from 20 transactions and 7000 from 50.
+- **When:** The table is imported, evaluated, exported as DMN and imported again.
+- **Then:**
+  - The single output gets the v1 `collect` of the same name (`sum`, `count`, `min`, `max`) and keeps its scalar type; `COUNT` makes it `integer` whatever the cells hold. Evaluation follows `RLE-003`.
+  - A customer with 60 transactions pays 22000 under `SUM`; with 25 transactions the `COUNT` is 2.
+  - Export writes `aggregation` on the table and imports to the same canonical hash. A table with a `collect` on several outputs, or on one of several, has no DMN form and export refuses it naming the output.
+  - With no matching rule, every aggregate, `COUNT` included, is `null`, as in `RLE-003` (shipped in 1.0.0). TODO: DMN-conformant `COUNT = 0` for no match is deferred to the spec-mode profile (S1) or an opt-in output property.
+  - An aggregation on a table that is not `COLLECT`, a value other than `SUM`, `COUNT`, `MIN` and `MAX`, or an aggregation on a table with more than one output is refused with the problem code `DMN_AGGREGATION_UNSUPPORTED`.
+- **Example:** `COLLECT SUM, txCount 60 -> fee 22000; COLLECT COUNT, txCount 25 -> 2`.
+- **Test ID:** `RLE_227_collect_sum_adds_the_matched_rules`, `RLE_227_collect_count_counts_the_matched_rules_as_an_integer`, `RLE_227_collect_min_and_max_pick_the_smallest_and_the_largest`, `RLE_227_an_aggregate_exports_as_dmn_and_imports_again_with_the_same_hash`, `RLE_227_an_aggregation_with_another_hit_policy_or_name_or_outputs_is_refused_with_a_named_code`, `RLE_227_a_table_with_aggregates_on_several_outputs_has_no_dmn_form`
+
 ## Host-Registered Functions (RE-F-27, PD-119)
 
 A host registers named functions that rule cells may call next to the built-in functions. Registration is the typed Java SPI `RuleFunctionRegistry` (DESIGN 4.1): each function declares a name, parameter types, a result type, a version label and a step cost. The functions are pure calculations: a function receives its argument values and nothing else, never the tenant, the caller, the clock or a connection, so a decision replays from its log entry (`TR-DET-01`, `TR-DET-05`). Data the host looks up, such as a customer segment held in core banking, is passed as an input. Functions belong to the host, never to a tenant. The parameter types are `string`, `boolean`, `number` (an `integer` or `decimal` input), `date`, `datetime` and `money`. A rule set that calls a host function has no DMN export, because DMN `external` functions stay refused (`422 DMN_EXTERNAL_FUNCTION_UNSUPPORTED`).
@@ -1512,3 +1556,13 @@ A test-scope module, `rule-engine-test`, loads a rule set file (YAML, JSON or DM
 - **Example:** `customer-7 -> 403; minh -> {users: {lan: "Tran Thi Lan"}}`
 - **Test IDs:** `RLE_222_a_signed_in_account_with_no_engine_permission_cannot_look_up_names`
 
+### RLE-223 The approved effective date is sealed at approval and a changed date is refused
+- **Traces to:** `TR-SEC-04`, RLE-210, #237
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** `card-fee` v1 in force at once and v2 requested at 25 Nov 2026 for 1 Dec 2026 and approved by `minh`; no seal key is set.
+- **When:** Someone with database write access moves v2's `effective_from` to 25 Nov 11:00, and a replica without v2 in its cache evaluates `card-fee` at 26 Nov.
+- **Then:** The `REQUESTED` and `APPROVED` history rows of v2 record `effective_from` (1 Dec) and the canonical hash. The version row holds an approval seal `sha256:<hex>` over tenant, rule set, version, canonical hash, effective date, approver and approval time. Before a version is compiled or served the seal is checked next to the canonical hash; the changed date fails it, so v2 is refused (`EVALUATION_ERROR` naming the failed integrity check, alert, one decision row as the audit entry) and v1 still serves other requests. The check runs when a version is loaded, so a replica that already holds a version in its cache serves it until the cache epoch moves; tampering is found on a cold load. An approved version never has a missing seal: migration `V2` gives a version approved before seals existed the marker `legacy:pre-seal` once, a check constraint refuses `NULL` on an approved version, a trigger refuses writing the marker afterwards, and the engine refuses an approved version whose seal is `NULL` even if the constraint was dropped. A plain seal stops a casual edit, not an administrator who recomputes it. A host that needs protection against one supplies an `ApprovalSealKey` (keys of at least 32 bytes held outside the database); the seal is then `hmac-sha256:<keyId>:<hex>` and is verified against the current and the previous keys; a plain seal and the marker are refused while a key is set unless the host opens the window `acceptUnkeyedSeals`.
+- **Key rotation:** After the host sets a new current key and lists the old one as previous, every approved version is still served. `VersionService.reseal` writes the seal of an approved version again under the current key. It needs `rules:approve`, the caller is neither the approver, the author nor the requester, and the old seal must verify first, so a changed version is refused (`SEAL_MISMATCH`) and never blessed. One `RESEALED` history row names the caller; a version already sealed under the current key is returned unchanged. A key is switched on after approvals the same way: open the window, re-seal, close the window.
+- **Example:** `v2 effective_from 2026-12-01 -> 2026-11-25T11:00Z in the table => refused at 26 Nov, v1 serves`; `v1 sealed by k1, host now has k2 current and k1 previous => served; omar re-seals => hmac-sha256:k2:...`; `v1 approved, approval_seal set to NULL by an administrator => refused`
+- **Test IDs:** `RLE_223_request_and_approval_rows_record_the_date_and_hash_and_the_approval_writes_a_seal`, `RLE_223_a_date_moved_in_the_table_is_refused_with_one_audit_entry_and_the_other_version_still_serves`, `RLE_223_a_host_key_makes_the_seal_an_hmac_and_a_plain_seal_or_another_key_is_refused`, `RLE_223_rotating_the_key_keeps_approved_versions_served_and_a_second_person_reseals_them`, `RLE_223_a_version_changed_in_the_table_is_not_resealed`, `RLE_223_switching_a_key_on_after_versions_were_approved_needs_the_window_and_a_reseal`, `RLE_223_an_approved_version_with_a_null_seal_is_refused_in_plain_mode`, `RLE_223_the_pre_seal_marker_cannot_be_written_after_the_migration_and_a_keyed_host_refuses_it`

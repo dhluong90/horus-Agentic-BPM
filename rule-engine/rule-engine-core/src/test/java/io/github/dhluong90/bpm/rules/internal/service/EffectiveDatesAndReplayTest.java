@@ -351,7 +351,7 @@ class EffectiveDatesAndReplayTest {
                         VersionStatus.RETIRED, v.hitPolicy(), v.effectiveFrom(), v.canonicalJson(), v.canonicalHash(),
                         v.sourceFormat(), v.sourceDocument(), v.sourceHash(), v.lockVersion() + 1, v.requestedBy(),
                         v.requestedAt(), v.approvedBy(), v.approvedAt(), v.approvalComment(), v.createdBy(),
-                        v.createdAt()));
+                        v.createdAt()).sealed(v.approvalSeal()));
             }
         }
         int rows = stores.decisions.size();

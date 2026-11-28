@@ -437,6 +437,14 @@ What the file holds:
 
 Only the executable subset the import accepts can be exported in this release. Agent steps (`horus:type="agentTask"`) are exported with their `<horus:outputSchema>` and `<horus:guardrail>` since 0.2.0; A definition with a `saga` block (#67) is imported and run, and is not yet exported back to BPMN.
 
+## Repeating a write
+
+Send an `Idempotency-Key` with every write. The first request with a key does the work and stores its answer in the same transaction; a repeat with the same key and the same request returns that answer and writes nothing. The same key with another request is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+
+If a repeat arrives while the first request is still running, it waits for it, for at most `horus.bpm.processes.idempotency.lock-timeout` (default `2s`, which is also the most; set it lower to give up sooner). When the first request commits in time, the repeat returns the same answer. When it does not, the repeat is `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`: wait a second and send it again. Either way the work runs once.
+
+A version of a definition that was approved is compiled only while its stored hashes equal the hashes recorded at its approval. A row that was edited in the database, hashes included, is refused with `DEFINITION_INTEGRITY_FAILED`; nothing starts (Process Engine 1.1).
+
 ## Transactions
 
 A start or a completion runs every synchronous step, up to the next user task or the end, in the caller's transaction. That covers local service tasks, business rule tasks (one `rle_decision` row each) and gateway conditions. If any step fails, everything rolls back, the host's own writes included. Concurrent requests with one `Idempotency-Key` do the work once: the second waits for the first and replays its answer.

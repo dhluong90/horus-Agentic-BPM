@@ -32,6 +32,7 @@ import io.github.dhluong90.bpm.rules.rest.ProblemDetails;
 import io.github.dhluong90.bpm.rules.rest.ApprovalController;
 import io.github.dhluong90.bpm.rules.rest.RuleSetController;
 import io.github.dhluong90.bpm.rules.rest.SimulationController;
+import io.github.dhluong90.bpm.rules.spi.ApprovalSealKey;
 import io.github.dhluong90.bpm.rules.spi.CallerResolver;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.spi.TenantResolver;
@@ -98,16 +99,24 @@ class RuleEngineServicesConfiguration {
     RuleEngineInternals ruleEngineInternals(DataSource dataSource, RuleEngineTransactions transactions, TenantResolver tenants,
             CallerResolver callers, ObjectProvider<Clock> clock, RuleEngineProperties properties,
             MaskingPolicy masking, Environment environment, DecisionExplainer explainer,
-            RuleFunctionRegistry functions) {
+            RuleFunctionRegistry functions, ObjectProvider<ApprovalSealKey> sealKey) {
         EngineSettings settings = properties.toSettings(environment);
         warnIfApprovalsSkipPersonalDataAcknowledgement(settings);
         requireDevProfileForUnboundApprovals(settings, environment);
         warnIfApprovalsAreNotBoundToContent(settings);
+        ApprovalSealKey seal = sealKey.getIfAvailable(ApprovalSealKey::none);
+        if (seal.current().isPresent() && seal.acceptUnkeyedSeals()) {
+            org.apache.commons.logging.LogFactory.getLog(RuleEngineServicesConfiguration.class).warn(
+                    "Approval seal window open: acceptUnkeyedSeals is on, so plain and pre-seal seals are accepted"
+                            + " next to the key. Re-seal the approved versions and turn it off.");
+        }
         try {
             return new RuleEngineInternals(PostgresRuleEngines.create(dataSource, transactions, tenants, callers,
                     RuleEngineAutoConfiguration.engineClock(clock), settings, masking,
                     properties.toQuerySettings(), explainer, functions.functions(),
-                    HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange())));
+                    HostFunctions.VersionChange.parse(properties.evaluation().functionVersionChange()),
+                    // RLE-223: a host bean supplies the key from outside the database; without one, plain seals.
+                    seal));
         } catch (IllegalArgumentException e) {
             // A function registered twice, with a built-in name or an invalid name (RLE-058): nothing is served.
             throw new IllegalStateException("The Rule Engine does not start: " + e.getMessage(), e);

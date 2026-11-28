@@ -1086,6 +1086,22 @@ public final class DefaultRuleEngine implements RuleEngine {
     }
 
     private CompiledRuleSet compiled(StoredVersion version) {
+        // RLE-223: the date and approver are outside the content hash, so the seal written at approval is checked on
+        // every load, before the cache: a date moved in the table is refused, not served.
+        ApprovalSeal seal = new ApprovalSeal(context.sealKey());
+        if (!seal.matches(version)) {
+            throw new IntegrityFailure("Integrity check failed: the approval seal of " + version.ruleSet() + " v"
+                    + version.version() + " does not match its effective date, hash and approver; the version is not"
+                    + " served");
+        }
+        if (seal.acceptedUnkeyed(version)) {
+            // The acceptUnkeyedSeals window is open: every version served on an unkeyed seal is logged and counted, never
+            // with the seal value, so the window is visible until the versions are re-sealed.
+            System.getLogger(DefaultRuleEngine.class.getName()).log(System.Logger.Level.WARNING,
+                    "Approval seal window open: " + version.ruleSet() + " v" + version.version() + " of tenant "
+                            + version.tenantId() + " is served on an unkeyed seal; re-seal it and close the window");
+            meters.unkeyedSealAccepted();
+        }
         String key = version.tenantId() + "/" + version.id() + "/" + version.canonicalHash();
         CompiledRuleSet cached = compiled.get(key);
         if (cached != null) {

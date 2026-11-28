@@ -43,6 +43,8 @@ export interface PlacedEdge {
   isLink?: boolean;
   /** The line from a compensation boundary event to its compensation activity (#488), drawn dotted. */
   isAssociation?: boolean;
+  /** The flow carries a condition (BPMN's small diamond at its start when it leaves an activity). */
+  conditional?: boolean;
   points: Point[];
   /** Centre of the edge's label, in the space dagre kept free for it. */
   labelAt: Point | undefined;
@@ -82,6 +84,8 @@ const TYPE_ROW = 17;
 export const TYPE_INDENT = 22;
 const TASK_MIN_HEIGHT = 56;
 /** Events and gateways: the symbol in a 48 px box, its name centred below in up to CAPTION_WIDTH. */
+/** Room kept at the foot of a step for its loop or compensation marker. */
+export const MARKER_ROW = 16;
 export const SYMBOL_SIZE = 48;
 export const CAPTION_WIDTH = 84;
 export const CAPTION_GAP = 10;
@@ -140,6 +144,13 @@ export function wrapWords(text: string, maxWidth: number, charWidth: number): st
   return lines.length > 0 ? lines : [''];
 }
 
+/** A line wider than its room is cut with an ellipsis; the step's own title carries the whole text. */
+function fitted(lines: string[], maxWidth: number, charWidth: number): string[] {
+  // Wrapping estimates generously; the cut is made at the width the text really draws at (about 0.9 of the estimate).
+  const perLine = Math.max(4, Math.floor(maxWidth / (charWidth * 0.9)));
+  return lines.map((line) => (line.length > perLine ? `${line.slice(0, perLine - 1)}…` : line));
+}
+
 /** Events and gateways get their symbol; every other node, and any type this cockpit does not know, a box. */
 export function shapeOf(type: string): Shape {
   if (!isKnownNodeType(type)) return 'task';
@@ -159,9 +170,11 @@ interface Size { width: number; height: number; lines: string[]; typeLines: stri
 function sized(node: DiagramNode, shape: Shape, typeLabel: string): Size {
   const name = node.name ?? node.id;
   if (shape === 'task') {
-    const lines = wrapText(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
-    const typeLines = wrapWords(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
-    const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW;
+    const lines = fitted(wrapWords(name, TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR), TASK_WIDTH - 2 * TASK_PAD_X, NAME_CHAR);
+    const typeLines = fitted(wrapWords(typeLabel, TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR), TASK_WIDTH - 2 * TASK_PAD_X - TYPE_INDENT, CAPTION_CHAR);
+    // A step that repeats or undoes another carries a marker at its foot (#496): the box keeps a row for it, clear of the text.
+    const marked = node.loop !== undefined || (node.compensation === true && node.type !== 'serviceTask:compensation');
+    const content = 2 * TASK_PAD_Y + lines.length * NAME_LINE + typeLines.length * TYPE_ROW + (marked ? MARKER_ROW : 0);
     return { width: TASK_WIDTH, height: Math.max(TASK_MIN_HEIGHT, content), lines, typeLines };
   }
   const lines = wrapText(name, CAPTION_WIDTH, CAPTION_CHAR);
