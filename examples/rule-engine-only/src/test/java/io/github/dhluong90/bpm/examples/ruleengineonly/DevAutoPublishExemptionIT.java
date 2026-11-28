@@ -85,7 +85,7 @@ class DevAutoPublishExemptionIT {
             // and the database refuses a row its own requester approved under the former exempt id
             JdbcClient jdbc = host.getBean(JdbcClient.class);
             assertThatThrownBy(() -> jdbc.sql("""
-                    UPDATE rle_version SET requested_by = :id, approved_by = :id, approved_at = now(), status = 'PUBLISHED'
+                    UPDATE rle_version SET requested_by = :id, approved_by = :id, approved_at = now(), approval_seal = 'sha256:' || repeat('0', 64), status = 'PUBLISHED'
                     WHERE tenant_id = 'bank-a' AND version_num = 1
                     """).param("id", FORMER_EXEMPT_ID).update())
                     .isInstanceOf(DataIntegrityViolationException.class)

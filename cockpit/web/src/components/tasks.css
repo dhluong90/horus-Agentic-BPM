@@ -20,10 +20,9 @@
 .tasks__assignee { color: var(--ink-2); }
 .tasks__due { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
 .tasks__soon { font: var(--type-caption); color: var(--ink-2); }
-.tasks__sla { height: 22px; }
 
 .tasks__inspector { position: sticky; top: calc(var(--topbar-h) + 16px); gap: 14px; }
-.tasks__state { display: flex; flex-wrap: wrap; gap: 8px; }
+.tasks__state { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 .tasks__facts { gap: 8px 16px; font: var(--type-label); }
 .tasks__facts dt { color: var(--muted); }
 .tasks__facts dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
@@ -48,8 +47,6 @@
 .tasks-dialog__foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .tasks-dialog__foot .dialog__actions { margin-top: 0; }
 
-.tasks .badge--warn { background: var(--warn-soft); color: var(--warn); }
-.tasks .badge--neutral { background: var(--surface-3); color: var(--ink-2); }
 
 /* ---------- Merged lists across hosts (CK-F-28, CK-F-29) ---------- */
 .alert--warn { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn-fill); }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL" xmlns:horus="urn:horus-bpm:bpmn:extensions:v1" id="d" targetNamespace="urn:conformance" expressionLanguage="urn:horus-bpm:expr:v1">
+  <bpmn:process id="loan-review-nonint" isExecutable="true">
+    <bpmn:startEvent id="start" isInterrupting="false"/>
+    <bpmn:subProcess id="assess">
+      <bpmn:startEvent id="assess-start" isInterrupting="false"/>
+      <bpmn:scriptTask id="score" scriptFormat="urn:horus-bpm:expr:v1" horus:resultVariable="band"><bpmn:script>'B'</bpmn:script></bpmn:scriptTask>
+      <bpmn:endEvent id="assess-end"/>
+      <bpmn:sequenceFlow id="a1" sourceRef="assess-start" targetRef="score"/>
+      <bpmn:sequenceFlow id="a2" sourceRef="score" targetRef="assess-end"/>
+    </bpmn:subProcess>
+    <bpmn:endEvent id="end"/>
+    <bpmn:sequenceFlow id="f1" sourceRef="start" targetRef="assess"/>
+    <bpmn:sequenceFlow id="f2" sourceRef="assess" targetRef="end"/>
+  </bpmn:process>
+</bpmn:definitions>

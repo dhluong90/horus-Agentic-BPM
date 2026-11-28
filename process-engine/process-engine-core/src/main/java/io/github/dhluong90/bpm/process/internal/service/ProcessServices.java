@@ -703,6 +703,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                 active ? DEV_APPROVER : null, active ? now : null);
         store.insertDefinition(stored);
+        if (active) {
+            recordApproval(stored);
+        }
         if (layout != null) {
             // #445: revision 1, from the file's own diagram, in the transaction of the import.
             importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
@@ -846,6 +849,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             String approver = self ? DEV_APPROVER : caller;
             StoredDefinition updated = current.approved(approver, now, effective, note);
             write(updated);
+            recordApproval(updated);
             Map<String, Object> approvedDetails = new LinkedHashMap<>();
             approvedDetails.put("sourceHash", updated.sourceHash());
             approvedDetails.put("readerVersion", READER_VERSION);
@@ -1089,6 +1093,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (d.lockVersion() != expected) {
             throw new VersionConflictException(d.key() + " v" + d.version() + " is at lock version " + d.lockVersion());
         }
+    }
+
+    /** #172: the hashes approved, kept apart from the version row, which the integrity check compares with. */
+    private void recordApproval(StoredDefinition approved) {
+        store.recordApproval(new ProcessStore.DefinitionApproval(approved.tenantId(), approved.id(),
+                approved.approvedBy(), approved.approvedAt(), approved.sourceHash(), approved.definitionHash()));
     }
 
     private void write(StoredDefinition updated) {
@@ -2312,6 +2322,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             return null;
         }
         for (io.github.dhluong90.bpm.process.internal.model.bpmn.FlowNode n : process.nodes()) {
+            // #632: a receive task that starts the process is its own catch.
+            if (!signal && n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.ReceiveTask r
+                    && r.instantiate() && process.containerOf(r.id()).equals(process.process().id())
+                    && name.equals(r.messageRef())) {
+                return r.id();
+            }
             if (!(n instanceof io.github.dhluong90.bpm.process.internal.model.bpmn.EventBasedGateway g) || !g.instantiate()
                     || !process.containerOf(g.id()).equals(process.process().id())) {
                 continue;
@@ -4670,8 +4686,14 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         }
     }
 
-    /** PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen. */
-    private void checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
+    /**
+     * PRE-031: a completion meets the form its step declares; a link task is checked by the host's own screen.
+     *
+     * @return PRE-390: the validated submission as history keeps it: masked fields as a marker, undeclared fields named
+     *     but not stored; null when the task has no form to validate against
+     */
+    @SuppressWarnings("unchecked")
+    private io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission checkForm(String tenant, InstanceRow row, TaskRow task, Map<String, Object> result) {
         java.util.Optional<TaskForms.Resolved> resolved;
         try {
             resolved = resolveForm(tenant, row, task);
@@ -4686,7 +4708,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 throw new io.github.dhluong90.bpm.process.api.FormValidationException(
                         "The result does not meet the task's form", violations);
             }
+            return TaskForms.record(form.schema(), result);
         }
+        return null;
     }
 
     @Override
@@ -4969,8 +4993,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                         + " task of it cannot complete this four-eyes task");
             }
             java.util.Optional<JobRow> reviewed = checkReviewResult(tenant, row, taskId, values);
+            io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission submission = null;
             if (reviewed.isEmpty()) {
-                checkForm(tenant, row, task, values);
+                submission = checkForm(tenant, row, task, values);
             }
             Instant now = clock.instant();
             if (store.completeTask(tenant, taskId, task.lockVersion(), caller, now) != 1) {
@@ -4981,7 +5006,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             InstanceState state = new InstanceState(row.id(), tenant, row.definitionId(), row.businessKey(),
                     InstanceStatus.valueOf(row.status()), store.tokens(tenant, row.id()), Values.readMap(row.variablesJson()),
                     participants, row.sequence());
-            run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller), RunAs.REQUEST);
+            run(definition, row, state, new Command.CompleteTask(taskId, task.tokenId(), values, caller, submission), RunAs.REQUEST);
             return read(tenant, store.findInstance(tenant, row.id()).orElseThrow());
         }, Views::instanceToJson, Views::instanceFromJson));
     }
@@ -5874,6 +5899,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 : reader.apply(source);
         if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
             throw integrityFailed(definition, "the stored source no longer gives the recorded definition hash");
+        }
+        if (definition.approvedBy() != null) {
+            // #172: row, source and both hashes may have been rewritten together; the approval record was not.
+            ProcessStore.DefinitionApproval approval = store.approval(definition.tenantId(), definition.id())
+                    .orElseThrow(() -> integrityFailed(definition, "the version has no approval record"));
+            if (!approval.sourceHash().equals(definition.sourceHash())
+                    || !approval.definitionHash().equals(definition.definitionHash())) {
+                throw integrityFailed(definition, "the stored hashes differ from the hashes approved");
+            }
         }
         return process;
     }

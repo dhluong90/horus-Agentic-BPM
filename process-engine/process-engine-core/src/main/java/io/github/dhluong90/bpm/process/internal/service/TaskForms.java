@@ -7,6 +7,7 @@ import io.github.dhluong90.bpm.process.internal.model.bpmn.Process;
 import io.github.dhluong90.bpm.process.internal.model.bpmn.UserTask;
 import io.github.dhluong90.bpm.process.internal.model.horus.FormSpec;
 import io.github.dhluong90.bpm.process.spi.FormRegistry;
+import io.github.dhluong90.bpm.process.internal.exec.RecordedSubmission;
 import io.github.dhluong90.bpm.process.spi.InputMasker;
 import io.github.dhluong90.bpm.process.spi.OutputSchemaValidator;
 import java.net.URI;
@@ -264,6 +265,60 @@ public final class TaskForms {
         return value;
     }
 
+    /** Most unrecorded field paths named in one entry, and the longest one. */
+    private static final int MAX_UNRECORDED = 50;
+    private static final int MAX_UNRECORDED_PATH = 120;
+
+    /**
+     * What history keeps of a validated submission (#663): the fields the schema declares, every part it marks
+     * {@code "mask": true} replaced by {@link RecordedSubmission#MASKED}, at any depth; a field the schema does not
+     * declare is not stored, only its path is named.
+     *
+     * @param schema the form schema
+     * @param submission the validated values
+     * @return the values to store and the paths of the fields left out
+     */
+    @SuppressWarnings("unchecked")
+    static RecordedSubmission record(Map<String, Object> schema, Map<String, Object> submission) {
+        List<String> dropped = new ArrayList<>();
+        Object values = recordValue(schema, submission, "", 0, dropped);
+        return new RecordedSubmission((Map<String, Object>) values,
+                dropped.size() > MAX_UNRECORDED ? dropped.subList(0, MAX_UNRECORDED) : dropped);
+    }
+
+    private static Object recordValue(Object schema, Object value, String path, int depth, List<String> dropped) {
+        if (value == null) {
+            return null;
+        }
+        if (!(schema instanceof Map<?, ?> node)) {
+            return value;
+        }
+        if (Boolean.TRUE.equals(node.get("mask")) || depth > MASK_MAX_DEPTH) {
+            return RecordedSubmission.MASKED;
+        }
+        if (value instanceof Map<?, ?> map && node.get("properties") instanceof Map<?, ?> properties) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String name = String.valueOf(entry.getKey());
+                String at = path.isEmpty() ? name : path + "." + name;
+                if (!properties.containsKey(entry.getKey())) {
+                    dropped.add(at.length() > MAX_UNRECORDED_PATH ? at.substring(0, MAX_UNRECORDED_PATH) : at);
+                    continue;
+                }
+                out.put(name, recordValue(properties.get(entry.getKey()), entry.getValue(), at, depth + 1, dropped));
+            }
+            return out;
+        }
+        if (value instanceof java.util.Collection<?> items && node.get("items") instanceof Map<?, ?> itemSchema) {
+            List<Object> out = new ArrayList<>();
+            for (Object item : items) {
+                out.add(recordValue(itemSchema, item, path + "[]", depth + 1, dropped));
+            }
+            return out;
+        }
+        return value;
+    }
+
     /**
      * The variables with the parts the schema marks {@code "mask": true} masked, at any depth.
      *
@@ -492,8 +547,20 @@ public final class TaskForms {
         }
         checkOptions(hints, schema, fields, problems);
         checkUnits(hints, fields, problems);
-        checkFormats(hints, fields, problems);
+        checkFormats(hints, schema, fields, problems);
         return problems;
+    }
+
+    private static boolean isCurrency(String code) {
+        if (!CURRENCY.matcher(code).matches()) {
+            return false;
+        }
+        try {
+            java.util.Currency.getInstance(code);
+            return true;
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 
     /** Texts per locale, each at most {@code max} characters. */
@@ -559,7 +626,9 @@ public final class TaskForms {
      * {@code formats}: field, then {@code {grouping, currency | currencyFrom}}. A fixed ISO 4217 {@code currency}, or
      * {@code currencyFrom}, a declared field that holds the code. Display only.
      */
-    private static void checkFormats(Map<String, Object> hints, Set<String> fields, List<String> problems) {
+    private static void checkFormats(Map<String, Object> hints, Map<String, Object> schema, Set<String> fields,
+            List<String> problems) {
+        Map<?, ?> properties = schema.get("properties") instanceof Map<?, ?> p ? p : Map.of();
         if (!hints.containsKey("formats")) {
             return;
         }
@@ -573,9 +642,10 @@ public final class TaskForms {
                     && (!f.containsKey("grouping") || f.get("grouping") instanceof Boolean)
                     && !(f.containsKey("currency") && f.containsKey("currencyFrom"))
                     && (!f.containsKey("currency") || f.get("currency") instanceof String c
-                            && CURRENCY.matcher(c).matches())
+                            && isCurrency(c))
                     && (!f.containsKey("currencyFrom") || f.get("currencyFrom") instanceof String from
-                            && fields.contains(from));
+                            && fields.contains(from) && !from.equals(String.valueOf(field))
+                            && !(properties.get(from) instanceof Map<?, ?> def && Boolean.TRUE.equals(def.get("mask"))));
             if (!ok) {
                 problems.add("formats: " + safe(String.valueOf(field)) + " is not a declared field with grouping"
                         + " (true or false) and at most one of currency (three capital letters) and currencyFrom"

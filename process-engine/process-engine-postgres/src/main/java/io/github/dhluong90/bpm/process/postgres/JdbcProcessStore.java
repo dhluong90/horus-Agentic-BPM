@@ -13,6 +13,7 @@ import io.github.dhluong90.bpm.process.internal.store.ProcessStore;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -30,11 +31,25 @@ import org.springframework.jdbc.core.simple.JdbcClient;
  */
 public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
 
+    /** The default wait on an idempotency claim; the starter may lower it. */
+    public static final Duration DEFAULT_IDEMPOTENCY_LOCK_TIMEOUT = Duration.ofSeconds(2);
+
     private final JdbcClient jdbc;
+    private final Duration idempotencyLockTimeout;
 
     /** @param dataSource the host's data source */
     public JdbcProcessStore(DataSource dataSource) {
+        this(dataSource, DEFAULT_IDEMPOTENCY_LOCK_TIMEOUT);
+    }
+
+    /**
+     * @param dataSource the host's data source
+     * @param idempotencyLockTimeout the longest a request waits for an idempotency key another request holds
+     *     (#172); longer is {@code 409 IDEMPOTENCY_IN_FLIGHT}
+     */
+    public JdbcProcessStore(DataSource dataSource, Duration idempotencyLockTimeout) {
         this.jdbc = JdbcClient.create(Objects.requireNonNull(dataSource, "dataSource must not be null"));
+        this.idempotencyLockTimeout = Objects.requireNonNull(idempotencyLockTimeout, "idempotencyLockTimeout");
     }
 
     // ---- queries (PRE-028) ---------------------------------------------------------------------------------
@@ -150,6 +165,16 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
                 Object variable = Values.readMap(rs.getString("details")).get("resultVariable");
                 if (variable instanceof String name && !name.isBlank()) {
                     return plain.withResultVariable(name);
+                }
+            }
+            // #663: what the user submitted, as it was stored (masked fields masked); older rows have none.
+            if ("TASK_COMPLETED".equals(type)) {
+                Map<String, Object> details = Values.readMap(rs.getString("details"));
+                if (details.get("submission") instanceof Map<?, ?> submitted) {
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> recorded = (Map<String, Object>) submitted;
+                    List<String> unrecorded = strings(details.get("unrecordedFields"));
+                    return plain.withSubmission(recorded, unrecorded.isEmpty() ? null : unrecorded);
                 }
             }
             return plain;
@@ -928,6 +953,26 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     }
 
     @Override
+    public void recordApproval(DefinitionApproval a) {
+        jdbc.sql("INSERT INTO pre_definition_approval (tenant_id, definition_id, approved_by, approved_at, source_hash, "
+                        + "definition_hash) VALUES (?, ?, ?, ?, ?, ?)")
+                .params(a.tenantId(), a.definitionId(), a.approvedBy(), ts(a.approvedAt()), a.sourceHash(),
+                        a.definitionHash())
+                .update();
+    }
+
+    @Override
+    public Optional<DefinitionApproval> approval(String tenant, String definitionId) {
+        return jdbc.sql("SELECT tenant_id, definition_id, approved_by, approved_at, source_hash, definition_hash "
+                        + "FROM pre_definition_approval WHERE tenant_id = ? AND definition_id = ?")
+                .params(tenant, definitionId)
+                .query((rs, row) -> new DefinitionApproval(rs.getString("tenant_id"), rs.getString("definition_id"),
+                        rs.getString("approved_by"), instant(rs, "approved_at"), rs.getString("source_hash"),
+                        rs.getString("definition_hash")))
+                .optional();
+    }
+
+    @Override
     public Optional<IdempotencyRecord> idempotency(String tenant, String operation, String key, Instant now) {
         return jdbc.sql("SELECT tenant_id, operation, idempotency_key, request_hash, response_body::text AS body, expires_at "
                         + "FROM pre_idempotency WHERE tenant_id = ? AND operation = ? AND idempotency_key = ? "
@@ -942,13 +987,13 @@ public final class JdbcProcessStore implements ProcessStore, ProcessQueryStore {
     @Override
     public boolean claimIdempotency(String tenant, String operation, String key, String requestHash, Instant expiresAt,
             Instant now) {
-        return jdbc.sql("INSERT INTO pre_idempotency (tenant_id, operation, idempotency_key, request_hash, status, "
+        return IdempotencyClaim.run(jdbc, idempotencyLockTimeout, () -> jdbc.sql("INSERT INTO pre_idempotency (tenant_id, operation, idempotency_key, request_hash, status, "
                         + "response_body, expires_at) VALUES (?, ?, ?, ?, 'PENDING', NULL, ?) "
                         + "ON CONFLICT (tenant_id, operation, idempotency_key) DO UPDATE SET request_hash = EXCLUDED.request_hash, "
                         + "status = 'PENDING', response_body = NULL, expires_at = EXCLUDED.expires_at "
                         + "WHERE pre_idempotency.expires_at <= ?")
                 .params(tenant, operation, key, requestHash, ts(expiresAt), ts(now))
-                .update() == 1;
+                .update() == 1);
     }
 
     @Override

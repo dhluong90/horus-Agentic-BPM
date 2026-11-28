@@ -156,11 +156,17 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
      *     (#490, #495); never a variable value; null otherwise
      * @param resultVariable for the {@code NODE_COMPLETED} of a script step, the variable it set, as recorded when it
      *     ran (#518); null otherwise
+     * @param submission for {@code TASK_COMPLETED}, the form values the user submitted as they were stored, masked
+     *     fields as {@code {"masked": true}} (#663); null for an entry written before it was recorded and for a task
+     *     without a form
+     * @param unrecordedFields for {@code TASK_COMPLETED}, the paths of submitted fields the form does not declare,
+     *     named but never stored; null when there were none
      */
     public record Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
             String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt, String errorCode,
             String handler, String cause, Integer waiters, java.util.Map<String, String> message, Instances instances,
-            Routing routing, java.util.Map<String, Object> event, String resultVariable) {
+            Routing routing, java.util.Map<String, Object> event, String resultVariable,
+            java.util.Map<String, Object> submission, java.util.List<String> unrecordedFields) {
 
         public Entry {
             Objects.requireNonNull(id, "id");
@@ -170,6 +176,18 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
             message = message == null ? null : java.util.Collections.unmodifiableMap(
                     new java.util.LinkedHashMap<>(message));
             event = event == null ? null : java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>(event));
+            submission = submission == null ? null : java.util.Collections.unmodifiableMap(
+                    new java.util.LinkedHashMap<>(submission));
+            unrecordedFields = unrecordedFields == null ? null : java.util.List.copyOf(unrecordedFields);
+        }
+
+        /** An entry with no submission part. */
+        public Entry(String id, String type, String nodeId, String actor, Instant occurredAt, String kind,
+                String compensates, String attemptId, String scopeTokenId, String scope, Integer attempt,
+                String errorCode, String handler, String cause, Integer waiters, java.util.Map<String, String> message,
+                Instances instances, Routing routing, java.util.Map<String, Object> event, String resultVariable) {
+            this(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope, attempt,
+                    errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable, null, null);
         }
 
         /** An entry with no event part. */
@@ -220,13 +238,13 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
         /** @return the same entry with the routing of a gateway or join */
         public Entry withRouting(Routing newRouting) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting, event, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, newRouting, event, resultVariable, submission, unrecordedFields);
         }
 
         /** @return the same entry in the scope named, for an entry of an undo */
         public Entry inScope(String scopeNodeId) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId,
-                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable);
+                    scopeNodeId, attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable, submission, unrecordedFields);
         }
 
         /**
@@ -237,7 +255,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withMessage(java.util.Map<String, String> message) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable, submission, unrecordedFields);
         }
 
         /**
@@ -246,7 +264,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withInstances(Instances counters) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, counters, routing, event, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, counters, routing, event, resultVariable, submission, unrecordedFields);
         }
 
         /**
@@ -257,7 +275,7 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withEvent(java.util.Map<String, Object> newEvent) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, newEvent, resultVariable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, newEvent, resultVariable, submission, unrecordedFields);
         }
 
         /**
@@ -268,7 +286,20 @@ public record InstanceActivities(String instanceId, Instant startedAt, Instant e
          */
         public Entry withResultVariable(String variable) {
             return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
-                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, variable);
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, variable, submission, unrecordedFields);
+        }
+
+        /**
+         * The same entry carrying the form submission a user task was completed with (#663).
+         *
+         * @param recorded the submission as stored: validated, a masked field as {@code {"masked": true}}
+         * @param unrecorded paths of submitted fields the form does not declare, which were not stored; may be null
+         * @return the entry with {@code submission} and {@code unrecordedFields} set
+         */
+        public Entry withSubmission(java.util.Map<String, Object> recorded, java.util.List<String> unrecorded) {
+            return new Entry(id, type, nodeId, actor, occurredAt, kind, compensates, attemptId, scopeTokenId, scope,
+                    attempt, errorCode, handler, cause, waiters, message, instances, routing, event, resultVariable,
+                    recorded, unrecorded);
         }
 
         /** @return true for the history types the undo of a saga writes */
