@@ -16,6 +16,16 @@ const out = join(here, '.generated');
 export const SITE_URL = 'https://dhluong90.github.io/horus-Agentic-BPM';
 const RAW = /https:\/\/raw\.githubusercontent\.com\/wiki\/dhluong90\/horus-Agentic-BPM\//g;
 
+/**
+ * Rendered diagrams carry width="100%", so a browser has no size to draw them at and shrinks a wide one to the column.
+ * Giving the copy its own width, from its viewBox, lets the stylesheet show it at that size and scroll it on a phone.
+ */
+export function sizeSvg(text) {
+  const box = text.match(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"/);
+  if (!box || !/^<svg[^>]*\swidth="100%"/.test(text)) return text;
+  return text.replace(/^(<svg[^>]*?)\swidth="100%"/, `$1 width="${Math.round(Number(box[1]))}" height="${Math.round(Number(box[2]))}"`);
+}
+
 export function slug(target) {
   return target.trim().replace(/\s+/g, '-');
 }
@@ -81,6 +91,10 @@ export function build(check = false) {
   if (errors.length) { console.error(errors.join('\n')); throw new Error(`${errors.length} problem(s) in the wiki content`); }
   if (!check) {
     cpSync(join(wiki, 'images'), join(out, 'images'), { recursive: true });
+    for (const file of readdirSync(join(out, 'images')).filter((name) => name.endsWith('.svg'))) {
+      const path = join(out, 'images', file);
+      writeFileSync(path, sizeSvg(readFileSync(path, 'utf8')));
+    }
     cpSync(join(here, 'content'), out, { recursive: true });
     cpSync(join(here, 'public'), join(out, 'public'), { recursive: true });
     writeFileSync(join(out, 'public', 'llms.txt'), llmsTxt(sidebar));

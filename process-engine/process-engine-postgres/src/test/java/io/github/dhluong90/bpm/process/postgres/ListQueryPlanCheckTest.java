@@ -184,6 +184,7 @@ class ListQueryPlanCheckTest {
         samples.put("instance-step-results", List.of("bank-a", INSTANCE, new String[] {"credit-review", "kyc-agent"}));
         samples.put("replay-overridden-attempts", List.of("bank-a", new String[] {INSTANCE, "AIN" + "%023d".formatted(43)},
                 new String[] {"AAT" + "%023d".formatted(42)}));
+        samples.put("replay-recorded-payloads", List.of("bank-a", "loan-origination", "kyc-agent", from, T, 500));
         samples.put("replay-recorded-answers", List.of("bank-a", "loan-origination", "kyc-agent", from, T, 100));
         samples.put("replay-recorded-answers-after", List.of("bank-a", "loan-origination", "kyc-agent", from, T, from,
                 "AHI" + "%023d".formatted(7), 100));
@@ -241,6 +242,7 @@ class ListQueryPlanCheckTest {
         samples.put("instance-node-activities", List.of("bank-a", INSTANCE, from, T));
         samples.put("instance-history-entries", List.of("bank-a", INSTANCE, from, T, 201));
         samples.put("instance-compensation-entries", List.of("bank-a", INSTANCE, from, T, 2000));
+        samples.put("variable-reencrypt-instances", List.of("bank-a", "", 500));
         samples.put("instances-1", List.of("bank-a", "RUNNING", 50));
         samples.put("instances-3-key-range-after", List.of("bank-a", "RUNNING", "COMPLETED", "FAILED", "loan-origination",
                 from, T, T, INSTANCE, 50));

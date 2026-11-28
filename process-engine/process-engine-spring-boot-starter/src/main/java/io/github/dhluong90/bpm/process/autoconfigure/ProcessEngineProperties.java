@@ -43,6 +43,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param tasks how a user task is completed through a declared form (PRE-031)
  * @param database the schema owner and the application role (#700)
  * @param parallelStart limits of the arrivals a parallel multiple start holds (PD-149, AUD-10)
+ * @param variableEncryption which instance variables are encrypted at rest and under which keys (PRE-395)
  */
 @ConfigurationProperties("horus.bpm.processes")
 public record ProcessEngineProperties(
@@ -73,7 +74,8 @@ public record ProcessEngineProperties(
         @DefaultValue Tasks tasks,
         @DefaultValue Cursor cursor,
         @DefaultValue ParallelStart parallelStart,
-        @DefaultValue Database database) {
+        @DefaultValue Database database,
+        @DefaultValue VariableEncryption variableEncryption) {
 
     /**
      * Two database roles for production (#700): a schema owner that migrates and an application role that serves traffic.
@@ -108,6 +110,89 @@ public record ProcessEngineProperties(
         }
     }
 
+    /**
+     * Application-level encryption of instance variables (PRE-395). Off until {@code variables} or
+     * {@code definitions} name something. Supply every key from an environment variable or a secret store, never from a
+     * file in the repository. Naming a variable without a key fails start-up: the engine never stores it in the clear
+     * instead.
+     *
+     * @param variables names of the variables encrypted in every definition, matched on the top-level name
+     * @param definitions per definition key, the variable names encrypted there; {@code *} encrypts all of them
+     * @param activeKeyId the id of the key that encrypts new values, 1 to 32 letters, digits, {@code .}, {@code _} or
+     *     {@code -}; required when {@code variables} or {@code definitions} is set
+     * @param keys Base64 AES-256 keys (32 bytes after decoding) by id. To rotate: add a new key, make it active, run
+     *     the re-encryption sweep, then remove the old key once no stored value carries its id; a value of a removed
+     *     key is refused with {@code 500 VARIABLE_KEY_UNAVAILABLE}
+     */
+    public record VariableEncryption(java.util.Set<String> variables,
+            java.util.Map<String, java.util.Set<String>> definitions, String activeKeyId,
+            java.util.Map<String, String> keys) {
+
+        /** Copies the collections; unset is empty. */
+        public VariableEncryption {
+            variables = variables == null ? java.util.Set.of() : java.util.Set.copyOf(variables);
+            definitions = definitions == null ? java.util.Map.of() : java.util.Map.copyOf(definitions);
+            keys = keys == null ? java.util.Map.of() : java.util.Map.copyOf(keys);
+        }
+
+        /** @return the rules these settings describe */
+        public io.github.dhluong90.bpm.process.spi.VariableEncryptionRules rules() {
+            return new io.github.dhluong90.bpm.process.spi.VariableEncryptionRules(variables, definitions);
+        }
+
+        /**
+         * Builds the keyring: the active key writes, every other key only reads.
+         *
+         * @return the keyring, empty when no key is set
+         * @throws IllegalArgumentException naming the property when a key is not Base64 or not 32 bytes, or the active
+         *     id is missing
+         */
+        public io.github.dhluong90.bpm.process.spi.VariableKeyring keyring() {
+            if (keys.isEmpty()) {
+                return io.github.dhluong90.bpm.process.spi.VariableKeyring.none();
+            }
+            if (activeKeyId == null || !keys.containsKey(activeKeyId)) {
+                throw new IllegalArgumentException("horus.bpm.processes.variable-encryption.active-key-id must name "
+                        + "one of horus.bpm.processes.variable-encryption.keys");
+            }
+            java.util.List<io.github.dhluong90.bpm.process.spi.VariableKeyring.Key> earlier = new java.util.ArrayList<>();
+            io.github.dhluong90.bpm.process.spi.VariableKeyring.Key active = null;
+            for (java.util.Map.Entry<String, String> e : keys.entrySet()) {
+                io.github.dhluong90.bpm.process.spi.VariableKeyring.Key key;
+                try {
+                    key = new io.github.dhluong90.bpm.process.spi.VariableKeyring.Key(e.getKey(),
+                            java.util.Base64.getDecoder().decode(e.getValue().strip()));
+                } catch (IllegalArgumentException ex) {
+                    throw new IllegalArgumentException("horus.bpm.processes.variable-encryption.keys." + e.getKey()
+                            + " must be Base64 of exactly 32 bytes");
+                }
+                if (e.getKey().equals(activeKeyId)) {
+                    active = key;
+                } else {
+                    earlier.add(key);
+                }
+            }
+            io.github.dhluong90.bpm.process.spi.VariableKeyring.Key now = active;
+            return new io.github.dhluong90.bpm.process.spi.VariableKeyring() {
+                @Override
+                public java.util.Optional<Key> current() {
+                    return java.util.Optional.of(now);
+                }
+
+                @Override
+                public java.util.List<Key> previous() {
+                    return earlier;
+                }
+            };
+        }
+
+        /** Never prints a key. */
+        @Override
+        public String toString() {
+            return "VariableEncryption[variables=" + variables + ", definitions=" + definitions.keySet()
+                    + ", activeKeyId=" + activeKeyId + ", keys=" + keys.keySet() + "]";
+        }
+    }
 
     /**
      * The keys that sign list cursors (AUD-13). Supply every key from an environment variable or a secret store,

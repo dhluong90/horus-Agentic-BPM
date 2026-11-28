@@ -280,9 +280,10 @@ class Run:
             self.check(f"UPG-01 {t}: all {len(before[t])} rows are still there", not gone, str(gone[:3]))
         changed_instances = [k for k in before["instances"] if k not in s["timers"] and after["instances"].get(k) != before["instances"][k]]
         self.check("UPG-01 waiting instances are unchanged by the upgrade", not changed_instances, str(changed_instances[:3]))
-        self.check("UPG-02 Flyway history: the old versions are kept and V2 is applied successfully on both engines",
+        self.check("UPG-02 Flyway history: the old versions are kept and V2 and V3 are applied successfully on both engines",
                    set(before["flyway"]) <= set(after["flyway"])
                    and ("rle", "2", "t") in after["flyway"] and ("pre", "2", "t") in after["flyway"]
+                   and ("rle", "3", "t") in after["flyway"]
                    and all(r[2] == "t" for r in after["flyway"]), str(after["flyway"]))
         vs = self.ok("lan", "GET", f"{RULES}/rule-sets/upg-fee/versions/1")
         self.check("UPG-03 version 1 reads with its approver and hash", vs["status"] in ("PUBLISHED", "RETIRED")
@@ -294,6 +295,13 @@ class Run:
         self.check("UPG-04 every version approved before the upgrade carries the legacy marker once",
                    approved_before and all(seals.get(i) == "legacy:pre-seal" for i in approved_before), str(seals)[:200])
         self.check("UPG-04 no approved version has a missing seal", all(v for v in seals.values()))
+        # RLE-231: the marker is scoped to the versions that existed before V2, and each has one audit entry
+        stamped = {r[0] for r in self.sql("SELECT id FROM rle_version WHERE legacy_backfilled_at IS NOT NULL")}
+        self.check("UPG-04 the marker is stamped on exactly the versions approved before the upgrade",
+                   stamped == approved_before, f"{sorted(stamped)} vs {sorted(approved_before)}")
+        audited = [r[0] for r in self.sql("SELECT version_id FROM rle_version_history WHERE action = 'LEGACY_SEALED'")]
+        self.check("UPG-04 one LEGACY_SEALED audit entry per backfilled version",
+                   sorted(audited) == sorted(approved_before), str(audited))
         # decisions replay: the engine loads the stored version cold in this JVM and checks its seal
         print("\nDeterministic replay")
         mismatch = []
@@ -313,6 +321,8 @@ class Run:
         self.approve(3, s["v3_requested"], "after the upgrade")
         seal3 = self.sql("SELECT approval_seal FROM rle_version WHERE rule_set_id = (SELECT id FROM rle_rule_set WHERE name='upg-fee') AND version_num = 3")
         self.check("UPG-06 the approval after the upgrade writes a real seal", seal3 and seal3[0][0].startswith("sha256:"), str(seal3))
+        late = self.sql("SELECT count(*) FROM rle_version WHERE legacy_backfilled_at IS NOT NULL")
+        self.check("UPG-06 the approval after the upgrade carries no legacy stamp", int(late[0][0]) == len(approved_before), str(late))
         d = self.ok("tuan", "POST", f"{RULES}/decisions/upg-fee:evaluate", {"inputs": {"tier": "SILVER"}})
         self.check("UPG-06 version 3 is in force and served", d["version"] == 3 and d["outputs"]["fee"]["amount"] == 40000, str(d))
         old = self.ok("minh", "POST", f"{RULES}/decisions/{s['decisions'][0][0]}:replay", {})

@@ -548,6 +548,18 @@ Expected: only the new id.
 3. If it is found, put it back as `current()` or `previous()` and restart. The versions verify again.
 4. If it is lost for good, the affected versions stay refused. The history, the decisions and their stored inputs and outputs remain readable. To serve the rule set again, import the rule set content (an export of the version, or the source file), request publication and approve it as a new version under a new key. Past decisions on the lost versions can no longer be replayed. Whether the bank accepts that, and how it explains it to an auditor, is a decision for the bank's security owner.
 
+## Variable encryption key custody
+
+Only when you set `variable-encryption.*` (PRE-525 to PRE-529). The keys must stay outside the database, and a database restore without them leaves every protected value refused with `VARIABLE_KEY_UNAVAILABLE`.
+
+1. Generate each key with `openssl rand -base64 32`; keep it in the bank's vault, injected as `horus.bpm.processes.variable-encryption.keys.<id>` and `active-key-id`. Every replica gets the same keys.
+2. Back the keys up in the vault's own backup, apart from the database backup. A lost key cannot be recovered.
+3. To rotate: add the new key, make it active, keep the old one listed, roll the replicas, then run `JdbcVariableReencryption.reencrypt(tenant, afterId, 500)` per tenant, passing back `lastId`, until `rewritten` and `refused` are both 0. Remove the old key only then.
+4. After a leak, rotate the same way and treat the old key as exposed.
+5. Do not take a variable out of `variable-encryption.*` while instances still hold it encrypted: the write is refused with `VARIABLE_ENCRYPTION_RULE_REMOVED` and nothing is decrypted (PRE-529). The sweep rewrites the instance rows only; keep the old key listed while jobs, tokens or history written under it remain. Run one sweeper per tenant at a time.
+
+The full rules are in [[Multi-Tenancy-and-Security]] under key custody.
+
 ## Upgrade to a later release
 
 This is the path from 1.0.0 to the next release. The upgrade test proves it on a populated database (`tools/upgrade-test/run.sh`, nightly in CI, see `tools/upgrade-test/README.md`). It stops the old host, then starts the new one on the same database, so Flyway runs the added migrations. It does not test a rolling upgrade with old and new copies running together, so stop every 1.0.0 copy before you start the first new one.
