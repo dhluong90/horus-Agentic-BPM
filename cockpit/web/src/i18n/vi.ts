@@ -409,6 +409,8 @@ export const vi: Record<MessageKey, string> = {
   'definition.diagramLabel': 'Sơ đồ {name}, {count} bước',
   'diagram.zoom': 'Thu phóng',
   'diagram.data.object': 'Đối tượng dữ liệu',
+  'diagram.note': 'Ghi chú',
+  'diagram.group': 'Nhóm',
   'diagram.data.store': 'Kho dữ liệu',
   'diagram.fit': 'Vừa khung',
   'diagram.fitAt': 'Vừa khung · {percent} %',
@@ -424,6 +426,7 @@ export const vi: Record<MessageKey, string> = {
 
   /* Process approval with the graph diff (CKP-024) */
   'definition.lens.changes': 'Thay đổi',
+  'definition.subtitleStored': 'Phiên bản {version}, vẽ theo sơ đồ của mô hình',
   'definition.subtitlePending': 'Phiên bản {version}, do {who} gửi duyệt',
   'diff.side': 'Phiên bản hiển thị',
   'diff.side.target': 'Đề xuất · phiên bản {version}',
@@ -527,6 +530,7 @@ export const vi: Record<MessageKey, string> = {
   'node.complexGateway': 'Cổng phức hợp',
   'node.adHocSubProcess': 'Tiểu quy trình tùy biến',
   'node.multiple': 'Sự kiện nhiều loại',
+  'node.intermediateEvent': 'Sự kiện trung gian',
   'node.parallelMultiple': 'Sự kiện nhiều loại song song',
   'node.timer': 'Hẹn giờ',
   'node.eventSubProcess': 'Tiểu quy trình sự kiện',
@@ -539,6 +543,7 @@ export const vi: Record<MessageKey, string> = {
   'node.messageCatch': 'Chờ thông điệp',
   'node.messageThrow': 'Gửi thông điệp',
   'node.receiveTask': 'Việc nhận thông điệp',
+  'node.receiveTaskStart': 'Tác vụ nhận, khởi tạo quy trình',
   'node.sendTask': 'Việc gửi thông điệp',
   'node.callActivity': 'Gọi quy trình',
   'node.transaction': 'Giao dịch nhiều bước',

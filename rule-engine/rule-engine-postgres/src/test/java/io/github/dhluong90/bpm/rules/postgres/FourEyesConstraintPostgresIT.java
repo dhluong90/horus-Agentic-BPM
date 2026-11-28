@@ -51,7 +51,8 @@ class FourEyesConstraintPostgresIT {
 
     private static int approve(DataSource db, String id, String approver) {
         return JdbcClient.create(db).sql("""
-                UPDATE rle_version SET status = 'PUBLISHED', approved_by = :approver, approved_at = now()
+                UPDATE rle_version SET status = 'PUBLISHED', approved_by = :approver, approved_at = now(),
+                  approval_seal = 'sha256:' || repeat('c', 64)
                 WHERE tenant_id = 'bank-a' AND id = :id
                 """).param("approver", approver).param("id", id).update();
     }

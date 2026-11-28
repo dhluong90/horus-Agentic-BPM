@@ -10,6 +10,7 @@ Short how-to pages for a developer adopting the Process Engine and the Rule Engi
 | Wait for a message, a signal or a time | [[Guide: messages, signals and timers|Guide-Messages-Signals-and-Timers]] |
 | Handle a failure or undo earlier steps | [[Guide: errors and compensation|Guide-Errors-and-Compensation]] |
 | Call a rule set from a process, or write a condition | [[Guide: decisions from processes|Guide-Decisions-from-Processes]] |
+| Import a DMN decision table | [[Rule Engine: import a DMN table|Rule-Engine-Importing-DMN]] |
 | Write and approve a decision table | [[Rule Engine: author a decision table|Rule-Engine-Authoring-Decision-Tables]], [[Rule Engine: publish a version|Rule-Engine-Versioning-and-Publishing]] |
 | Call the API or generate a client | [[Guide: the REST API and OpenAPI|Guide-REST-API-and-OpenAPI]] |
 | Show the cockpit to authors, approvers and operators | [[Cockpit: embed, approve, operate|Cockpit]] (embedded in your service, or standalone) |

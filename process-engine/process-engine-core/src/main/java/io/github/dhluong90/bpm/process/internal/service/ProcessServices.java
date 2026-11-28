@@ -703,6 +703,9 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 Hashes.sha256(text), nodeCount, source, active ? now : null, caller, now,
                 active ? DEV_APPROVER : null, active ? now : null);
         store.insertDefinition(stored);
+        if (active) {
+            recordApproval(stored);
+        }
         if (layout != null) {
             // #445: revision 1, from the file's own diagram, in the transaction of the import.
             importedLayouts.insert(tenant, stored.id(), new io.github.dhluong90.bpm.process.api.LayoutRevision(
@@ -846,6 +849,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             String approver = self ? DEV_APPROVER : caller;
             StoredDefinition updated = current.approved(approver, now, effective, note);
             write(updated);
+            recordApproval(updated);
             Map<String, Object> approvedDetails = new LinkedHashMap<>();
             approvedDetails.put("sourceHash", updated.sourceHash());
             approvedDetails.put("readerVersion", READER_VERSION);
@@ -1089,6 +1093,12 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         if (d.lockVersion() != expected) {
             throw new VersionConflictException(d.key() + " v" + d.version() + " is at lock version " + d.lockVersion());
         }
+    }
+
+    /** #172: the hashes approved, kept apart from the version row, which the integrity check compares with. */
+    private void recordApproval(StoredDefinition approved) {
+        store.recordApproval(new ProcessStore.DefinitionApproval(approved.tenantId(), approved.id(),
+                approved.approvedBy(), approved.approvedAt(), approved.sourceHash(), approved.definitionHash()));
     }
 
     private void write(StoredDefinition updated) {
@@ -4440,6 +4450,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 store.appendHistory(tenant, row.id(), job.definitionId(), List.of(new HistoryEntry(
                         "COMPENSATION_STEP_COMPLETED", entry.stepId(), job.tokenId(), attemptId, reportedBy, now,
                         details)));
+                publishUndoCompleted(row, entry, attemptId, false, now);
                 closeRetried(tenant, row.id(), job.tokenId(), now);
                 advanceWalk(store.definition(tenant, row.definitionId()).orElseThrow(), tenant, row.id(),
                         job.tokenId());
@@ -4449,6 +4460,33 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                     reportedBy);
         }
         return StepCompletion.Outcome.ACCEPTED;
+    }
+
+    /**
+     * PRE-377: one {@code processes.compensation.step-completed.v1} when an undo step is {@code DONE}, in the transaction
+     * that wrote its {@code COMPENSATION_STEP_COMPLETED} history entry. {@code nodeId} is the forward step that was
+     * undone, {@code handler} the compensation handler that ran, {@code outcome} {@code COMPLETED} or, for an undo an
+     * approver marked done by hand, {@code COMPLETED_MANUALLY}. Ids and codes only, never a variable or an output.
+     */
+    private void publishUndoCompleted(InstanceRow row, ProcessStore.CompensationEntry entry, String attemptId,
+            boolean manual, Instant now) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("instanceId", row.id());
+        payload.put("scopeId", entry.scopeTokenId());
+        payload.put("nodeId", entry.stepId());
+        payload.put("handler", entry.handler());
+        payload.put("outcome", manual ? "COMPLETED_MANUALLY" : "COMPLETED");
+        payload.put("seq", entry.seq());
+        if (attemptId != null) {
+            payload.put("attemptId", attemptId);
+        }
+        payload.put("definitionKey", row.definitionKey());
+        payload.put("version", row.definitionVersion());
+        if (row.businessKey() != null) {
+            payload.put("businessKey", row.businessKey());
+        }
+        publish(new ProcessEventPublisher.Event(Ids.child(entry.id() + "/undo-completed", 1),
+                "processes.compensation.step-completed.v1", row.tenantId(), now, payload), row.id());
     }
 
     /** PRE-074: an undo failed for good. Its entry is {@code FAILED}, an incident holds the walk, nothing else moves. */
@@ -4569,6 +4607,7 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         details.put("manual", true);
         store.appendHistory(tenant, pending.instanceId(), pending.definitionId(), List.of(new HistoryEntry(
                 "COMPENSATION_STEP_COMPLETED", entry.stepId(), pending.tokenId(), null, approver, now, details)));
+        store.findInstance(tenant, pending.instanceId()).ifPresent(r -> publishUndoCompleted(r, entry, null, true, now));
         ProcessStore.IncidentRow current = store.lockIncident(tenant, pending.id()).orElseThrow();
         ProcessStore.IncidentRow resolved = current.resolved(COMPLETED_MANUALLY, approver, now);
         writeIncident(resolved);
@@ -5851,6 +5890,15 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 : reader.apply(source);
         if (!Hashes.sha256(CanonicalProcessWriter.canonicalText(process)).equals(definition.definitionHash())) {
             throw integrityFailed(definition, "the stored source no longer gives the recorded definition hash");
+        }
+        if (definition.approvedBy() != null) {
+            // #172: row, source and both hashes may have been rewritten together; the approval record was not.
+            ProcessStore.DefinitionApproval approval = store.approval(definition.tenantId(), definition.id())
+                    .orElseThrow(() -> integrityFailed(definition, "the version has no approval record"));
+            if (!approval.sourceHash().equals(definition.sourceHash())
+                    || !approval.definitionHash().equals(definition.definitionHash())) {
+                throw integrityFailed(definition, "the stored hashes differ from the hashes approved");
+            }
         }
         return process;
     }

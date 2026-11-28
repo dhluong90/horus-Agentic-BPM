@@ -67,7 +67,9 @@ public final class DmnWriter {
             case "unique" -> "UNIQUE";
             default -> "COLLECT";
         };
-        out.line(2, "<decisionTable id=\"decisionTable_" + name + "\" hitPolicy=\"" + hitPolicy + "\">");
+        String aggregation = aggregation(outputs, hitPolicy);
+        out.line(2, "<decisionTable id=\"decisionTable_" + name + "\" hitPolicy=\"" + hitPolicy + "\""
+                + (aggregation == null ? "" : " aggregation=\"" + aggregation + "\"") + ">");
         for (JsonNode input : inputs) {
             writeInput(out, input);
         }
@@ -121,6 +123,23 @@ public final class DmnWriter {
         out.line(3, "</input>");
     }
 
+    /**
+     * The DMN aggregation of a COLLECT table (RLE-227). DMN has one per table and only with one output, so a table
+     * with an aggregate on one of several outputs, or on more than one, has no DMN form and is refused.
+     */
+    private static String aggregation(List<JsonNode> outputs, String hitPolicy) {
+        List<JsonNode> aggregated = outputs.stream().filter(o -> o.has("collect")).toList();
+        if (aggregated.isEmpty()) {
+            return null;
+        }
+        if (outputs.size() != 1) {
+            throw unsupported("Output " + aggregated.get(0).get("name").stringValue() + " has collect: "
+                    + aggregated.get(0).get("collect").stringValue() + " in a table of " + outputs.size()
+                    + " outputs; DMN has one aggregation per table and only for one output");
+        }
+        return aggregated.get(0).get("collect").stringValue().toUpperCase(java.util.Locale.ROOT);
+    }
+
     private static void writeOutput(Xml out, JsonNode output, boolean collect) {
         String name = output.get("name").stringValue();
         String type = output.get("type").stringValue();
@@ -130,10 +149,6 @@ public final class DmnWriter {
         if (output.has("default")) {
             throw unsupported("Output " + name + " has a default; DMN has no per-rule output default."
                     + " Write the value in every rule, then export");
-        }
-        if (output.has("collect")) {
-            throw unsupported("Output " + name + " has collect: " + output.get("collect").stringValue()
-                    + "; per-output aggregates are exported from stage S1 (release 1.1)");
         }
         StringBuilder start = new StringBuilder("<output id=\"output_" + name + "\" name=\"" + name + "\" label=\""
                 + Xml.escape(label(output, name)) + "\" typeRef=\"" + Xml.escape(typeRef(type, "output " + name)) + "\"");
@@ -155,9 +170,19 @@ public final class DmnWriter {
             throw unsupported("Rule " + id + " uses " + (when.has("any") ? "any" : "all")
                     + ", which has no decision table form; split it into rows, then export");
         }
+        String description = rule.has("description") ? rule.get("description").stringValue() : null;
+        // a rule id mapped at import (RLE-224) goes back out as the id of the file
+        if (description != null) {
+            var marker = java.util.regex.Pattern.compile("(?:^|\\s)\\(DMN id ([A-Za-z0-9_.-]{1,200})\\)$").matcher(description);
+            if (marker.find() && DmnReader.mapRuleId(marker.group(1)).filter(rule.get("id").stringValue()::equals).isPresent()) {
+                id = marker.group(1);
+                description = description.substring(0, marker.start()).strip();
+                description = description.isEmpty() ? null : description;
+            }
+        }
         out.line(3, "<rule id=\"" + Xml.escape(id) + "\">");
-        if (rule.has("description")) {
-            out.element(4, "description", rule.get("description").stringValue());
+        if (description != null) {
+            out.element(4, "description", description);
         }
         writeExplain(out, 4, "explain", rule.path("explain"));
         for (JsonNode input : inputs) {

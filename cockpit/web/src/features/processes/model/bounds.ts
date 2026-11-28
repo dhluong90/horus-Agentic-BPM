@@ -45,6 +45,9 @@ export function drawnBoxes(layout: Layout, collaboration?: CollaborationDrawing,
     boxes.push({ x: centre - DATA_CAPTION_WIDTH / 2, y: item.y + item.height, width: DATA_CAPTION_WIDTH, height: DATA_CAPTION_TOP + item.lines.length * CAPTION_LINE_HEIGHT + DESCENT });
   }
   for (const link of layout.data?.links ?? []) link.points.forEach(point);
+  for (const note of layout.annotations?.items ?? []) boxes.push({ x: note.x, y: note.y, width: note.width, height: note.height });
+  for (const link of layout.annotations?.links ?? []) link.points.forEach(point);
+  boxes.push(...(layout.groups ?? []));
   if (collaboration !== undefined) {
     if (collaboration.pool !== undefined) boxes.push(collaboration.pool);
     boxes.push(...collaboration.lanes, ...collaboration.blackBoxes);

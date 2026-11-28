@@ -117,17 +117,17 @@ class XmlHardeningTest {
 
     @Test
     void TR_STD_04_refusal_details_cut_long_values_and_escape_control_characters() {
-        String hostile = "Decision_" + "A".repeat(3_000) + "&#13;&#10;FORGED LOG LINE";
+        String hostile = "§".repeat(3_000) + "&#13;&#10;§";
         String dmn = DmnRuleSetTest.table("<input><inputExpression typeRef=\"number\"><text>age</text></inputExpression></input>",
                 "<rule id=\"R1\"><inputEntry><text>-</text></inputEntry><outputEntry><text>true</text></outputEntry></rule>")
-                .replace("id=\"rate-check\" name=\"rate-check\"", "id=\"" + hostile + "\" name=\"x&#13;&#10;y\"")
-                .replace("id=\"d\" name=\"d\"", "id=\"Definitions_1\" name=\"DRD\"");
+                .replace("id=\"rate-check\" name=\"rate-check\"", "id=\"" + hostile + "\" name=\"§&#13;&#10;§\"")
+                .replace("id=\"d\" name=\"d\"", "id=\"§\" name=\"§\"");
 
         assertThatThrownBy(() -> RuleSetReader.read(SourceFormat.DMN_XML, dmn.getBytes(StandardCharsets.UTF_8)))
                 .isInstanceOf(ValidationFailedException.class)
                 .satisfies(e -> {
                     String detail = e.getMessage();
-                    assertThat(detail).hasSizeLessThan(400).doesNotContain("\r", "\n").contains("…", "x\\u000D\\u000Ay");
+                    assertThat(detail).hasSizeLessThan(400).doesNotContain("\r", "\n").contains("…", "§\\u000D\\u000A§");
                 });
         assertThat(Quote.of("tab\there ")).isEqualTo("'tab\\u0009here\\u2028'");
         assertThat(Quote.of("é".repeat(100))).isEqualTo("'" + "é".repeat(80) + "…'");

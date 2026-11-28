@@ -437,13 +437,23 @@ What the file holds:
 
 Only the executable subset the import accepts can be exported in this release. Agent steps (`horus:type="agentTask"`) are exported with their `<horus:outputSchema>` and `<horus:guardrail>` since 0.2.0; A definition with a `saga` block (#67) is imported and run, and is not yet exported back to BPMN.
 
+## Repeating a write
+
+Send an `Idempotency-Key` with every write. The first request with a key does the work and stores its answer in the same transaction; a repeat with the same key and the same request returns that answer and writes nothing. The same key with another request is `422 IDEMPOTENCY_KEY_REUSE_MISMATCH`.
+
+If a repeat arrives while the first request is still running, it waits for it, for at most `horus.bpm.processes.idempotency.lock-timeout` (default `2s`, which is also the most; set it lower to give up sooner). When the first request commits in time, the repeat returns the same answer. When it does not, the repeat is `409 IDEMPOTENCY_IN_FLIGHT` with `Retry-After: 1`: wait a second and send it again. Either way the work runs once.
+
+A version of a definition that was approved is compiled only while its stored hashes equal the hashes recorded at its approval. A row that was edited in the database, hashes included, is refused with `DEFINITION_INTEGRITY_FAILED`; nothing starts (Process Engine 1.1).
+
 ## Transactions
 
 A start or a completion runs every synchronous step, up to the next user task or the end, in the caller's transaction. That covers local service tasks, business rule tasks (one `rle_decision` row each) and gateway conditions. If any step fails, everything rolls back, the host's own writes included. Concurrent requests with one `Idempotency-Key` do the work once: the second waits for the first and replays its answer.
 
 ## Events and the listener contract
 
-Every state change hands an event (`processes.instance.started.v1`, `processes.step.completed.v1`, `processes.incident.raised.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.task.claimed.v1`, `processes.task.unclaimed.v1`, `processes.task.escalated.v1`, `processes.definition.publish-requested.v1`, `processes.definition.approved.v1`, `processes.definition.rejected.v1`, `processes.definition.withdrawn.v1`, `processes.definition.retired.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+Every state change hands an event (`processes.instance.started.v1`, `processes.step.completed.v1`, `processes.incident.raised.v1`, `processes.task.created.v1`, `processes.task.completed.v1`, `processes.instance.completed.v1`, `processes.instance.cancelled.v1`, `processes.compensation.started.v1`, `processes.compensation.step-completed.v1`, `processes.task.claimed.v1`, `processes.task.unclaimed.v1`, `processes.task.escalated.v1`, `processes.definition.publish-requested.v1`, `processes.definition.approved.v1`, `processes.definition.rejected.v1`, `processes.definition.withdrawn.v1`, `processes.definition.retired.v1`) to the host's `ProcessEventPublisher` **inside the transaction of the state change**. The default implementation is the Spring `ApplicationEventPublisher`. So the event and the state change commit or roll back together.
+
+`processes.compensation.step-completed.v1` is published once per undo step that finishes, newest step first, so a host can watch a saga being undone. The payload has `instanceId`, `scopeId` (the saga scope token), `nodeId` (the forward step that was undone), `handler` (the compensation handler that ran), `outcome` (`COMPLETED`, or `COMPLETED_MANUALLY` when an approver marked a stuck undo done by hand), `seq`, `attemptId` (absent for a manual completion), `definitionKey`, `version` and `businessKey`. It carries no variable or step output. Order is guaranteed per instance only: one saga's undo steps arrive newest first, with no order across instances. A failed or retried undo attempt emits nothing; the event comes from the attempt that succeeds, or from the approved manual resolution. The same moment is the `COMPENSATION_STEP_COMPLETED` entry of the instance's history (`kind: COMPENSATION` in `GET /instances/{id}/activities`). Since 1.0.1.
 
 Each event is in the standard envelope: `eventId`, `eventType`, `occurredAt`, `tenantId`, `correlationId` (the request's `X-Correlation-Id`), `causationId` (its `Idempotency-Key`, or the job id), `producer`, `schemaVersion` and `payload`. The payload holds ids, keys, versions and codes, never a variable. The JSON Schema of each type is in `process-engine/api/events/`, and a change within `.v1` only adds. `Event.envelope()` gives the map to write into a host outbox row.
 

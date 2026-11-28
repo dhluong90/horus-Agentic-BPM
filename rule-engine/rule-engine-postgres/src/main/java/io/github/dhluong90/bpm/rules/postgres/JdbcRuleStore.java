@@ -172,9 +172,11 @@ public final class JdbcRuleStore implements RuleStore {
                   requested_by = :requestedBy, requested_at = :requestedAt, approved_by = :approvedBy,
                   approved_at = :approvedAt, approval_comment = :comment, retired_at = :retiredAt,
                   retire_requested_by = :retireBy, retire_requested_at = :retireAt, retire_reason = :retireReason,
-                  retire_confirm_no_version = :retireConfirm
+                  retire_confirm_no_version = :retireConfirm,
+                  approval_seal = COALESCE(:approvalSeal, approval_seal)
                 WHERE tenant_id = :tenant AND id = :id AND lock_version = :expected
                 """)
+                .param("approvalSeal", v.approvalSeal())
                 .param("retiredAt", timestamp(v.retiredAt()))
                 .param("retireBy", v.retirementRequest() == null ? null : v.retirementRequest().requestedBy())
                 .param("retireAt", v.retirementRequest() == null ? null : timestamp(v.retirementRequest().requestedAt()))
@@ -316,11 +318,12 @@ public final class JdbcRuleStore implements RuleStore {
                 INSERT INTO rle_version_history (tenant_id, id, version_id, action, from_status, to_status, actor,
                   reason, superseded_by, approval_mode, no_version_in_effect, lock_version, occurred_at,
                   canonical_hash, previous_canonical_hash, acknowledged_warnings, masked_by_default_inputs,
-                  copied_from, retire_requested_by)
+                  copied_from, retire_requested_by, effective_from)
                 VALUES (:tenant, :id, :versionId, :action, :from, :to, :actor, :reason, :supersededBy, :mode, :none,
                   :lock, :at, :hash, :previousHash, CAST(:acknowledged AS jsonb), CAST(:maskedByDefault AS jsonb),
-                  :copiedFrom, :retireRequestedBy)
+                  :copiedFrom, :retireRequestedBy, :effectiveFrom)
                 """)
+                .param("effectiveFrom", timestamp(row.effectiveFrom()))
                 .param("retireRequestedBy", row.retireRequestedBy())
                 .param("supersededBy", row.supersededBy()).param("mode", row.approvalMode())
                 .param("none", row.noVersionInEffect())
@@ -451,7 +454,8 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("reason"), rs.getLong("lock_version"), instant(rs, "occurred_at"), superseded,
                 rs.getString("approval_mode"), noVersionInEffect, rs.getString("canonical_hash"),
                 rs.getString("previous_canonical_hash"), acknowledged(rs.getString("acknowledged")),
-                strings(rs.getString("masked_by_default")), copiedFrom, rs.getString("retire_requested_by"));
+                strings(rs.getString("masked_by_default")), copiedFrom, rs.getString("retire_requested_by"),
+                instant(rs, "effective_from"));
     }
 
     @Override
@@ -610,7 +614,7 @@ public final class JdbcRuleStore implements RuleStore {
                 rs.getString("requested_by"), instant(rs, "requested_at"), rs.getString("approved_by"),
                 instant(rs, "approved_at"), rs.getString("approval_comment"), rs.getString("created_by"),
                 instant(rs, "created_at"), instant(rs, "retired_at"), copiedFrom,
-                retirementRequest(rs));
+                retirementRequest(rs), rs.getString("approval_seal"));
     }
 
     /** The pending four-eyes retirement of a version row, or null; the columns are set together. */

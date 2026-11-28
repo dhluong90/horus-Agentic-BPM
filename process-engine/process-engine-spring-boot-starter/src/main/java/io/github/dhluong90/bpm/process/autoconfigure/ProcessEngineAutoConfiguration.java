@@ -148,8 +148,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcProcessStore processEngineStore(DataSource dataSource) {
-        return new JdbcProcessStore(dataSource);
+    JdbcProcessStore processEngineStore(DataSource dataSource, ProcessEngineProperties properties) {
+        return new JdbcProcessStore(dataSource, properties.idempotency().lockTimeout());
     }
 
     @Bean
@@ -415,8 +415,8 @@ public class ProcessEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    JdbcCalendarStore processEngineCalendarStore(DataSource dataSource) {
-        return new JdbcCalendarStore(dataSource);
+    JdbcCalendarStore processEngineCalendarStore(DataSource dataSource, ProcessEngineProperties properties) {
+        return new JdbcCalendarStore(dataSource, properties.idempotency().lockTimeout());
     }
 
     /**

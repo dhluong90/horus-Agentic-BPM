@@ -2,6 +2,8 @@
 
 Minimal Spring Boot host services that embed the engines. Each one is built and tested by `mvn -B verify` at the repository root. Every example's parent is `examples/pom.xml`, which marks it as never published.
 
+**Run the integration tests with `verify`.** The embedded Rule Engine entry point is granted only to a Process Engine class from a sealed jar of the same version (#336). Under `mvn test` in a multi-module build the engine modules are `target/classes` directories, which are never granted, so an example's `*IT` class run that way fails with `TENANT_NOT_ALLOWED`. `mvn test` runs the unit tests (`*Test`) only; `mvn verify` packages the engines first and runs the `*IT` classes. Do not name an `*IT` class with `-Dtest` in a build that has not packaged the engines.
+
 | Example | Shows | Status |
 |---|---|---|
 | [`rule-engine-only/`](rule-engine-only/README.md) | A host with its own tables and Flyway history that adds the Rule Engine starter and one configuration block | Available |
