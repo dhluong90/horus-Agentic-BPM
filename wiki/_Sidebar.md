@@ -13,6 +13,7 @@
 - [[Principles]]
 - [[Architecture]]
 - [[Configuration and extension points|Configuration-and-Extension-Points]]
+- [[Traces|Tracing]]
 
 **Developer guides**
 - [[All guides|Guides]]

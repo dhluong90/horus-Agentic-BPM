@@ -857,6 +857,30 @@ public class ProcessEngineAutoConfiguration {
     }
 
     /**
+     * One span per step in the host's trace (#114, TR-OBS-03), bound only when the host has a Micrometer
+     * {@code Tracer}. Without one the engine does nothing extra and needs no tracing dependency.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.tracing.Tracer")
+    static class ProcessEngineTracingConfiguration {
+
+        /** Binds after every singleton exists, so the host's tracer is found whatever the configuration order. */
+        @Bean
+        @ConditionalOnMissingBean(name = "processEngineTracing")
+        org.springframework.beans.factory.SmartInitializingSingleton processEngineTracing(ProcessServices services,
+                ObjectProvider<io.micrometer.tracing.Tracer> tracer,
+                org.springframework.core.env.Environment environment) {
+            return () -> {
+                io.micrometer.tracing.Tracer bound = tracer.getIfAvailable();
+                if (bound != null) {
+                    services.useTracing(new ProcessEngineTracing(bound,
+                            environment.getProperty("horus.bpm.tracing.tenant-attribute", Boolean.class, true)));
+                }
+            };
+        }
+    }
+
+    /**
      * Periodic background work: the rollup on {@code stats.rollup-interval}, and any task another bean adds, such as
      * the gauge refresh of the metrics. This method names no Micrometer type, so a host without Micrometer loads it.
      */

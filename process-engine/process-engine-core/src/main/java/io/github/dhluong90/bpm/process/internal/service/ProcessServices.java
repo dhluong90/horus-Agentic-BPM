@@ -259,6 +259,8 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
             Map.of();
     private volatile io.github.dhluong90.bpm.process.spi.AssigneeDirectory directory =
             io.github.dhluong90.bpm.process.spi.AssigneeDirectory.NONE;
+    private volatile io.github.dhluong90.bpm.process.spi.ProcessTracing tracing =
+            io.github.dhluong90.bpm.process.spi.ProcessTracing.NONE;
     private volatile io.github.dhluong90.bpm.process.spi.ProcessMetrics metrics =
             io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE;
     /** The kind of the async job the current thread's result transaction handles, for the attempt metric. */
@@ -5131,6 +5133,35 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
         this.metrics = sink == null ? io.github.dhluong90.bpm.process.spi.ProcessMetrics.NONE : sink;
     }
 
+    /**
+     * Installs the sink of the engine's trace points (#114). Called once while the engine is wired.
+     *
+     * @param sink the sink, or null for none
+     */
+    public void useTracing(io.github.dhluong90.bpm.process.spi.ProcessTracing sink) {
+        this.tracing = sink == null ? io.github.dhluong90.bpm.process.spi.ProcessTracing.NONE : sink;
+    }
+
+    private io.github.dhluong90.bpm.process.spi.ProcessTracing.Span startStepSpan(StoredDefinition definition,
+            String stepKind) {
+        try {
+            io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span = tracing.startStep(definition.tenantId(),
+                    definition.key(), definition.version(), stepKind);
+            return span == null ? io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE : span;
+        } catch (RuntimeException ignored) {
+            return io.github.dhluong90.bpm.process.spi.ProcessTracing.Span.NONE;
+        }
+    }
+
+    private static void endStepSpan(io.github.dhluong90.bpm.process.spi.ProcessTracing.Span span, String outcome,
+            RuntimeException failure) {
+        try {
+            span.end(outcome, failure instanceof ExecutionException e ? e.code() : null, failure);
+        } catch (RuntimeException ignored) {
+            // a tracer never fails a step
+        }
+    }
+
     /** Counts instance and incident events once their transaction has committed (PRE-084). */
     private void countCommitted(ProcessEventPublisher.Event event) {
         io.github.dhluong90.bpm.process.spi.ProcessMetrics sink = metrics;
@@ -5471,25 +5502,38 @@ public final class ProcessServices implements DefinitionService, ProcessEngine, 
                 }
                 Queued item = queue.poll();
                 Command command = item.command();
-                if (item.call() != null) {
-                    Effect.InvokeService call = item.call();
-                    if (!waitsOnLocalCall(state, call)) {
-                        // The branch ended while the call waited its turn: nothing to run, nothing to apply, but the
-                        // trail says so, so an operator sees that the handler was not called (PRE-374).
-                        history.add(new HistoryEntry("STEP_SKIPPED", call.nodeId(), call.tokenId(), call.attemptId(),
-                                null, clock.instant(), Map.of("reason", "branch ended")));
-                        continue;
-                    }
-                    command = new Command.AsyncResult(call.tokenId(), call.attemptId(),
-                            invokeLocal(state, call, as, history));
-                }
-                long appliedAt = System.nanoTime();
+                var span = startStepSpan(definition, item.call() != null ? "LOCAL_CALL" : stepKind(command));
+                String spanOutcome = "OK";
+                RuntimeException spanFailure = null;
                 Transition t;
+                long appliedAt;
                 try {
-                    t = compiled.kernel().apply(state, command, clock);
+                    if (item.call() != null) {
+                        Effect.InvokeService call = item.call();
+                        if (!waitsOnLocalCall(state, call)) {
+                            // The branch ended while the call waited its turn: nothing to run, nothing to apply, but the
+                            // trail says so, so an operator sees that the handler was not called (PRE-374).
+                            history.add(new HistoryEntry("STEP_SKIPPED", call.nodeId(), call.tokenId(), call.attemptId(),
+                                    null, clock.instant(), Map.of("reason", "branch ended")));
+                            spanOutcome = "SKIPPED";
+                            continue;
+                        }
+                        command = new Command.AsyncResult(call.tokenId(), call.attemptId(),
+                                invokeLocal(state, call, as, history));
+                    }
+                    appliedAt = System.nanoTime();
+                    try {
+                        t = compiled.kernel().apply(state, command, clock);
+                    } catch (RuntimeException e) {
+                        metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
+                        throw e;
+                    }
                 } catch (RuntimeException e) {
-                    metrics.stepApplied(stepKind(command), "FAILED", Duration.ofNanos(System.nanoTime() - appliedAt));
+                    spanOutcome = "FAILED";
+                    spanFailure = e;
                     throw e;
+                } finally {
+                    endStepSpan(span, spanOutcome, spanFailure);
                 }
                 Duration kernelTime = Duration.ofNanos(System.nanoTime() - appliedAt);
                 String commandKind = stepKind(command);

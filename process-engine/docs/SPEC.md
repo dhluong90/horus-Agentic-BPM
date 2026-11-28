@@ -2961,3 +2961,17 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The import stores a draft (one for each process of such a collaboration) with the warning `NOT_EXECUTABLE_VIEW_ONLY`, in the `dev` profile too. `requestApproval` and `approve` refuse it with `NOT_EXECUTABLE`. In a collaboration with an executable pool the non-executable pools stay display-only as before. The strict read still answers `NOT_EXECUTABLE`.
 - **Example:** `<process id="wfp-6" isExecutable="false">` -> `DRAFT`, `NOT_EXECUTABLE_VIEW_ONLY`; request for publish -> `422 NOT_EXECUTABLE`.
 - **Test ID:** `PRE_392_a_process_marked_not_executable_is_a_view_only_draft_and_publish_refuses_it` (`OpenBindingsTest`); `PRE_392_a_process_that_says_it_is_not_executable_is_read_for_viewing_only` (`OpenBindingsReaderTest`)
+
+### PRE-394 Each step the kernel applies is a span with ids, versions, codes and outcomes only
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A host with a Micrometer `Tracer`, and a card application started over HTTP with business key `TRACE-APP-7731` and customer `C-002`. A second host has no tracer.
+- **When:** The finished spans are read.
+- **Then:**
+  - Each step is one span `horus.process.step` in the trace of the request or job that ran it, with `horus.definition_key`, `horus.definition_version`, `horus.step_kind` (`START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL` or `LOCAL_CALL`) and `horus.outcome` (`OK`, `FAILED` or `SKIPPED`). A failed step adds `horus.error_code` and `horus.error_type` (the exception class); the span's error carries the code, never the exception message.
+  - A decision evaluated by the step is a child `horus.rule.evaluate` span (`RLE-228`).
+  - No span carries a business key, instance id, variable, input, output or masked value. `horus.tenant_id` is present only when `horus.bpm.tracing.tenant-attribute` is `true` (default).
+  - A host without a tracer starts and runs unchanged: the engine uses a no-op port. A tracer that throws never fails or rolls back a step.
+- **Example:** `POST /api/cards/applications -> horus.process.step START OK, child horus.rule.evaluate; no attribute contains TRACE-APP-7731`.
+- **Test ID:** `PRE_394_a_step_is_one_span_with_the_definition_the_kind_and_the_outcome`, `PRE_394_the_tenant_attribute_can_be_turned_off_and_a_failure_records_its_code_and_type_never_its_message` (`ProcessEngineTracingTest`); `PRE_394_RLE_228_a_started_application_produces_step_and_evaluation_spans_with_ids_and_codes_only` (`TracingSpansIT`)
