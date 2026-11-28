@@ -58,6 +58,8 @@ Prometheus names replace `.` with `_` and add `_total` to counters and `_seconds
 | `horus.rle.evaluation.errors` | counter | `code` | Failed or refused evaluations by error code |
 | `horus.rle.cache.size`, `horus.rle.cache.evictions` | gauge, counter | `cause` | Compiled versions held by this replica |
 | `horus.rle.partition.default.rows` | gauge | | Decision rows outside every monthly partition; should be 0 |
+| `horus.rle.outbox.pending` | gauge | | Event outbox rows (`rle_decision_outbox`) not yet `SENT`, capped at 100000 |
+| `horus.rle.outbox.oldest.age` | gauge | | Age in seconds of the oldest row not yet `SENT`, 0 when none waits: the lag of the host's relay |
 | `horus.rle.lifecycle.retired`, `horus.rle.seal.unkeyed.accepted` | counter | `reason` | Retired versions; versions served on an unkeyed seal |
 | `horus.pre.instances.started`, `horus.pre.instances.completed`, `horus.pre.instances.failed` | counter | none | Instance outcomes, counted after commit |
 | `horus.pre.instances.active`, `horus.pre.incidents.open` | gauge | | Running instances and open incidents, refreshed every 30 s |
@@ -70,7 +72,7 @@ Prometheus names replace `.` with `_` and add `_total` to counters and `_seconds
 | `hikaricp_connections_*` | gauge, timer | `pool` | Database pool, from Spring Boot |
 | `http_server_requests_seconds_*`, `jvm_*` | | | Spring Boot's HTTP and JVM meters |
 
-Not yet metered, so not on the dashboards: a count of open user tasks (the table has no index that answers it cheaply; the age of the oldest due job covers the timer and async backlog), and outbox lag (the engines publish events through the host's `ProcessEventPublisher` and keep no outbox of their own, so lag belongs to the host's outbox).
+Not yet metered, so not on the dashboards: a count of open user tasks (the table has no index that answers it cheaply; the age of the oldest due job covers the timer and async backlog), and the lag of an outbox the host owns (the Process Engine hands events to the host's `ProcessEventPublisher` and keeps no outbox; the sample host's `event_outbox` has no relay, so it has no lag to measure). The Rule Engine does keep one, `rle_decision_outbox`, and meters it: the engine writes the rows and the host's relay marks them `SENT`, so the age of the oldest unsent row is the relay's lag. A host that sets no relay will see that age grow, and `HorusEventOutboxLagging` fires; that is the signal that its events are not leaving.
 
 ## Alerts
 
@@ -83,6 +85,7 @@ Not yet metered, so not on the dashboards: a count of open user tasks (the table
 | `HorusRuleEvaluationErrors` | More than 1% of evaluations fail for 5 minutes | critical |
 | `HorusRuleEvaluationSlow` | Evaluation p99 above 250 ms for 10 minutes | warning |
 | `HorusDecisionLogDefaultPartitionRows` | Decision rows outside every monthly partition for 15 minutes | warning |
+| `HorusEventOutboxLagging` | The oldest Rule Engine event is unsent for more than 5 minutes, for 10 minutes | warning |
 | `HorusUnkeyedSealAccepted` | A version was served on an unkeyed seal while a key is set | warning |
 | `HorusOpenIncidents` | Incidents stay open for 30 minutes | warning |
 | `HorusIncidentSpike` | More than 10 incidents in 10 minutes | critical |
@@ -100,7 +103,7 @@ docker run --rm -v "$PWD/deploy/observability:/w" --entrypoint promtool prom/pro
 docker run --rm -v "$PWD/deploy/observability:/w" --entrypoint promtool prom/prometheus test rules /w/prometheus/tests/horus-bpm.rules.test.yml
 ```
 
-CI runs both on every change under `deploy/observability/`. To route the alerts, point Prometheus at your Alertmanager (`alerting:` in `prometheus.yml`); the profile ships none.
+CI runs both on every change under `deploy/observability/`, and a third check: `deploy/observability/check-grafana.sh` starts Prometheus and Grafana from the pinned images with the shipped provisioning, then asks Grafana to run every panel query of all three dashboards. It fails when a dashboard is not provisioned into "Horus BPM", the data source is unhealthy, or any expression is refused. It needs Docker and python3; run it from the repository root before you change a dashboard. To route the alerts, point Prometheus at your Alertmanager (`alerting:` in `prometheus.yml`); the profile ships none.
 
 ## Dashboards
 

@@ -11,6 +11,6 @@ docker compose --env-file .env --env-file deploy/observability/observability.env
 
 Grafana is at `http://127.0.0.1:3000` (user `admin`, password in `secrets/grafana_admin_password`), Prometheus at `http://127.0.0.1:9090`.
 
-The full guide is [`docs/OBSERVABILITY.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/OBSERVABILITY.md). It lists every meter and tag, the 14 alerts with their thresholds, how to expose the endpoint on a separate management port in your own host, and how to check the rules with promtool.
+The full guide is [`docs/OBSERVABILITY.md`](https://github.com/dhluong90/horus-Agentic-BPM/blob/main/docs/OBSERVABILITY.md). It lists every meter and tag, the 15 alerts with their thresholds, how to expose the endpoint on a separate management port in your own host, and how to check the rules with promtool.
 
 The meters never carry a tenant, business key, instance id, rule set or variable. Each alert links to its section of the [[Operations runbook|Operations-Runbook]]: symptom, likely cause, checks and remedy.

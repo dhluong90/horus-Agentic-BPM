@@ -102,7 +102,7 @@ failures=0
 expect() {
   local name="$1" dir="$2" want="$3"; shift 3
   local out="$WORK/out.txt" got=0 ok=true text
-  env FAKE_STATE="$dir.state" GH="$WORK/gh" REPO="$REPO" SOURCE_REF="$REF" SOURCE_DIGEST="${DIGEST_USED:-$DIGEST}" VERIFY_RETRIES="${RETRIES:-1}" VERIFY_SLEEP=0 \
+  env FAKE_STATE="$dir.state" GH="$WORK/gh" REPO="$REPO" SOURCE_REF="$REF" SOURCE_DIGEST="${DIGEST_USED-$DIGEST}" GITHUB_SHA="$DIGEST" VERIFY_RETRIES="${RETRIES:-1}" VERIFY_SLEEP=0 \
     bash "$GATE" "$dir" > "$out" 2>&1 || got=$?
   [[ "$got" == "$want" ]] || ok=false
   for text in "$@"; do grep -qF -- "$text" "$out" || { ok=false; echo "  missing: $text"; }; done
@@ -156,6 +156,11 @@ expect "8 statements of another tag are refused" "$WORK/ref" 1 "no valid build p
 
 fixture "$WORK/digest"
 DIGEST_USED="ffffffffffffffffffffffffffffffffffffffff" expect "8b statements of another commit are refused" "$WORK/digest" 1 "no valid build provenance for"
+
+fixture "$WORK/nodigest"
+DIGEST_USED="" expect "8a2 an unset SOURCE_DIGEST is refused, even when GITHUB_SHA is set" "$WORK/nodigest" 2 "SOURCE_DIGEST (the commit the statements must name) is not set"
+fixture "$WORK/shortdigest"
+DIGEST_USED="abc123" expect "8a3 a malformed SOURCE_DIGEST is refused" "$WORK/shortdigest" 2 "not a 40-digit lower-case commit hash"
 
 fixture "$WORK/sums"
 rm "$WORK/sums.state/prov/$(digest_of "$WORK/sums/SHA256SUMS")"

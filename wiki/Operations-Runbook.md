@@ -128,6 +128,23 @@ The host log has a warning from `horus-rle-partitions` that names the month and 
 
 **Remedy.** If the application role is not the table owner, run the partition script in [Database roles](#create-the-decision-log-partitions-as-the-owner) as the owner. It moves the rows into the new month in the same transaction. Otherwise fix the cause in the log and restart the host: it creates the missing months at start-up.
 
+### HorusEventOutboxLagging
+
+**Symptom.** The oldest Rule Engine event has waited more than 5 minutes without the status `SENT`, for 10 minutes. Warning. The gauge `horus_rle_outbox_oldest_age_seconds` is the lag; `horus_rle_outbox_pending` counts the unsent rows (at most 100000).
+
+**Likely cause.** The Rule Engine writes each event to `rle_decision_outbox` in the transaction of the state change and keeps no relay: your host's relay sends the rows and marks them `SENT`. The relay is stopped or crashed, it cannot reach the broker, or its claims are stuck (`CLAIMED` rows whose `locked_until` is past). A host that has no relay yet sees this alert at once; consumers then never receive the events.
+
+**Check.** The Rule Engine dashboard, panels "Event outbox". In PostgreSQL:
+
+```sql
+SELECT status, count(*), min(created_at) FROM rle_decision_outbox WHERE status <> 'SENT' GROUP BY status;
+SELECT count(*) FROM rle_decision_outbox WHERE status = 'CLAIMED' AND locked_until < now();
+```
+
+Then the relay's own log and its broker connection.
+
+**Remedy.** Restart or repair the relay. Rows stay in the table, so nothing is lost; the relay sends them in order of `created_at` and consumers deduplicate on `eventId`. Release stuck claims with your relay's own command, or by setting those rows back to `PENDING` once the relay is stopped. Do not delete unsent rows.
+
 ### HorusUnkeyedSealAccepted
 
 **Symptom.** A version was served on an unkeyed approval seal while a seal key is set. Warning. This only happens while the host has `acceptUnkeyedSeals()` open, which is a window for switching a key on.

@@ -290,6 +290,8 @@ jobs:
           SCRIPT_REF: ${{ github.sha }}
         run: |
           set -euo pipefail
+          # Fail closed: the commit the statements must name is required; the script refuses to run without it.
+          [[ "$SOURCE_DIGEST" =~ ^[0-9a-f]{40}$ ]] || { echo "::error title=SOURCE_DIGEST missing::The attestation gate needs the tag commit in SOURCE_DIGEST; got '${SOURCE_DIGEST}'. No Release is created."; exit 1; }
           curl -sSfL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github.raw+json" \
             -o "$RUNNER_TEMP/verify-release-attestations.sh" \
             "https://api.github.com/repos/$REPO/contents/tools/release/verify-release-attestations.sh?ref=$SCRIPT_REF"
