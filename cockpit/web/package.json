@@ -19,6 +19,8 @@
     "schemas": "node scripts/generate-schemas.mjs",
     "schemas:check": "node scripts/generate-schemas.mjs --check",
     "licences": "node scripts/check-licences.mjs",
+    "e2e:visual": "sh scripts/visual-regression.sh",
+    "e2e:visual:update": "sh scripts/visual-regression.sh --update-snapshots",
     "e2e:live": "playwright test -c playwright.live.config.ts"
   },
   "dependencies": {

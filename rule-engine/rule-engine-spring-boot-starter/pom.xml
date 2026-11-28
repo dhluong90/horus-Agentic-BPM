@@ -75,6 +75,31 @@
       <artifactId>micrometer-core</artifactId>
       <optional>true</optional>
     </dependency>
+    <!-- Traces (#114): the engines open spans through the host's Tracer only when the host has one. -->
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing</artifactId>
+      <optional>true</optional>
+      <!-- Public Domain, outside the licence allow-list; only the @NewSpan advice of micrometer-tracing uses it. -->
+      <exclusions>
+        <exclusion>
+          <groupId>aopalliance</groupId>
+          <artifactId>aopalliance</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-tracing-test</artifactId>
+      <scope>test</scope>
+      <!-- Public Domain, outside the licence allow-list; SimpleTracer does not use it. -->
+      <exclusions>
+        <exclusion>
+          <groupId>aopalliance</groupId>
+          <artifactId>aopalliance</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
     <!--
       The ruleEngine health contributor, one per Spring Boot line (RuleEngineHealthCheck plus an adapter).
       Spring Boot 4: the optional spring-boot-health module. The 3.5 test leg excludes it from the test

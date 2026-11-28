@@ -16,7 +16,7 @@ export const LENSES = ['table', 'readings', 'changes', 'report', 'history', 'sou
 export type Lens = (typeof LENSES)[number];
 
 /** The views of one process definition version: its diagram, its steps as a list, what it changes, and the cases of its key. */
-export const PROCESS_LENSES = ['diagram', 'steps', 'changes', 'cases'] as const;
+export const PROCESS_LENSES = ['diagram', 'steps', 'changes', 'cases', 'timing'] as const;
 export type ProcessLens = (typeof PROCESS_LENSES)[number];
 
 /**

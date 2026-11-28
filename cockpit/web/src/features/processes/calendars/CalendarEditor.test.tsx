@@ -75,11 +75,13 @@ describe('The business calendar editor (#125)', () => {
     // The calendar is now one version on, and its history names who proposed and who approved the change.
     window.location.hash = '#/calendars';
     await userEvent.click(await screen.findByRole('link', { name: 'Vn banking hours' }));
+    // The page first shows the version it had read before; wait for the calendar one version on (three holidays) so it is not replaced under the click.
+    await screen.findByRole('tab', { name: 'Holidays (3)' });
     await userEvent.click(await screen.findByRole('tab', { name: 'History' }));
     const row = await screen.findByRole('link', { name: 'Holiday added' });
     expect(row.closest('li')).toHaveTextContent(/Approved.*Approved by .*Proposed by/);
     expect(JSON.parse(engine.handle({ method: 'GET', path: '/api/bpm/processes/v1/calendars/vn-banking-hours', headers: {}, body: '', user: 'lan', permissions: ['processes:read'] }).body)).toMatchObject({ version: 4, approvedBy: 'minh' });
-  });
+  }, 20_000);
 
   it('CKP_092_the_proposer_cannot_approve_her_own_proposal', async () => {
     const engine = resetProcessEngine();

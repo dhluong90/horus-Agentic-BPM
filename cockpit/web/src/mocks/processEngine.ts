@@ -124,9 +124,21 @@ export interface ProcessSeed {
   resolveApproval?: 'four-eyes' | 'single';
   /** The pending onboarding version lists agent step fields with no classification (PD-146), as the engine does. */
   unclassified?: boolean;
+  /** Step timing of the demo key: `empty` is a period without activity. */
+  stepTiming?: 'empty';
   /** A pending change of the `vn-banking-hours` calendar, proposed by lan (#473): in the approvals list and under Calendar changes. */
   calendar?: boolean;
 }
+
+/** The figures of the demo key over a period (getNodeStats, mode=window): the approval is the slow step. */
+const STEP_TIMING = {
+  start: { entered: 1240, completed: 1240, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 40, p50Ms: 30, p95Ms: 90 },
+  'screen-sanctions': { entered: 1240, completed: 1236, failed: 4, incidents: 2, slaBreaches: 0, meanMs: 2400, p50Ms: 1900, p95Ms: 6200 },
+  'verify-docs': { entered: 1240, completed: 1232, failed: 8, incidents: 3, slaBreaches: 0, meanMs: 19000, p50Ms: 14000, p95Ms: 47000 },
+  'risk-rating': { entered: 1232, completed: 1232, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 120, p50Ms: 90, p95Ms: 310 },
+  approve: { entered: 187, completed: 171, failed: 0, incidents: 0, slaBreaches: 12, meanMs: 5400000, p50Ms: 4800000, p95Ms: 9900000 },
+  'open-account': { entered: 1216, completed: 1216, failed: 0, incidents: 0, slaBreaches: 0, meanMs: 8100, p50Ms: 6500, p95Ms: 130000 },
+} as const;
 
 /** A command on an incident, as the engine received it. */
 export interface RecordedIncidentCommand {
@@ -674,6 +686,15 @@ export function createFakeProcessEngine(seed: ProcessSeed = {}) {
     }
     const lifecycle = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)(\/diff|:approve|:reject|:withdraw)$/.exec(path);
     if (lifecycle) return lifecycleCommand(request, lifecycle[1] ?? '', Number(lifecycle[2]), lifecycle[3] ?? '', header);
+    const statsRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/node-stats$/.exec(path);
+    if (statsRoute && request.method === 'GET') {
+      if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');
+      if (!definitions.some((d) => d.key === statsRoute[1] && d.version === Number(statsRoute[2]))) return problem(404, 'DEFINITION_NOT_FOUND');
+      if (url.searchParams.get('mode') !== 'window') return problem(400, 'INPUT_INVALID');
+      const from = url.searchParams.get('from') ?? '2026-11-20T10:00:00Z';
+      const nodes = seed.stepTiming === 'empty' || statsRoute[1] !== 'kyc-onboarding' ? {} : STEP_TIMING;
+      return json(200, { definitionKey: statsRoute[1], version: Number(statsRoute[2]), mode: 'window', from, to: '2026-11-21T11:00:00Z', asOf: '2026-11-21T10:52:00Z', lagSeconds: 480, nodes });
+    }
     const layoutRoute = /^\/api\/bpm\/processes\/v1\/definitions\/([^/]+)\/versions\/(\d+)\/layout$/.exec(path);
     if (layoutRoute && request.method === 'GET') {
       if (!request.permissions.includes('processes:read')) return problem(403, 'PERMISSION_DENIED');

@@ -2971,3 +2971,37 @@ The example host `examples/guarded-agent-process` runs the guarded agent journey
 - **Then:** The import stores a draft (one for each process of such a collaboration) with the warning `NOT_EXECUTABLE_VIEW_ONLY`, in the `dev` profile too. `requestApproval` and `approve` refuse it with `NOT_EXECUTABLE`. In a collaboration with an executable pool the non-executable pools stay display-only as before. The strict read still answers `NOT_EXECUTABLE`.
 - **Example:** `<process id="wfp-6" isExecutable="false">` -> `DRAFT`, `NOT_EXECUTABLE_VIEW_ONLY`; request for publish -> `422 NOT_EXECUTABLE`.
 - **Test ID:** `PRE_392_a_process_marked_not_executable_is_a_view_only_draft_and_publish_refuses_it` (`OpenBindingsTest`); `PRE_392_a_process_that_says_it_is_not_executable_is_read_for_viewing_only` (`OpenBindingsReaderTest`)
+
+### PRE-518 Each step the kernel applies is a span with ids, versions, codes and outcomes only
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A host with a Micrometer `Tracer`, and a card application started over HTTP with business key `TRACE-APP-7731` and customer `C-002`. A second host has no tracer.
+- **When:** The finished spans are read.
+- **Then:**
+  - Each step is one span `horus.process.step` in the trace of the request or job that ran it, with `horus.definition_key`, `horus.definition_version`, `horus.step_kind` (`START`, `COMPLETE_TASK`, `JOB_DUE`, `ASYNC_RESULT`, `CANCEL` or `LOCAL_CALL`) and `horus.outcome` (`OK`, `FAILED` or `SKIPPED`). A failed step adds `horus.error_code` and `horus.error_type` (the exception class); the span's error carries the code, never the exception message.
+  - A decision evaluated by the step is a child `horus.rule.evaluate` span (`RLE-228`).
+  - No span carries a business key, instance id, variable, input, output or masked value. `horus.tenant_id` is present only when `horus.bpm.tracing.tenant-attribute` is `true` (default).
+  - A host without a tracer starts and runs unchanged: the engine uses a no-op port. A tracer that throws never fails or rolls back a step.
+- **Example:** `POST /api/cards/applications -> horus.process.step START OK, child horus.rule.evaluate; no attribute contains TRACE-APP-7731`.
+- **Test ID:** `PRE_518_a_step_is_one_span_with_the_definition_the_kind_and_the_outcome`, `PRE_518_the_tenant_attribute_can_be_turned_off_and_a_failure_records_its_code_and_type_never_its_message` (`ProcessEngineTracingTest`), `PRE_518_a_step_that_ends_on_an_Error_leaves_no_current_span_for_the_next_tenant` (`ProcessEngineTracingTest`); `PRE_518_RLE_228_a_started_application_produces_step_and_evaluation_spans_with_ids_and_codes_only` (`TracingSpansIT`)
+
+### PRE-519 An Error thrown in a step ends its span, so no trace is stitched across tenants
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`, `TR-TEN-01`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** A tracing binding whose current span stays on the thread until the step's span ends, and a service task whose handler throws an `Error`.
+- **When:** The step fails with the `Error`, then the next unit of work, of another tenant, starts on the same thread.
+- **Then:** Every span that started has ended, the failed one with outcome `FAILED` and the `Error` class as its failure; no span is current on the thread; the next span has no parent.
+- **Example:** `AssertionError in bank-a step -> span ended FAILED; bank-b START has parent null`.
+- **Test ID:** `PRE_519_an_error_thrown_in_a_step_ends_its_span_so_the_next_unit_of_work_of_another_tenant_has_no_parent` (`ProcessServicesQaTest`)
+
+### PRE-520 Trace export is off until a bank turns it on
+- **Traces to:** `TR-OBS-03`, `TR-SEC-05`
+- **Milestone:** M3
+- **Kind:** control
+- **Given:** The example host started with no tracing property.
+- **When:** It takes traffic that makes engine spans.
+- **Then:** The context holds no span exporter bean, and nothing connects to the default OTLP ports 4317 and 4318.
+- **Example:** `20 POST /api/cards/applications -> 0 connections on 4317 and 4318`.
+- **Test ID:** `PRE_520_with_no_tracing_property_nothing_is_exported_and_no_exporter_connects_anywhere` (`TracingExportOffIT`)

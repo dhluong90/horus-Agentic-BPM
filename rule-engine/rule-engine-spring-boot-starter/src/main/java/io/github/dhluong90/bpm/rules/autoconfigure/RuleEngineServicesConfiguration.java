@@ -302,6 +302,30 @@ class RuleEngineServicesConfiguration {
     }
 
     /**
+     * One span per evaluation in the host's trace (#114, TR-OBS-03), bound only when the host has a Micrometer
+     * {@code Tracer}. Without one the engine does nothing extra and needs no tracing dependency.
+     */
+    @Configuration(proxyBeanMethods = false)
+    @ConditionalOnClass(name = "io.micrometer.tracing.Tracer")
+    static class EvaluationTracingConfiguration {
+
+        /** Binds after every singleton exists, so the host's tracer is found whatever the configuration order. */
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineTracing")
+        org.springframework.beans.factory.SmartInitializingSingleton ruleEngineTracing(RuleEngineInternals internals,
+                ObjectProvider<io.micrometer.tracing.Tracer> tracer,
+                org.springframework.core.env.Environment environment) {
+            return () -> {
+                io.micrometer.tracing.Tracer bound = tracer.getIfAvailable();
+                if (bound != null) {
+                    internals.engines().meters().tracing().bind(new RuleEngineTracing(bound,
+                            environment.getProperty("horus.bpm.tracing.tenant-attribute", Boolean.class, true)));
+                }
+            };
+        }
+    }
+
+    /**
      * The one-time hand-off of the tenant-scoped entry point to the Process Engine (ADR-0027, #336). Registered only
      * when the process starter's decision port, its one registered claimant, resolves to a class in a sealed package of a
      * jar with this Rule Engine's {@code Implementation-Version} ({@link EmbeddedEngineClaimantCondition}). Otherwise
