@@ -296,6 +296,22 @@ public interface VersionService {
     RuleSetVersion retire(String ruleSet, int version, WriteOptions options);
 
     /**
+     * Re-writes the approval seal of an approved version under the current key (RLE-223), after a key was rotated or
+     * switched on. The old seal must verify first, so a version whose date or approver was changed is refused, never
+     * blessed. Four eyes: the caller needs {@code rules:approve} and is neither the approver, the author nor the
+     * requester of the version. One {@code RESEALED} history entry records who did it; a version already sealed under
+     * the current key is returned unchanged.
+     *
+     * @param ruleSet the rule set name
+     * @param version the version number; it is {@code PUBLISHED} or {@code RETIRED}
+     * @param options the comment and idempotency key
+     * @return the version
+     */
+    default RuleSetVersion reseal(String ruleSet, int version, WriteOptions options) {
+        throw new UnsupportedOperationException("reseal is not supported by " + getClass().getName());
+    }
+
+    /**
      * Retires a published version as {@link #retire(String, int, WriteOptions)} does, and lets it be the last version
      * in effect of its rule set when {@code confirmNoVersionInEffect} is true (PD-101). Without the confirmation, a
      * retirement that would leave no version in effect is refused with {@link LastVersionInEffectException}; with it,

@@ -19,6 +19,9 @@ import java.util.concurrent.TimeUnit;
  *       {@code code}, the engine error code of a failed or refused call, for example {@code RULE_SET_NOT_FOUND};</li>
  *   <li>counter {@code horus.rle.lifecycle.retired} (Prometheus {@code horus_rle_lifecycle_retired_total}), tag
  *       {@code reason} ({@code SUPERSEDED}, {@code MANUAL}), counted after commit.</li>
+ *   <li>counter {@code horus.rle.seal.unkeyed.accepted} (Prometheus {@code horus_rle_seal_unkeyed_accepted_total}),
+ *       versions served on a plain or pre-seal seal while a seal key is set and {@code acceptUnkeyedSeals} is on;
+ *       alert on it being above zero once the re-seal is done.</li>
  * </ul>
  * No tag carries a tenant, a rule set, a caller or an input value. Percentile histograms are the host's choice, for
  * example {@code management.metrics.distribution.percentiles-histogram.horus.rle.evaluations=true}.
@@ -28,6 +31,7 @@ final class RuleEngineEvaluationMetrics implements MeterBinder {
     static final String EVALUATIONS = "horus.rle.evaluations";
     static final String ERRORS = "horus.rle.evaluation.errors";
     static final String RETIRED = "horus.rle.lifecycle.retired";
+    static final String UNKEYED_SEALS = "horus.rle.seal.unkeyed.accepted";
 
     private final EngineMeters meters;
 
@@ -51,7 +55,15 @@ final class RuleEngineEvaluationMetrics implements MeterBinder {
                     .tag("reason", reason.name())
                     .register(registry));
         }
+        Counter unkeyed = Counter.builder(UNKEYED_SEALS)
+                .description("Versions served on an unkeyed approval seal while a seal key is set")
+                .register(registry);
         meters.bind(new EngineMeters.Recorder() {
+            @Override
+            public void unkeyedSealAccepted() {
+                unkeyed.increment();
+            }
+
             @Override
             public void evaluation(EngineMeters.Outcome outcome, String code, long nanos) {
                 timers.get(outcome).record(nanos, TimeUnit.NANOSECONDS);

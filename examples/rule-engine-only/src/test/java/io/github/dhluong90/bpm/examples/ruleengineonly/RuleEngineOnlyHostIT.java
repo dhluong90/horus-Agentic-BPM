@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("1");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("2");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
@@ -200,8 +200,9 @@ class RuleEngineOnlyHostIT {
                 .query(String.class).list();
 
         assertThat(hostHistory).containsExactly("1 V1__create_loan_application.sql");
-        // The host's tables existed first, so the engine baselines at 0 and still applies its one V1 baseline.
-        assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__baseline.sql");
+        // The host's tables existed first, so the engine baselines at 0 and still applies V1 and V2.
+        assertThat(engineHistory).containsExactly("0 Rule Engine baseline", "1 V1__baseline.sql",
+                "2 V2__approval_seal.sql");
     }
 
     @Test
