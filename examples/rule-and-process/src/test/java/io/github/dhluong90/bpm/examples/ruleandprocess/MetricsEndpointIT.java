@@ -96,7 +96,7 @@ class MetricsEndpointIT {
         assertThat(body).contains("horus_pre_instances_active", "horus_pre_incidents_open",
                 "horus_pre_jobs_due_oldest_age_seconds{kind=\"TIMER\"", "horus_pre_jobs_due_oldest_age_seconds{kind=\"ASYNC_SERVICE\"",
                 "horus_rle_evaluations_seconds_count{outcome=\"matched\"", "horus_rle_cache_size",
-                "horus_rle_partition_default_rows", "hikaricp_connections_active", "hikaricp_connections_max",
+                "horus_rle_partition_default_rows", "horus_rle_outbox_pending", "horus_rle_outbox_oldest_age_seconds", "hikaricp_connections_active", "hikaricp_connections_max",
                 "hikaricp_connections_pending", "jvm_memory_used_bytes", "http_server_requests_seconds");
         // and no meter carries a tenant
         assertThat(body).doesNotContain("tenant=");

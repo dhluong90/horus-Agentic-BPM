@@ -34,6 +34,14 @@ groups:
           summary: "Decision rows sit outside every monthly partition"
           description: "The roll-over job has not created the month. Rows in the default partition can be erased by the roll-over."
           runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horusdecisionlogdefaultpartitionrows"
+      - alert: HorusEventOutboxLagging
+        expr: max(horus_rle_outbox_oldest_age_seconds) > 300
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "The host's relay is behind on Rule Engine events"
+          description: "The oldest event in rle_decision_outbox has waited {{ $value | humanizeDuration }} without the status SENT. Check the host's relay."
+          runbook_url: "https://github.com/dhluong90/horus-Agentic-BPM/wiki/Operations-Runbook#horuseventoutboxlagging"
       - alert: HorusUnkeyedSealAccepted
         expr: increase(horus_rle_seal_unkeyed_accepted_total[15m]) > 0
         labels: {severity: warning}

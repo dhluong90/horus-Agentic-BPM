@@ -6,6 +6,7 @@ import io.github.dhluong90.bpm.host.spi.ModuleTenantSettings;
 import io.github.dhluong90.bpm.rules.internal.service.EngineDefaults;
 import io.github.dhluong90.bpm.rules.spi.MaskingPolicy;
 import io.github.dhluong90.bpm.rules.postgres.DecisionLogPartitions;
+import io.github.dhluong90.bpm.rules.postgres.EventOutboxLag;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineSchemaMigrator;
 import io.github.dhluong90.bpm.rules.postgres.RuleEngineTransactions;
 import java.time.Clock;
@@ -81,6 +82,12 @@ public class RuleEngineAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    EventOutboxLag ruleEngineEventOutboxLag(DataSource dataSource, RuleEngineTransactions transactions) {
+        return new EventOutboxLag(dataSource, transactions);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     RuleEnginePartitionMaintenance ruleEnginePartitionMaintenance(DecisionLogPartitions partitions,
             RuleEngineProperties properties, ObjectProvider<Clock> clock,
             org.springframework.core.env.Environment environment) {
@@ -115,6 +122,12 @@ public class RuleEngineAutoConfiguration {
         @ConditionalOnMissingBean(name = "ruleEngineMetrics")
         RuleEngineMetrics ruleEngineMetrics(DecisionLogPartitions partitions) {
             return new RuleEngineMetrics(partitions);
+        }
+
+        @Bean
+        @ConditionalOnMissingBean(name = "ruleEngineOutboxMetrics")
+        RuleEngineOutboxMetrics ruleEngineOutboxMetrics(EventOutboxLag lag, ObjectProvider<Clock> clock) {
+            return new RuleEngineOutboxMetrics(lag, engineClock(clock));
         }
     }
 

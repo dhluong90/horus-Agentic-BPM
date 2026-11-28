@@ -9,7 +9,8 @@
 # Env:     REPO             owner/name                                       (default $GITHUB_REPOSITORY)
 #          SIGNER_WORKFLOW  owner/name/.github/workflows/release.yml         (default "$REPO/.github/workflows/release.yml")
 #          SOURCE_REF       refs/tags/vX.Y.Z the statements must name        (default refs/tags/$BPM_RELEASE_TAG)
-#          SOURCE_DIGEST    commit the statements must name (--source-digest)  (default $GITHUB_SHA when set, else unchecked)
+#          SOURCE_DIGEST    commit the statements must name (--source-digest); REQUIRED, 40 hex digits, no default.
+#                           Unset or malformed: exit 2 before any statement is read (fail closed). In CI: ${{ github.sha }}
 #          VERIFY_METADATA  true (default): SHA256SUMS, BUILD-INFO.json and bom-release.json need a provenance
 #                           statement too; false for releases before they were attested (v1.0.0)
 #          GH               the GitHub CLI to run                            (default gh; tests put a fake in its place)
@@ -28,7 +29,9 @@ REPO="${REPO:-${GITHUB_REPOSITORY:-}}"
 SIGNER_WORKFLOW="${SIGNER_WORKFLOW:-$REPO/.github/workflows/release.yml}"
 SOURCE_REF="${SOURCE_REF:-${BPM_RELEASE_TAG:+refs/tags/$BPM_RELEASE_TAG}}"
 [[ -n "$SOURCE_REF" ]] || { echo "ERROR: SOURCE_REF (refs/tags/vX.Y.Z) is not set." >&2; exit 2; }
-SOURCE_DIGEST="${SOURCE_DIGEST:-${GITHUB_SHA:-}}"
+SOURCE_DIGEST="${SOURCE_DIGEST:-}"
+[[ -n "$SOURCE_DIGEST" ]] || { echo "ERROR: SOURCE_DIGEST (the commit the statements must name) is not set; the gate does not run without it." >&2; exit 2; }
+[[ "$SOURCE_DIGEST" =~ ^[0-9a-f]{40}$ ]] || { echo "ERROR: SOURCE_DIGEST is not a 40-digit lower-case commit hash: '$SOURCE_DIGEST'." >&2; exit 2; }
 VERIFY_METADATA="${VERIFY_METADATA:-true}"
 GH="${GH:-gh}"
 RETRIES="${VERIFY_RETRIES:-5}"
@@ -46,7 +49,7 @@ verify() {
   local args=(attestation verify "$file" --repo "$REPO" --signer-workflow "$SIGNER_WORKFLOW"
               --source-ref "$SOURCE_REF" --format json)
   [[ -z "$type" ]] || args+=(--predicate-type "$type")
-  [[ -z "$SOURCE_DIGEST" ]] || args+=(--source-digest "$SOURCE_DIGEST")
+  args+=(--source-digest "$SOURCE_DIGEST")
   while true; do
     if "$GH" "${args[@]}" > "$out" 2> "$out.err"; then return 0; fi
     (( try < RETRIES )) || { sed 's/^/    | /' "$out.err"; return 1; }
@@ -75,7 +78,7 @@ if [[ "$VERIFY_METADATA" == true ]]; then
     artefacts+=("$ARCHIVE/$name")
   done
 fi
-echo "Verifying ${#artefacts[@]} artefact(s) (${#jars[@]} jar(s)) of $REPO against $SIGNER_WORKFLOW at $SOURCE_REF${SOURCE_DIGEST:+, commit $SOURCE_DIGEST}."
+echo "Verifying ${#artefacts[@]} artefact(s) (${#jars[@]} jar(s)) of $REPO against $SIGNER_WORKFLOW at $SOURCE_REF, commit $SOURCE_DIGEST."
 
 # 1. Build provenance for every jar and POM.
 for f in "${artefacts[@]}"; do

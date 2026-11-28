@@ -1,5 +1,6 @@
 name: Observability pack
-# The alert rules, their unit tests and the dashboards of deploy/observability (#659).
+# The alert rules, their unit tests and the dashboards of deploy/observability (#659), and a Grafana that loads
+# the dashboards and runs every panel query against Prometheus.
 on:
   pull_request:
     paths: ["deploy/observability/**", "docs/OBSERVABILITY.md", "docker-compose.yml", ".github/workflows/observability.yml"]
@@ -12,10 +13,14 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: promtool check and test, dashboards valid, meters documented
         run: deploy/observability/check.sh
+      # Grafana and Prometheus start from the images docker-compose.yml pins, with the shipped provisioning. Every
+      # dashboard must be provisioned and every panel query must be accepted by the data source.
+      - name: Grafana loads the dashboards and every panel query is valid
+        run: deploy/observability/check-grafana.sh
