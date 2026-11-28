@@ -124,7 +124,7 @@ class RuleEngineOnlyHostIT {
 
         assertThat(engine.path("status").asString()).isEqualTo("UP");
         assertThat(engine.path("details").path("historyTable").asString()).isEqualTo("rle_schema_history");
-        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("2");
+        assertThat(engine.path("details").path("schemaVersion").asString()).isEqualTo("3");
         assertThat(engine.path("details").path("pendingMigrations").asInt()).isZero();
         assertThat(engine.path("details").path("nextMonthPartition").asString()).isEqualTo("rle_decision_2027_02");
         assertThat(engine.path("details").path("nextMonthPartitionPresent").asBoolean()).isTrue();
