@@ -237,6 +237,7 @@ export const vi: Record<MessageKey, string> = {
   'instance.tiles': 'Hồ sơ đang ở đâu',
   'instance.tile.step': 'Bước hiện tại',
   'instance.tile.assigned': 'Người phụ trách',
+  'instance.tile.empty': 'Chưa có dữ liệu',
   'instance.notReached': 'Hồ sơ chưa tới bước này.',
   'instance.engine': 'Bộ máy quy trình',
   'instance.token.ACTIVE': 'Đang chạy',

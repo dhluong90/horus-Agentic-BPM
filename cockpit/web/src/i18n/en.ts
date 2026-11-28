@@ -235,6 +235,7 @@ export const en = {
   'instance.tiles': 'Where the case stands',
   'instance.tile.step': 'Current step',
   'instance.tile.assigned': 'Assigned to',
+  'instance.tile.empty': 'No data yet',
   'instance.notReached': 'The case has not reached this step.',
   'instance.engine': 'Process Engine',
   'instance.token.ACTIVE': 'Running now',

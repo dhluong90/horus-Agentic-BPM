@@ -128,7 +128,7 @@
  * label, the tint and "Removed in version 2" carry it. */
 .diff-row--removed td { color: var(--ink-2); }
 .diff-row--unchanged > * { color: var(--ink-2); }
-.diff-td--mod { background: var(--diff-mod); }
+.diff-td--mod { color: var(--ink); font-weight: 600; }
 .diff-cell { display: inline-flex; align-items: center; gap: 6px; flex-wrap: nowrap; white-space: nowrap; }
 .diff-cell__old { text-decoration: line-through; color: var(--ink-2); opacity: .9; }
 .diff-cell__arrow { color: var(--muted); }
@@ -500,7 +500,7 @@ body:has(.edit-dock) .toast-host { bottom: 96px; }
 .sbs__absent { color: var(--muted); font-size: 13px; }
 .diff-row--removed td.sbs__absent { text-decoration: none; color: var(--bad); font-weight: 600; }
 .diff-row--added td.sbs__absent { color: var(--ok); font-weight: 600; }
-.diff-td--old { background: var(--diff-mod); color: var(--ink-2); }
+.diff-td--old { color: var(--bad); }
 .diff-td--old .cell-values, .diff-td--old .cell-output { text-decoration: line-through; }
 .changes__notes { margin: 0; padding: 0 20px 14px; list-style: none; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
 /* A long diff scrolls inside its own region, so the docked decision stays in view and the version row stays on top. */
@@ -559,8 +559,10 @@ body:has(.edit-dock) .toast-host { bottom: 96px; }
 .reading__text { margin: 0; font: var(--type-body); line-height: 1.6; color: var(--ink); overflow-wrap: anywhere; }
 .reading__text--old { color: var(--ink-2); }
 .reading__text--old del { text-decoration-thickness: 1px; }
-.reading__text--new ins { text-decoration: none; background: var(--diff-mod); border-radius: var(--radius-xs); padding: 1px 4px; }
-.reading--added .reading__text--new ins { background: var(--diff-add); }
+.reading__text--new ins { text-decoration: none; color: var(--ok); font-weight: 600; }
+.reading__text--new ins::before { content: '+\00a0'; }
+.reading__text--old del { color: var(--bad); }
+.reading__text--old del::before { content: '\2212\00a0'; display: inline-block; text-decoration: none; }
 .reading--removed .reading__text--old { color: var(--ink-2); }
 .reading__note { margin: 0; color: var(--muted); font: var(--type-caption); }
 .reading-empty { padding: var(--space-6) 0; }
@@ -642,7 +644,7 @@ body:has(.edit-dock) .toast-host { bottom: 96px; }
 
 /* Fields not classified (PD-146): neutral and quiet, one short band on the card ground; amber is kept for what needs
  * attention. The sentence and the field names share a line where the width allows, and wrap under the title where not. */
-.unclassified { display: flex; flex-direction: column; gap: 2px; padding: 8px 12px; border-radius: var(--radius-m); background: var(--surface-2); color: var(--ink-2); border: 1px solid var(--line); font-size: 13px; line-height: 1.45; --note-indent: 1.35em; }
+.unclassified { display: flex; flex-direction: column; gap: 2px; padding: 4px 0; color: var(--ink-2); font-size: 13px; line-height: 1.45; --note-indent: 1.35em; }
 .unclassified__head { margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; }
 .unclassified__title { font-weight: 650; color: var(--ink); }
 .unclassified__icon { display: inline-block; width: calc(var(--note-indent) - 0.3em); color: var(--muted); }
