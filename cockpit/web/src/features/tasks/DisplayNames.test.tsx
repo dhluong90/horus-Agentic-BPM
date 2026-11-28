@@ -31,7 +31,7 @@ describe('#415 and #442 display names in the task queue', () => {
     await waitFor(() => { expect(within(rows[0] as HTMLElement).getByText('Role: Credit officer')).toBeInTheDocument(); });
     expect(screen.getByText('Group: Loans operations')).toBeInTheDocument();
     const selected = await screen.findByRole('complementary', { name: 'Collateral valuation' });
-    expect(await within(selected).findByText('Claimed by Hoa Tran', { selector: '.badge' })).toBeInTheDocument();
+    expect(await within(selected).findByText('Claimed by Hoa Tran', { selector: '.status-mark' })).toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(/credit-officer|loans-operations|\bhoa\b/);
     // One lookup for the queue, with every role, group and user it shows, in the language of the screen.
     expect(seen.length).toBeGreaterThan(0);

@@ -24,13 +24,13 @@ describe('CKP-021 a task is completed through its declared form', () => {
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
     // Every kind of field the engine declares is drawn with the label of the language.
-    expect(within(form).getByRole('radio', { name: 'APPROVE' })).toBeInTheDocument();
+    expect(within(form).getByRole('radio', { name: 'Approve' })).toBeInTheDocument();
     expect(within(form).getByLabelText(/^Approved limit/)).toHaveValue('250,000,000');
     expect(within(form).getByLabelText(/^Review date/)).toHaveAttribute('type', 'date');
     expect(within(form).getByLabelText(/^Dependants/)).toHaveValue('2');
     expect(within(form).getByRole('radio', { name: 'Yes' })).toBeInTheDocument();
 
-    await userEvent.click(within(form).getByRole('radio', { name: 'REJECT' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -98,7 +98,7 @@ describe('control: masked fields stay masked', () => {
     expect(document.body).not.toHaveTextContent('***');
     expect(within(form).queryByDisplayValue('***')).not.toBeInTheDocument();
 
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
     await waitFor(() => { expect(completions()).toHaveLength(1); });
@@ -116,7 +116,7 @@ describe('control: masked fields stay masked', () => {
     const field = within(form).getByLabelText(/^National ID number/);
     expect(field).toHaveValue('');
     await userEvent.type(field, '079012345678');
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -146,7 +146,7 @@ describe('control: completing is idempotent', () => {
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
     // The engine did not answer; the operator tries again with the same form.
@@ -170,11 +170,11 @@ describe('control: completing is idempotent', () => {
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
-    await userEvent.click(within(form).getByRole('radio', { name: 'APPROVE' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Approve' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
     await within(dock()).findByRole('alert');
-    await userEvent.click(within(form).getByRole('radio', { name: 'REJECT' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
     await userEvent.type(within(form).getByLabelText(/^Reason/), 'Not enough income');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -189,7 +189,7 @@ describe('control: validation is enforced by the engine, not the screen', () => 
     open(`#/tasks/${QUEUE_TASKS.myCreditReview}`);
 
     const form = await screen.findByRole('form', { name: 'Credit review' });
-    await userEvent.click(within(form).getByRole('radio', { name: 'REJECT' }));
+    await userEvent.click(within(form).getByRole('radio', { name: 'Reject' }));
     await userEvent.type(within(form).getByLabelText(/^Review date/), '2026-11-21');
     await userEvent.click(within(dock()).getByRole('button', { name: 'Complete task' }));
 
@@ -197,7 +197,7 @@ describe('control: validation is enforced by the engine, not the screen', () => 
     await waitFor(() => { expect(reason).toHaveAttribute('aria-invalid', 'true'); });
     expect(reason).toHaveAccessibleDescription('Fill in this field.');
     // The decision the operator chose is still chosen; nothing was cleared or completed.
-    expect(within(form).getByRole('radio', { name: 'REJECT' })).toBeChecked();
+    expect(within(form).getByRole('radio', { name: 'Reject' })).toBeChecked();
     expect(completions()).toHaveLength(0);
     // Editing the field clears the engine's old sentence about it.
     await userEvent.type(reason, 'x');

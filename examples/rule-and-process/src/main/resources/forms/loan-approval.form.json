@@ -13,8 +13,14 @@
     "order": ["decision", "reason"],
     "widgets": { "decision": "radio", "reason": "textarea" },
     "labels": {
-      "decision": { "en": "Your decision (approve or reject)", "vi": "Quyết định của bạn (phê duyệt hoặc từ chối)" },
+      "decision": { "en": "Your decision", "vi": "Quyết định của bạn" },
       "reason": { "en": "Reason (required when rejecting)", "vi": "Lý do (bắt buộc khi từ chối)" }
+    },
+    "options": {
+      "decision": {
+        "APPROVED": { "label": { "en": "Approve", "vi": "Phê duyệt" }, "consequence": { "en": "The loan is priced and the offer is sent.", "vi": "Khoản vay được định giá và gửi đề nghị." } },
+        "REJECTED": { "label": { "en": "Reject", "vi": "Từ chối" }, "consequence": { "en": "The customer is told it is declined.", "vi": "Khách hàng được báo bị từ chối." } }
+      }
     }
   }
 }

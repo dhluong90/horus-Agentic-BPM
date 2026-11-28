@@ -64,12 +64,12 @@ export function StatusMark({ status, claimedBy }: { status: Task['status']; clai
   if (status === 'CLAIMED') {
     const mine = claimedBy === userId;
     return (
-      <span className={mine ? 'badge badge--accent' : 'badge badge--neutral'}>
+      <span className={mine ? 'status-mark status-mark--accent' : 'status-mark'}>
         <span aria-hidden="true">●</span> {mine ? t('tasks.status.claimedByYou') : t('tasks.status.claimedBy', { who: personName(claimedBy ?? '') })}
       </span>
     );
   }
-  if (status === 'COMPLETED') return <span className="badge badge--ok"><span aria-hidden="true">✓</span> {t('tasks.status.completed')}</span>;
-  if (status === 'CANCELLED') return <span className="badge badge--neutral"><span aria-hidden="true">■</span> {t('tasks.status.cancelled')}</span>;
-  return <span className="badge badge--neutral"><span aria-hidden="true">○</span> {t('tasks.status.open')}</span>;
+  if (status === 'COMPLETED') return <span className="status-mark status-mark--ok"><span aria-hidden="true">✓</span> {t('tasks.status.completed')}</span>;
+  if (status === 'CANCELLED') return <span className="status-mark"><span aria-hidden="true">■</span> {t('tasks.status.cancelled')}</span>;
+  return <span className="status-mark"><span aria-hidden="true">○</span> {t('tasks.status.open')}</span>;
 }

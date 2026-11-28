@@ -11,7 +11,7 @@ import { groupWhileTyping } from '../../rules/model/money';
 import { useProcessesSession } from '../api/processesContext';
 import { useClaimTask, useCompleteForm, useTaskForm } from '../api/useProcesses';
 import { ReviewMeta, useReviewCrumbs } from '../review/ReviewParts';
-import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, type Drafts, type FormField, type Problem } from './model';
+import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, type Drafts, type FormField, type Problem } from './model';
 
 /*
  * A task completed through the form its process declares (CKP-021). The engine owns the form and checks the result;
@@ -123,7 +123,7 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
   const built = useMemo(() => build(fields, drafts, data, locale, replaced), [fields, drafts, data, locale, replaced]);
   // What each choice leads to, beside the action: the chosen one stands out.
   const effectsOf = fields.flatMap((field) => Object.entries(field.effects).map(([code, text]) => ({
-    code, text, label: `${field.optionLabels[code] ?? code}:`, chosen: drafts[field.name] === code,
+    code, text, label: `${optionText(field, code)}:`, chosen: drafts[field.name] === code,
   })));
   const refused = complete.error === null ? undefined : toHostError(complete.error);
   const api = apiErrorsOf(refused?.kind === 'problem' ? refused.members?.['errors'] : undefined);
@@ -265,7 +265,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
           {options.map((option) => (
             <label key={option} className="taskform__option">
               <input type="radio" name={id} value={option} checked={value === option} aria-invalid={message !== undefined} onChange={() => { onChange(field.name, option); }} />
-              <span>{kind.kind === 'yesno' ? t(option === 'true' ? 'review.yes' : 'review.no') : field.optionLabels[option] ?? option}</span>
+              <span>{kind.kind === 'yesno' ? t(option === 'true' ? 'review.yes' : 'review.no') : optionText(field, option)}</span>
             </label>
           ))}
         </div>
@@ -276,7 +276,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
     control = (
       <select {...common} className="field__input" value={value} onChange={(e) => { onChange(field.name, e.target.value); }}>
         <option value="">{t('form.choose')}</option>
-        {kind.options.map((option) => <option key={option} value={option}>{field.optionLabels[option] ?? option}</option>)}
+        {kind.options.map((option) => <option key={option} value={option}>{optionText(field, option)}</option>)}
       </select>
     );
   } else if (kind.kind === 'text' && kind.multiline) {

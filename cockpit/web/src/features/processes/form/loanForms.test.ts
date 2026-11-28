@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { build, fieldsOf, initialDrafts } from './model';
+import { build, fieldsOf, initialDrafts, optionText } from './model';
 
 /** The two forms of the loan showcase (#623) are read as the host serves them: schema and hints from the example's files. */
 const root = resolve(__dirname, '../../../../../../examples/rule-and-process/src/main/resources');
@@ -11,9 +11,10 @@ const bpmn = readFileSync(resolve(root, 'processes/loan-origination.bpmn'), 'utf
 describe('#623 loan showcase forms', () => {
   it('the proposal form draws four labelled fields in English and Vietnamese', () => {
     const form = { ...load('loan-proposal'), data: {} };
-    expect(fieldsOf(form, 'en').map((f) => f.label)).toEqual(['Proposed amount (VND)', 'Term (months)', 'Your recommendation', 'Reason for the approver (required when declining)']);
-    expect(fieldsOf(form, 'vi')[0]?.label).toBe('Số tiền đề xuất (VND)');
-    expect(fieldsOf(form, 'en')[0]?.kind).toMatchObject({ kind: 'number', integer: true, grouped: false });
+    expect(fieldsOf(form, 'en').map((f) => f.label)).toEqual(['Proposed amount', 'Term', 'Your recommendation', 'Reason for the approver (required when declining)']);
+    expect(fieldsOf(form, 'vi')[0]?.label).toBe('Số tiền đề xuất');
+    expect(fieldsOf(form, 'vi').map((f) => f.unit)).toEqual(['VND', 'tháng', undefined, undefined]);
+    expect(fieldsOf(form, 'en')[0]?.kind).toMatchObject({ kind: 'number', integer: true, grouped: true });
     expect(fieldsOf(form, 'en').filter((f) => f.required).map((f) => f.name)).toEqual(['amountMinor', 'recommendation']);
   });
 
@@ -22,12 +23,20 @@ describe('#623 loan showcase forms', () => {
     const decision = fieldsOf(form, 'en')[0];
     expect(decision).toMatchObject({ name: 'decision', required: true, kind: { kind: 'choice', options: ['APPROVED', 'REJECTED'], radio: true } });
     expect(bpmn).toContain("approval.decision == 'APPROVED'");
-    // The engine's form hints carry labels only: the codes are shown as they are submitted, and no option label or effect is drawn.
+    // No raw code is shown: every option has a label and a consequence in both languages, and the submitted codes stay.
     for (const locale of ['en', 'vi'] as const) {
       const [field] = fieldsOf(form, locale);
-      expect(field?.optionLabels).toEqual({});
-      expect(field?.effects).toEqual({});
+      expect(Object.keys(field?.optionLabels ?? {})).toEqual(['APPROVED', 'REJECTED']);
+      expect(Object.keys(field?.effects ?? {})).toEqual(['APPROVED', 'REJECTED']);
     }
+    expect(fieldsOf(form, 'vi')[0]?.optionLabels['REJECTED']).toBe('Từ chối');
+  });
+
+  it('a host that sends no option hints still shows words, never raw codes', () => {
+    const bare = { ...load('loan-approval'), hints: { order: ['decision', 'reason'] }, data: {} };
+    const [field] = fieldsOf(bare, 'en');
+    expect(field ? optionText(field, 'APPROVED') : '').toBe('Approved');
+    expect(field ? optionText(field, 'NEEDS_REVIEW') : '').toBe('Needs review');
   });
 
   it('a rejection needs a reason, and an approval does not', () => {
@@ -41,11 +50,11 @@ describe('#623 loan showcase forms', () => {
     expect(approved.result).toEqual({ decision: 'APPROVED' });
   });
 
-  it('the amount is typed as plain digits (the engine has no grouping widget) and submitted as a whole number', () => {
+  it('the amount is grouped by the language and submitted as a whole number', () => {
     const fields = fieldsOf({ ...load('loan-proposal'), data: {} }, 'vi');
-    expect(initialDrafts(fields, { amountMinor: 900000000 }, 'vi')['amountMinor']).toBe('900000000');
-    expect(initialDrafts(fieldsOf({ ...load('loan-proposal'), data: {} }, 'en'), { amountMinor: 900000000 }, 'en')['amountMinor']).toBe('900000000');
-    const built = build(fields, { amountMinor: '900000000', recommendation: 'APPROVE' }, {}, 'vi', new Set());
+    expect(initialDrafts(fields, { amountMinor: 900000000 }, 'vi')['amountMinor']).toBe('900.000.000');
+    expect(initialDrafts(fieldsOf({ ...load('loan-proposal'), data: {} }, 'en'), { amountMinor: 900000000 }, 'en')['amountMinor']).toBe('900,000,000');
+    const built = build(fields, { amountMinor: '900.000.000', recommendation: 'APPROVE' }, {}, 'vi', new Set());
     expect(built.problems).toEqual({});
     expect(built.result).toEqual({ amountMinor: 900000000, recommendation: 'APPROVE' });
   });
