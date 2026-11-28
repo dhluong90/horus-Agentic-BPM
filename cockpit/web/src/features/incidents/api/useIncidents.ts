@@ -18,7 +18,7 @@ function useKeys() {
   const base = [hostId, tenant, 'processes', 'incidents'] as const;
   return {
     all: base,
-    list: (status: IncidentStatus) => [...base, 'list', status] as const,
+    list: (status: IncidentStatus, process?: IncidentProcess) => [...base, 'list', status, ...(process === undefined ? [] : [process.key, process.version ?? 0])] as const,
     incident: (id: string) => [...base, 'one', id] as const,
   };
 }
@@ -28,13 +28,16 @@ function jittered(seconds: number): () => number {
   return () => Math.round(seconds * 1000 * (0.9 + Math.random() * 0.2));
 }
 
-/** One status's first page, newest first. */
-export function useIncidentList(status: IncidentStatus, refreshSeconds: number, enabled = true) {
+/** The process, and optionally one version of it, an incident list is narrowed to (#91). */
+export interface IncidentProcess { key: string; version?: number | undefined }
+
+/** One status's first page, newest first; of one process or version when `process` is given. */
+export function useIncidentList(status: IncidentStatus, refreshSeconds: number, enabled = true, process?: IncidentProcess) {
   const { client } = useProcessesSession();
   const keys = useKeys();
   return useQuery({
-    queryKey: keys.list(status),
-    queryFn: ({ signal }) => client.listIncidents({ status, limit: INCIDENT_LIMIT, signal }),
+    queryKey: keys.list(status, process),
+    queryFn: ({ signal }) => client.listIncidents({ status, limit: INCIDENT_LIMIT, signal, ...(process === undefined ? {} : { definitionKey: process.key, version: process.version }) }),
     enabled,
     refetchInterval: jittered(refreshSeconds),
     staleTime: 5_000,

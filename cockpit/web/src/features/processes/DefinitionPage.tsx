@@ -11,7 +11,7 @@ import { useI18n } from '../../i18n/I18nProvider';
 import { Tabs } from '../rules/components/Tabs';
 import { formatDateTime } from '../rules/model/dates';
 import { useProcessesSession } from './api/processesContext';
-import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useInstances, useRejectDefinition } from './api/useProcesses';
+import { useApproveDefinition, useDefinitionDiff, useDefinitionGraph, useDefinitionVersion, useInstances, useLiveCounts, useRejectDefinition } from './api/useProcesses';
 import { ApprovalDock, DecidedLine } from './approval/ApprovalDock';
 import { useDockReserve } from './approval/dock';
 import { InstanceStatusPill } from './InstanceStatusPill';
@@ -20,6 +20,8 @@ import { ancestorsOf, flowOrder, type DiagramGraph } from './model/bpmnGraph';
 import { StepTiming } from './timing/StepTiming';
 import { nodeTypeLabel } from './model/nodeLabels';
 import { DefinitionStatusPill } from './ProcessesPage';
+import type { StepLive } from './diagram/DefinitionDiagram';
+import { liveFigures } from './model/liveCounts';
 
 /* The diagram and dagre load on demand, in their own chunk, only when a diagram opens (CKP-028). */
 const DefinitionDiagram = lazy(() => import('./diagram/DefinitionDiagram'));
@@ -104,9 +106,7 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
               </Suspense>
             )
           ) : shown === 'diagram' ? (
-            <Suspense fallback={<LoadingRows rows={6} />}>
-              <DefinitionDiagram graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: dockReserve } : {})} />
-            </Suspense>
+            <LiveDiagram definitionKey={definitionKey} version={version} graph={graph.data} label={t('definition.diagramLabel', { name: title, count: String(graph.data.nodes.length) })} {...(docked ? { reserve: dockReserve } : {})} />
           ) : shown === 'timing' ? <StepTiming definitionKey={definitionKey} version={version} graph={graph.data} /> : <StepList graph={graph.data} />}
         </Tabs>
       </article>
@@ -116,6 +116,41 @@ export function DefinitionPage({ definitionKey, version, lens, pageLimit }: { de
         )
       ) : null}
     </section>
+  );
+}
+
+/**
+ * The definition diagram with the cases now at each step and the open incidents of each step written under it (#91).
+ * Each figure opens the list it counts. The figures are read again on a timer; a failed read leaves the diagram as it
+ * was, without them, and says nothing louder than a quiet line.
+ */
+function LiveDiagram({ definitionKey, version, graph, label, reserve }: { definitionKey: string; version: number; graph: DiagramGraph; label: string; reserve?: number }) {
+  const { t, locale } = useI18n();
+  const counts = useLiveCounts(definitionKey, version);
+  const format = (n: number) => n.toLocaleString(locale === 'vi' ? 'vi-VN' : 'en-GB');
+  const figures = counts.data === undefined ? [] : liveFigures(counts.data);
+  const names = new Map(graph.nodes.map((node) => [node.id, node.name ?? readableName(node.id)]));
+  const live = new Map<string, StepLive>(figures.map(({ node, tokens, incidents }) => {
+    const step = names.get(node) ?? readableName(node);
+    return [node, {
+      tokens, incidents,
+      tokensLabel: t('live.tokens', { step, count: format(tokens) }),
+      incidentsLabel: t('live.incidents', { step, count: format(incidents) }),
+      tokensHref: formatRoute({ name: 'process', key: definitionKey, version, lens: 'cases' }),
+      incidentsHref: formatRoute({ name: 'incidents', process: definitionKey, version, step: node }),
+    }] as const;
+  }));
+  // Always drawn, so the diagram does not move when the first figures arrive.
+  const key = (
+    <ul className="live-key" aria-label={t('live.key')}>
+      <li className="live-key__item"><span className="live-key__dot" aria-hidden="true" />{t('live.key.tokens')}</li>
+      <li className="live-key__item live-key__item--incidents"><svg className="live-key__sign" viewBox="0 0 14 14" aria-hidden="true"><path d="M7 1.5 13 12.5H1Z M7 5.5V8.5" /></svg>{t('live.key.incidents')}</li>
+    </ul>
+  );
+  return (
+    <Suspense fallback={<LoadingRows rows={6} />}>
+      <DefinitionDiagram graph={graph} label={label} live={live} formatCount={format} toolbar={key} {...(reserve !== undefined ? { reserve } : {})} />
+    </Suspense>
   );
 }
 
