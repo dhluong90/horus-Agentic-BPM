@@ -209,6 +209,83 @@ export function initialDrafts(fields: readonly FormField[], data: Json, locale: 
   return drafts;
 }
 
+/** One line of the recorded decision: what the field is called and the value as the reader reads it; `masked` and `missing` carry no text. */
+export interface RecordedRow {
+  name: string;
+  label: string;
+  text: string | undefined;
+  masked: boolean;
+  wide: boolean;
+  /** What the chosen option leads to, when the form says so. */
+  consequence?: string;
+}
+
+const isoDay = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * The values a completed task's form holds, as read-only text: a choice by its label, money in the language's
+ * separators and the currency's minor units, a masked field never as its value. A field with no value has no text.
+ */
+export function recordedRows(fields: readonly FormField[], data: Json, locale: Locale, words: { yes: string; no: string; when: (iso: string) => string | undefined }): RecordedRow[] {
+  return fields.map((field) => {
+    const value = data[field.name];
+    const wide = field.kind.kind === 'text' && field.kind.multiline;
+    const row = (text: string | undefined): RecordedRow => ({ name: field.name, label: field.label, text, masked: field.masked, wide });
+    if (field.masked) return row(undefined);
+    if (value === undefined || value === null || value === '') return row(undefined);
+    const unit = field.unit !== undefined ? ` ${field.unit}` : '';
+    switch (field.kind.kind) {
+      case 'money': {
+        if (!isMoney(value)) return row(undefined);
+        const plain = minorToText(value.amount, value.currency);
+        const negative = plain.startsWith('-');
+        return row(`${negative ? '-' : ''}${formatDecimalText(plain.replace('-', ''), locale) ?? plain} ${value.currency}`);
+      }
+      case 'number': {
+        if (typeof value !== 'number' && typeof value !== 'string') return row(undefined);
+        const raw = String(value);
+        return row(`${field.kind.grouped ? formatDecimalText(raw, locale) ?? raw : locale === 'vi' ? raw.replace('.', ',') : raw}${unit}`);
+      }
+      case 'choice':
+        return typeof value === 'string' ? { ...row(optionText(field, value)), ...(field.effects[value] !== undefined ? { consequence: field.effects[value] } : {}) } : row(undefined);
+      case 'yesno':
+        return row(typeof value === 'boolean' ? (value ? words.yes : words.no) : undefined);
+      case 'datetime':
+        return row(typeof value === 'string' ? words.when(value) ?? value : undefined);
+      case 'date':
+        return row(typeof value === 'string' && isoDay.test(value) ? words.when(`${value}T00:00:00Z`)?.replace(/ \d{2}:\d{2}$/, '') ?? value : undefined);
+      case 'text':
+        return row(typeof value === 'string' ? `${value}${unit}` : undefined);
+    }
+  });
+}
+
+/** A masked field as the engine stores it: the marker, never the value. */
+const isMarker = (value: unknown): boolean => typeof value === 'object' && value !== null && !Array.isArray(value) && (value as Record<string, unknown>)['masked'] === true;
+
+/**
+ * The lines of the decision as it was recorded: the stored submission read through the form's own labels, units and
+ * formats. A masked field is the engine's marker, so it is `masked` whatever the case holds now.
+ */
+export function submissionRows(form: { schema: Json; hints: Json }, submission: Json, locale: Locale, words: { yes: string; no: string; when: (iso: string) => string | undefined }): RecordedRow[] {
+  const fields = fieldsOf({ ...form, data: submission }, locale).map((field) => ({ ...field, masked: isMarker(submission[field.name]) }));
+  return recordedRows(fields, submission, locale, words);
+}
+
+/**
+ * A path the engine did not record, in words: each step is the form's own label when it names one, else the step
+ * written as words; the steps join with " › " ("Collateral › Owner").
+ */
+export function pathLabel(form: { schema: Json; hints: Json }, path: string, locale: Locale): string {
+  const labels = asRecord(form.hints['labels']) ?? {};
+  const known = asRecord(form.schema['properties']) ?? {};
+  return path.split('.').filter((step) => step !== '').map((step, index) => {
+    const named = index === 0 && known[step] !== undefined ? asRecord(labels[step]) : undefined;
+    const text = named?.[locale] ?? named?.['en'];
+    return typeof text === 'string' ? text : fieldLabel(step);
+  }).join(' › ');
+}
+
 export type Problem = 'required' | 'number' | 'integer' | 'money' | 'moneyScale' | 'moneyRange' | 'moneyCurrency' | 'date' | 'datetime' | 'choice' | 'tooLong';
 
 export interface Built {

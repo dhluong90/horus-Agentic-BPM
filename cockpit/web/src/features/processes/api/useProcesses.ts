@@ -263,6 +263,7 @@ export function useCompleteForm(taskId: string, lockVersion: number) {
     onSettled: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: keys.task(taskId) }),
+        queryClient.invalidateQueries({ queryKey: keys.taskForm(taskId) }),
         queryClient.invalidateQueries({ queryKey: [keys.task(taskId)[0], keys.task(taskId)[1], 'processes', 'tasks'] }),
       ]);
     },
