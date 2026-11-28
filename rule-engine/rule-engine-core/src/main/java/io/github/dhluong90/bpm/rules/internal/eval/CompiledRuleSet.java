@@ -521,14 +521,10 @@ public final class CompiledRuleSet {
         return new DecisionResult.Matched(matched.stream().map(CompiledRule::id).toList(), values);
     }
 
-    /**
-     * No rule matched: every declared output is null, under every hit policy, except a {@code collect: count}
-     * output, which is 0 as FEEL {@code count([])} is (RLE-002, RLE-003, RLE-227).
-     */
+    /** No rule matched: every declared output is null, under every hit policy (RLE-002, RLE-003). */
     private DecisionResult.NoMatch noMatch() {
         Map<String, Object> values = new LinkedHashMap<>();
-        outputs.forEach(output -> values.put(output.name(),
-                output.aggregate() == OutputClause.Aggregate.COUNT ? java.math.BigDecimal.ZERO : null));
+        outputs.forEach(output -> values.put(output.name(), null));
         return new DecisionResult.NoMatch(values);
     }
 

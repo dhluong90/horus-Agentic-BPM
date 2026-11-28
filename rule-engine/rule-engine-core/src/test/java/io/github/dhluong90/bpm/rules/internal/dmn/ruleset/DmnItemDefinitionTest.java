@@ -397,33 +397,29 @@ class DmnItemDefinitionTest {
     }
 
     @Test
-    void RLE_227_with_no_matching_rule_count_is_zero_and_sum_is_null() {
+    void RLE_227_with_no_matching_rule_count_and_sum_are_null_as_shipped() {
         // Given a fee table whose first rule needs at least 1 transaction; a customer with none matches no rule
         Map<String, Object> none = Map.of("txCount", 0);
 
         DecisionResult.Outcome count = evaluate(read(feesOnTier("COUNT")), none);
         DecisionResult.Outcome sum = evaluate(read(feesOnTier("SUM")), none);
 
-        // Then, as FEEL: count([]) is 0 and sum([]) is null
+        // Then, as shipped in 1.0.0: every aggregate is null (DMN-conformant count 0 is deferred to the spec-mode profile)
         assertThat(count).isInstanceOf(DecisionResult.NoMatch.class);
-        assertThat(((DecisionResult.NoMatch) count).outputs().get("fee")).hasToString("0");
+        assertThat(((DecisionResult.NoMatch) count).outputs().get("fee")).isNull();
         assertThat(sum).isInstanceOf(DecisionResult.NoMatch.class);
         assertThat(((DecisionResult.NoMatch) sum).outputs().get("fee")).isNull();
     }
 
     @Test
-    void RLE_227_a_null_input_matches_no_comparison_so_count_is_zero_and_sum_is_null() {
+    void RLE_227_a_null_input_matches_no_comparison_so_count_and_sum_are_null_as_shipped() {
         Map<String, Object> nullInput = new java.util.HashMap<>();
         nullInput.put("txCount", null);
 
         for (String aggregation : List.of("COUNT", "SUM")) {
             DecisionResult.Outcome outcome = evaluate(read(feesOnTier(aggregation)), nullInput);
             Object fee = outcome instanceof DecisionResult.NoMatch n ? n.outputs().get("fee") : "not NoMatch";
-            if (aggregation.equals("COUNT")) {
-                assertThat(fee).as(aggregation).hasToString("0");
-            } else {
-                assertThat(fee).as(aggregation).isNull();
-            }
+            assertThat(fee).as(aggregation).isNull();
         }
     }
 }
