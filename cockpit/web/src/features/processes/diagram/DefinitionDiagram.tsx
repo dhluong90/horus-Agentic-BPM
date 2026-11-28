@@ -171,16 +171,19 @@ function Collaboration({ drawing }: { drawing: CollaborationDrawing }) {
         <g className="dg-pool" data-pool={drawing.pool.id}>
           <rect x={drawing.pool.x} y={drawing.pool.y} width={drawing.pool.width} height={drawing.pool.height} rx={4} />
           <path className="dg-pool__band" d={`M${String(drawing.pool.x + POOL_BAND)} ${String(drawing.pool.y)}V${String(drawing.pool.y + drawing.pool.height)}`} />
-          <BandName label={drawing.pool.label} className="dg-pool__name" x={drawing.pool.x + POOL_BAND / 2} y={drawing.pool.y + drawing.pool.height / 2} room={drawing.pool.height - 16} />
         </g>
       ) : null}
       {drawing.lanes.map((lane) => (
         <g key={lane.id} className="dg-lane" data-lane={lane.id} data-depth={lane.depth ?? 0}>
           <rect x={lane.x} y={lane.y} width={lane.width} height={lane.height} rx={2} />
           <path className="dg-lane__band" d={`M${String(lane.x + LANE_BAND)} ${String(lane.y)}V${String(lane.y + lane.height)}`} />
-          <BandName label={lane.label} className="dg-lane__name" x={lane.x + LANE_BAND / 2} y={lane.y + lane.height / 2} room={lane.height - 12} />
         </g>
       ))}
+      {/* Names come after every frame, so a neighbouring lane's border never runs over a name. */}
+      <g className="dg-names">
+        {drawing.pool !== undefined ? <BandName label={drawing.pool.label} className="dg-pool__name" x={drawing.pool.x + POOL_BAND / 2} y={drawing.pool.y + drawing.pool.height / 2} room={drawing.pool.height - 16} /> : null}
+        {drawing.lanes.map((lane) => <BandName key={lane.id} label={lane.label} className="dg-lane__name" x={lane.x + LANE_BAND / 2} y={lane.y + lane.height / 2} room={lane.height - 12} />)}
+      </g>
       {drawing.blackBoxes.map((box) => (
         <g key={box.id} className="dg-pool dg-pool--black-box" data-pool={box.id}>
           <rect x={box.x} y={box.y} width={box.width} height={box.height} rx={4} />
@@ -223,12 +226,16 @@ function NoteBox({ note, side, kindLabel }: { note: { id: string; text: string; 
 
 /** A message flow: a dashed line with an arrow and, when it has one, a label (#497). */
 function MessageFlowLine({ flow, marker }: { flow: { id: string; label: string | undefined; points: readonly Point[]; labelAt: Point }; marker: string }) {
+  const vertical = flow.points.length > 1 && flow.points.every((point) => point.x === flow.points[0]?.x);
+  // Beside the line, and in the gap right under the pool it leaves, clear of the pool borders and the lane names.
+  const labelY = vertical ? Math.min(Math.min(...flow.points.map((point) => point.y)) + 20, flow.labelAt.y) : flow.labelAt.y;
   return (
     <g className="dg-edge dg-edge--message" data-message-flow={flow.id}>
       <path d={path(flow.points)} markerEnd={`url(#${marker})`} />
       {flow.label !== undefined ? (
         <g className="dg-edge__label">
-          <text x={flow.labelAt.x} y={flow.labelAt.y + 4} textAnchor="middle">{flow.label}</text>
+          {/* A message flow runs straight up and down between pools: its name stands beside the line, not on it. */}
+          <text x={flow.labelAt.x + (vertical ? 8 : 0)} y={labelY + 4} textAnchor={vertical ? 'start' : 'middle'}>{flow.label}</text>
         </g>
       ) : null}
     </g>
@@ -431,6 +438,7 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
   const marked = intermediate || node.type.includes(':');
   const captionTop = node.y + SYMBOL_SIZE + CAPTION_GAP;
   const extra = markProps(mark, picked);
+  const captionX = node.shape === 'gateway' ? centre.x + 8 : centre.x;
   return (
     <g className={`dg-node dg-node--${node.shape} dg-node--${node.type.replace(':', '-')}${soft ? ' dg-node--soft' : ''}${interaction.selected ? ' dg-node--selected' : ''}${interaction.onSelect ? ' dg-node--pick' : ''}${extra.className}`} data-node={node.id} data-type={node.type} {...(boundary || node.type.startsWith('startEvent') ? { 'data-interrupting': String(!soft) } : {})} tabIndex={0} aria-label={label} {...interactive(interaction)} {...extra.data}>
       <title>{label}</title>
@@ -458,8 +466,9 @@ function SymbolNode({ node, label, interaction, mark, picked }: NodeProps) {
         </>
       )}
       {node.lines.length > 0 ? (
-        <text aria-hidden="true" className="dg-node__caption" x={centre.x} y={captionTop + 12} textAnchor="middle">
-          {node.lines.map((line, index) => <tspan key={index} x={centre.x} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
+        // A gateway's name stands to the lower right of the diamond: flows leave a gateway at its bottom point, so a name centred under it is crossed by them.
+        <text aria-hidden="true" className="dg-node__caption" x={captionX} y={captionTop + 12} textAnchor={node.shape === 'gateway' ? 'start' : 'middle'}>
+          {node.lines.map((line, index) => <tspan key={index} x={captionX} dy={index === 0 ? 0 : CAPTION_LINE_HEIGHT}>{index < node.lines.length - 1 ? `${line} ` : line}</tspan>)}
         </text>
       ) : null}
       {mark !== undefined ? <MarkBadge mark={mark} x={centre.x + 20} y={centre.y - 20} /> : null}
