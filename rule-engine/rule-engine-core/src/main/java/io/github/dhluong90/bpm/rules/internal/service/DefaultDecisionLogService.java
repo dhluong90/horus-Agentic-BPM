@@ -2,6 +2,10 @@ package io.github.dhluong90.bpm.rules.internal.service;
 
 import io.github.dhluong90.bpm.rules.api.DecisionLogService;
 import io.github.dhluong90.bpm.rules.api.DecisionNotFoundException;
+import io.github.dhluong90.bpm.rules.api.InputInvalidException;
+import io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException;
+import io.github.dhluong90.bpm.rules.api.InvalidStateException;
+import io.github.dhluong90.bpm.rules.internal.store.DecisionQueueAdmin;
 import io.github.dhluong90.bpm.rules.api.DecisionSearchResult;
 import io.github.dhluong90.bpm.rules.api.LoggedDecision;
 import io.github.dhluong90.bpm.rules.api.MaskedInputQuery;
@@ -41,6 +45,15 @@ public final class DefaultDecisionLogService implements DecisionLogService {
      * the host grants it: the search tests whether a person was decided on (architect condition (a) on #255).
      */
     static final String PERMISSION_MASKED_SEARCH = "rules:masked:search";
+
+    /** Permission to ask for a retry or a resolve of a dead-lettered decision (RLE-231). */
+    static final String PERMISSION_LOG_OPERATE = "rules:log:operate";
+
+    /** Permission to approve or reject that request; never the requester's own (RLE-231). */
+    static final String PERMISSION_LOG_APPROVE = "rules:log:approve";
+
+    /** Event type of the audit entry of every request, approval and rejection on a dead letter. */
+    static final String EVENT_DEAD_LETTER = "rules.decision-log.dead-letter-action.v1";
 
     /** The window of {@code masking.search.max-per-minute}. */
     private static final java.time.Duration SEARCH_WINDOW = java.time.Duration.ofMinutes(1);
@@ -271,5 +284,130 @@ public final class DefaultDecisionLogService implements DecisionLogService {
                 row.errorCode(), row.maskedInputsJson(), row.outputsJson(), matched, row.callerId(),
                 row.correlationId(), row.evalClock(), row.createdAt(), row.durationMicros(), row.pinned(),
                 row.onBehalfOf(), row.budgetLimit());
+    }
+
+    @Override
+    public List<io.github.dhluong90.bpm.rules.api.DeadLetter> deadLetters(int limit) {
+        String tenant = context.tenant();
+        context.callerWith(PERMISSION_LOG_READ);
+        if (limit < 1 || limit > 1_000) {
+            throw new QueryInvalidException("limit must be 1 to 1000");
+        }
+        DecisionQueueAdmin admin = queueAdmin();
+        return context.withoutDooming(() -> admin.deadLetters(tenant, limit));
+    }
+
+    @Override
+    public io.github.dhluong90.bpm.rules.api.DeadLetter requestDeadLetterAction(String decisionId,
+            io.github.dhluong90.bpm.rules.api.DeadLetterAction action, String comment, String idempotencyKey) {
+        String tenant = context.tenant();
+        String caller = context.callerWith(PERMISSION_LOG_OPERATE);
+        Objects.requireNonNull(action, "action must not be null");
+        String reason = requireReason(comment);
+        DecisionQueueAdmin admin = queueAdmin();
+        String operation = "dead-letter-request";
+        String requestHash = io.github.dhluong90.bpm.rules.internal.json.Hashes.sha256Parts(operation, caller,
+                String.valueOf(decisionId), action.name(), reason);
+        return context.idempotent(tenant, operation, idempotencyKey, requestHash, 200, () -> {
+            var row = admin.deadLetter(tenant, String.valueOf(decisionId))
+                    .orElseThrow(() -> new DecisionNotFoundException(String.valueOf(decisionId)));
+            String command = action == io.github.dhluong90.bpm.rules.api.DeadLetterAction.RETRY ? "retry" : "resolve";
+            Instant now = context.clock().instant();
+            boolean done = admin.transition(tenant, row.decisionId(),
+                    java.util.Set.of(io.github.dhluong90.bpm.rules.api.DeadLetterState.DEAD),
+                    action == io.github.dhluong90.bpm.rules.api.DeadLetterAction.RETRY
+                            ? DecisionQueueAdmin.RETRY_REQUESTED : DecisionQueueAdmin.RESOLVE_REQUESTED,
+                    caller, reason, now);
+            if (!done) {
+                throw InvalidStateException.deadLetter(row.decisionId(), row.state(), command);
+            }
+            auditDeadLetter(tenant, caller, row.decisionId(), command + "-requested", reason, now);
+            return admin.deadLetter(tenant, row.decisionId())
+                    .orElseThrow(() -> new DecisionNotFoundException(row.decisionId()));
+        }, DefaultDecisionLogService::deadLetterJson, DefaultDecisionLogService::deadLetterFrom);
+    }
+
+    @Override
+    public String decideDeadLetterRequest(String decisionId, boolean approve, String comment, String idempotencyKey) {
+        String tenant = context.tenant();
+        String caller = context.callerWith(PERMISSION_LOG_APPROVE);
+        String reason = approve && (comment == null || comment.isBlank()) ? null : requireReason(comment);
+        DecisionQueueAdmin admin = queueAdmin();
+        String operation = approve ? "dead-letter-approve" : "dead-letter-reject";
+        String requestHash = io.github.dhluong90.bpm.rules.internal.json.Hashes.sha256Parts(operation, caller,
+                String.valueOf(decisionId), String.valueOf(reason));
+        return context.idempotent(tenant, operation, idempotencyKey, requestHash, 200, () -> {
+            var row = admin.deadLetter(tenant, String.valueOf(decisionId))
+                    .orElseThrow(() -> new DecisionNotFoundException(String.valueOf(decisionId)));
+            var state = row.state();
+            if (state == io.github.dhluong90.bpm.rules.api.DeadLetterState.DEAD) {
+                throw InvalidStateException.deadLetter(row.decisionId(), state, approve ? "approve" : "reject");
+            }
+            // The four-eyes rule: whoever asked cannot decide (TR-SEC-04).
+            if (caller.equals(row.requestedBy())) {
+                throw SelfApprovalForbiddenException.deadLetter(row.decisionId());
+            }
+            boolean retry = state == io.github.dhluong90.bpm.rules.api.DeadLetterState.RETRY_REQUESTED;
+            String kind = !approve ? DecisionQueueAdmin.REQUEST_REJECTED
+                    : retry ? DecisionQueueAdmin.RETRY_APPROVED : DecisionQueueAdmin.RESOLVE_APPROVED;
+            Instant now = context.clock().instant();
+            if (!admin.transition(tenant, row.decisionId(), java.util.Set.of(state), kind, caller, reason, now)) {
+                throw InvalidStateException.deadLetter(row.decisionId(), state, approve ? "approve" : "reject");
+            }
+            auditDeadLetter(tenant, caller, row.decisionId(), kind.toLowerCase(java.util.Locale.ROOT)
+                    .replace('_', '-'), reason, now);
+            return kind;
+        }, kind -> kind, kind -> kind);
+    }
+
+    private static String deadLetterJson(io.github.dhluong90.bpm.rules.api.DeadLetter row) {
+        ObjectNode json = EngineJson.NODES.objectNode();
+        json.put("decisionId", row.decisionId()).put("ruleSet", row.ruleSet()).put("version", row.version())
+                .put("queuedAt", row.queuedAt().toString()).put("attempts", row.attempts())
+                .put("lastError", row.lastError()).put("state", row.state().name())
+                .put("requestedBy", row.requestedBy()).put("requestComment", row.requestComment())
+                .put("requestedAt", row.requestedAt() == null ? null : row.requestedAt().toString());
+        return EngineValues.write(json);
+    }
+
+    private static io.github.dhluong90.bpm.rules.api.DeadLetter deadLetterFrom(String text) {
+        JsonNode json = EngineValues.read(text);
+        String requestedAt = json.path("requestedAt").isNull() ? null : json.path("requestedAt").asString();
+        return new io.github.dhluong90.bpm.rules.api.DeadLetter(json.path("decisionId").asString(),
+                json.path("ruleSet").asString(), json.path("version").asInt(),
+                Instant.parse(json.path("queuedAt").asString()), json.path("attempts").asInt(),
+                json.path("lastError").isNull() ? null : json.path("lastError").asString(),
+                io.github.dhluong90.bpm.rules.api.DeadLetterState.valueOf(json.path("state").asString()),
+                json.path("requestedBy").isNull() ? null : json.path("requestedBy").asString(),
+                json.path("requestComment").isNull() ? null : json.path("requestComment").asString(),
+                requestedAt == null ? null : Instant.parse(requestedAt));
+    }
+
+    private DecisionQueueAdmin queueAdmin() {
+        if (log instanceof DecisionQueueAdmin admin) {
+            return admin;
+        }
+        throw new UnsupportedOperationException("The decision log has no queue: dead letters exist only with "
+                + "decision-log.mode: async");
+    }
+
+    private static String requireReason(String comment) {
+        String text = comment == null ? "" : comment.strip();
+        if (text.length() < 3 || text.length() > 500) {
+            throw new InputInvalidException("comment is required and must be 3 to 500 characters");
+        }
+        return text;
+    }
+
+    /** One audit entry for every step on a dead letter, in the step's transaction: who, what, which decision, why. */
+    private void auditDeadLetter(String tenant, String actor, String decisionId, String step, String reason,
+            Instant now) {
+        String eventId = Ulid.next(now);
+        ObjectNode payload = EventEnvelope.start(eventId, EVENT_DEAD_LETTER, tenant, now, eventId, null)
+                .put("step", step)
+                .put("actor", actor)
+                .put("decisionId", decisionId)
+                .put("reason", reason);
+        outbox.append(tenant, eventId, EngineValues.write(payload), now);
     }
 }

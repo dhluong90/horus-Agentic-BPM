@@ -333,6 +333,70 @@ final class RuleListQueries {
     private static final String KEYSET = "  AND (created_at, id) < (:afterAt, :afterId)\n";
     private static final String PAGE = "ORDER BY created_at DESC, id DESC\nLIMIT :limit\n";
 
+
+    /** The kinds of event after which a queue row waits for the relay (RLE-231). */
+    static final String WAITING_KINDS = "('ATTEMPT_FAILED', 'RETRY_APPROVED')";
+    /** The kinds after which a queue row is out of the relay's hands: dead, with a request waiting, or resolved. */
+    static final String PARKED_KINDS = "('DEAD_LETTERED', 'REQUEST_REJECTED', 'RETRY_REQUESTED',"
+            + " 'RESOLVE_REQUESTED', 'RESOLVE_APPROVED')";
+    /** The kinds of a dead letter an operator still has to deal with. */
+    static final String DEAD_KINDS = "('DEAD_LETTERED', 'REQUEST_REJECTED', 'RETRY_REQUESTED',"
+            + " 'RESOLVE_REQUESTED')";
+
+    /** A row's latest event is of one of the kinds, and meets the extra condition: the row's state. */
+    private static String latest(String kinds, String extra) {
+        return "EXISTS (SELECT 1 FROM rle_decision_queue_event s WHERE s.queue_seq = q.queue_seq AND s.kind IN " + kinds
+                + extra + " AND NOT EXISTS (SELECT 1 FROM rle_decision_queue_event n WHERE n.queue_seq = s.queue_seq"
+                + " AND n.event_seq > s.event_seq))";
+    }
+
+    /** Waiting for the relay: never failed, or failed or approved for retry and past its back-off (parameter :now). */
+    static final String RELAYABLE = "(NOT EXISTS (SELECT 1 FROM rle_decision_queue_event e WHERE e.queue_seq = "
+            + "q.queue_seq) OR " + latest(WAITING_KINDS, " AND (s.next_attempt_at IS NULL OR s.next_attempt_at <= :now)")
+            + ")";
+
+    /** Counted against the backlog: every row the relay still has to move, backing off or not. */
+    static final String COUNTED = "NOT " + latest(PARKED_KINDS, "");
+
+    /** The dead letters of a tenant, before ordering: rows whose latest event is a dead kind (parameter :tenant). */
+    static final String DEAD_LETTERS_SQL = """
+            SELECT q.id, q.rule_set_name, q.version_num, q.queued_at, s.kind, s.actor, s.comment, s.occurred_at,
+              (SELECT f.attempt FROM rle_decision_queue_event f WHERE f.queue_seq = q.queue_seq
+                 AND f.kind IN ('ATTEMPT_FAILED', 'DEAD_LETTERED') ORDER BY f.event_seq DESC LIMIT 1) AS attempts,
+              (SELECT f.detail FROM rle_decision_queue_event f WHERE f.queue_seq = q.queue_seq
+                 AND f.kind IN ('ATTEMPT_FAILED', 'DEAD_LETTERED') ORDER BY f.event_seq DESC LIMIT 1) AS last_error
+            FROM rle_decision_queue_event s JOIN rle_decision_queue q ON q.queue_seq = s.queue_seq
+            WHERE q.tenant_id = :tenant AND s.kind IN ('DEAD_LETTERED', 'REQUEST_REJECTED', 'RETRY_REQUESTED',
+              'RESOLVE_REQUESTED') AND NOT EXISTS (SELECT 1 FROM rle_decision_queue_event n
+                                                   WHERE n.queue_seq = s.queue_seq AND n.event_seq > s.event_seq)
+            """ ;
+
+    /**
+     * The next batch of queued decisions for the relay, locked so that replicas take different rows, oldest first.
+     * Across tenants and bounded by the batch size, so it is a sweep (RLE-230, RLE-231).
+     */
+    static final ListQuery RELAY_LOCK_BATCH = new ListQuery("relay-lock-batch",
+            new Bound.Sweep("the next :n rows of the decision queue in queue order, the relay's batch of at most 10,000"),
+            "SELECT q.queue_seq FROM rle_decision_queue q WHERE " + RELAYABLE
+                    + " ORDER BY q.queue_seq LIMIT :n FOR UPDATE OF q SKIP LOCKED");
+
+    /** The same batch without a lock, for the relay to move one row at a time after the log refused the batch. */
+    static final ListQuery RELAY_BATCH = new ListQuery("relay-batch",
+            new Bound.Sweep("the next :n rows of the decision queue in queue order, the relay's batch of at most 10,000"),
+            "SELECT q.queue_seq FROM rle_decision_queue q WHERE " + RELAYABLE + " ORDER BY q.queue_seq LIMIT :n");
+
+    /** One queue row, locked, when it is still waiting for the relay; empty when another replica has it. */
+    static final ListQuery RELAY_ROW_LOCK = new ListQuery("relay-row-lock",
+            new Bound.Sweep("at most one row: the queue_seq is unique"),
+            "SELECT q.queue_seq FROM rle_decision_queue q WHERE q.queue_seq = :seq AND " + RELAYABLE
+                    + " FOR UPDATE OF q SKIP LOCKED");
+
+    /** A page of the tenant's dead letters, oldest first. */
+    static final ListQuery DEAD_LETTERS = new ListQuery("dead-letters",
+            new Bound.Sweep("the decisions the relay gave up on: the events table holds only failures and operator steps,"
+                    + " never one row per decision, and the page is limited by :limit"),
+            DEAD_LETTERS_SQL + " ORDER BY q.queue_seq LIMIT :limit");
+
     private RuleListQueries() {
     }
 
@@ -342,7 +406,7 @@ final class RuleListQueries {
                 HISTORY_OF_VERSIONS, RULE_SET_EVENTS, DECLARED_INPUTS, MASKED_BY_DEFAULT, RETIRE_SUPERSEDED,
                 MASKING_KEY_SCOPES, LIVE_VERSION_INPUTS, PUBLISHED_VERSION_INPUTS, VERSION_FUNCTIONS, SIMULATION_REPORTS, PUBLISHED_FUNCTION_USES, SETTINGS_SEEN, DECISION_PARTITIONS, DECISION_SEARCH, DECISION_SEARCH_AFTER,
                 DECISIONS_BY_LOGGED_INPUT, DECISION_COUNT, byCorrelation(false, false), byCorrelation(true, true),
-                byInput(false), byInput(true));
+                byInput(false), byInput(true), RELAY_LOCK_BATCH, RELAY_BATCH, RELAY_ROW_LOCK, DEAD_LETTERS);
     }
 
     /** Parameters: tenant, [afterAt, afterId], limit. */

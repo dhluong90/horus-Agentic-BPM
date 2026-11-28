@@ -317,12 +317,21 @@ public record RuleEngineProperties(
          *     this long
          * @param maxBacklog queued decisions above which an evaluation is refused with {@code 503 DECISION_LOG_BACKLOG},
          *     1,000 to 10,000,000; default 100,000. Counted at the relay's runs and every 256 decisions, so it is
-         *     approximate
+         *     approximate. Dead letters are not counted: they block nothing
+         * @param maxAttempts attempts the relay makes on a decision the log refuses before it dead-letters it, 1 to
+         *     100; default 5. A dead letter is kept whole, listed by the dead-letter endpoints and counted in
+         *     {@code horus.rle.decision.log.queue.dead}; an operator retries or resolves it with a second person's
+         *     approval, and nothing deletes it
+         * @param retryBackoff the wait after the first failed attempt, doubled with each further one, 100 ms to
+         *     one hour; default five seconds
+         * @param maxRetryBackoff the longest wait between two attempts, at least {@code retry-backoff} and at most one
+         *     hour; default five minutes
          */
         public record Async(@DefaultValue("100") int batchSize, @DefaultValue("PT1S") Duration pollInterval,
-                @DefaultValue("100000") int maxBacklog) {
+                @DefaultValue("100000") int maxBacklog, @DefaultValue("5") int maxAttempts,
+                @DefaultValue("PT5S") Duration retryBackoff, @DefaultValue("PT5M") Duration maxRetryBackoff) {
 
-            /** Validates the three settings; an out-of-range value fails start-up naming the property. */
+            /** Validates the settings; an out-of-range value fails start-up naming the property. */
             public Async {
                 if (batchSize < 1 || batchSize > 10_000) {
                     throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.batch-size must be 1 to 10000, "
@@ -336,11 +345,23 @@ public record RuleEngineProperties(
                     throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-backlog must be 1000 to "
                             + "10000000, was " + maxBacklog);
                 }
+                if (maxAttempts < 1 || maxAttempts > 100) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-attempts must be 1 to 100, "
+                            + "was " + maxAttempts);
+                }
+                if (retryBackoff.compareTo(Duration.ofMillis(100)) < 0 || retryBackoff.compareTo(Duration.ofHours(1)) > 0) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.retry-backoff must be PT0.1S to "
+                            + "PT1H, was " + retryBackoff);
+                }
+                if (maxRetryBackoff.compareTo(retryBackoff) < 0 || maxRetryBackoff.compareTo(Duration.ofHours(1)) > 0) {
+                    throw new IllegalArgumentException("horus.bpm.rules.decision-log.async.max-retry-backoff must be "
+                            + "retry-backoff (" + retryBackoff + ") to PT1H, was " + maxRetryBackoff);
+                }
             }
 
-            /** @return the defaults: 100, one second, 100,000 */
+            /** @return the defaults: 100, one second, 100,000, 5 attempts, backing off from 5 seconds to 5 minutes */
             public static Async defaults() {
-                return new Async(100, Duration.ofSeconds(1), 100_000);
+                return new Async(100, Duration.ofSeconds(1), 100_000, 5, Duration.ofSeconds(5), Duration.ofMinutes(5));
             }
         }
 

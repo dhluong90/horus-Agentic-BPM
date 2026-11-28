@@ -225,30 +225,6 @@ class AsyncDecisionLogPostgresIT {
     }
 
     @Test
-    void RLE_230_a_batch_the_log_refuses_stays_queued_and_the_failure_is_counted() {
-        AsyncDecisionLog log = asyncLog(100, 100_000);
-        RuleEngines engine = engine(log);
-        publishCardFee(engine);
-        evaluate(engine, "GOLD");
-        jdbc.sql("""
-                INSERT INTO rle_decision_queue (tenant_id, created_at, id, rule_set_name, version_num, hit_policy,
-                  outcome, masked_inputs, matched_rule_ids, eval_clock, duration_micros)
-                VALUES ('bank-a', now(), '01KBX9Q3M4R7T2V8W6Y0Z1A2B3', 'card-fee', 1, 'FIRST', 'NOT_AN_OUTCOME', '{}', '[]',
-                  now(), 1)
-                """).update();
-
-        assertThatThrownBy(log::relayOnce).isInstanceOf(RuntimeException.class);
-
-        assertThat(count("rle_decision_queue")).isEqualTo(2);
-        assertThat(count("rle_decision")).isZero();
-        assertThat(log.relayFailureCount()).isEqualTo(1);
-
-        jdbc.sql("DELETE FROM rle_decision_queue WHERE outcome = 'NOT_AN_OUTCOME'").update();
-        assertThat(log.relayOnce()).isEqualTo(1);
-        assertThat(count("rle_decision")).isEqualTo(1);
-    }
-
-    @Test
     void RLE_230_the_queue_is_not_used_in_the_default_transactional_mode() {
         RuleEngines engine = PostgresRuleEngines.create(db, transactions, caller, caller, clock,
                 EngineSettings.defaults().withRequireContentHash(false));

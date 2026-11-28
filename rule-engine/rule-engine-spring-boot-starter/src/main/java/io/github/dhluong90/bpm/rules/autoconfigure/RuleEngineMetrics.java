@@ -26,6 +26,9 @@ final class RuleEngineMetrics implements MeterBinder {
     static final String RELAYED = "horus.rle.decision.log.relayed";
     static final String REFUSED = "horus.rle.decision.log.refused";
     static final String RELAY_FAILED = "horus.rle.decision.log.relay.failed";
+    /** Dead letters an operator still has to deal with; the alert fires above 0 (RLE-231). */
+    static final String QUEUE_DEAD = "horus.rle.decision.log.queue.dead";
+    static final String DEAD_LETTERED = "horus.rle.decision.log.dead.lettered";
 
     private final DecisionLogPartitions partitions;
     private final io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog asyncLog;
@@ -66,7 +69,15 @@ final class RuleEngineMetrics implements MeterBinder {
                     .description("Evaluations refused with DECISION_LOG_BACKLOG").register(registry);
             io.micrometer.core.instrument.FunctionCounter.builder(RELAY_FAILED, asyncLog,
                     io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog::relayFailureCount)
-                    .description("Relay runs that failed").register(registry);
+                    .description("Failed attempts and failed runs of the relay").register(registry);
+            Gauge.builder(QUEUE_DEAD, asyncLog,
+                    io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog::deadLetterDepth)
+                    .description("Decisions the relay gave up on and dead-lettered, not yet retried or resolved by an "
+                            + "operator; they block nothing, and the alert fires above 0").strongReference(true)
+                    .register(registry);
+            io.micrometer.core.instrument.FunctionCounter.builder(DEAD_LETTERED, asyncLog,
+                    io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog::deadLetteredCount)
+                    .description("Decisions this replica dead-lettered").register(registry);
         }
     }
 

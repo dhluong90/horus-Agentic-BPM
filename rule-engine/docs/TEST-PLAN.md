@@ -137,6 +137,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-228 | `RLE_228_*` in `ImportFileNameAndBudgetLimitPostgresIT`, `ImportRequestFileNameTest`, `SourceFileNameHeaderTest` | Unit, Testcontainers | M3 | `TR-STD-01`, `TR-AUD-01` | Implemented (#357) |
 | RLE-229 | `RLE_229_*` in `ImportFileNameAndBudgetLimitPostgresIT`, `RuleEngineSchemaMigratorIT`; `RLE_082_*` in `EvaluationStepBudgetSettingTest` | Unit, Testcontainers | M3 | `TR-SEC-01`, `TR-AUD-01` | Implemented (#360) |
 | RLE-230 | `RLE_230_*` in `AsyncDecisionLogPostgresIT`, `RuleEngineSchemaMigratorIT`, `RuleEngineAutoConfigurationTest`; `ErrorMatrixWebMvcTest` | Testcontainers, wiring | M3 | `TR-AUD-01`, `TR-DET-01` | Implemented (#45) |
+| RLE-231 | `RLE_231_*` in `DecisionLogDeadLetterPostgresIT`, `DeadLetterEndpointsWebMvcTest`, `DecisionLogDeadLetterSettingsTest`, `EventEnvelopeTest` (the event schema) | Testcontainers, WebMvc, wiring | M3 | `TR-AUD-01`, `TR-SEC-04`, `TR-TEN-01`, `TR-IDEM-01` | Implemented (#45) |
 | RLE-227 | `RLE_227_collect_sum_adds_the_matched_rules` and five more | Unit | M3 | `TR-STD-25` | Implemented: `DmnItemDefinitionTest` (SUM, COUNT, MIN, MAX, export round trip, refusals with `DMN_AGGREGATION_UNSUPPORTED`) |
 
 ## Compatibility matrix

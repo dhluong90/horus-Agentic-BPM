@@ -101,7 +101,8 @@ public class RuleEngineAutoConfiguration {
             RuleEngineTransactions transactions, RuleEngineProperties properties, ObjectProvider<Clock> clock) {
         RuleEngineProperties.DecisionLog.Async async = properties.decisionLog().asyncOrDefault();
         return new io.github.dhluong90.bpm.rules.postgres.AsyncDecisionLog(dataSource, transactions, engineClock(clock),
-                async.batchSize(), async.maxBacklog());
+                async.batchSize(), async.maxBacklog(), async.maxAttempts(), async.retryBackoff(),
+                async.maxRetryBackoff());
     }
 
     /** Moves queued decisions into the log while the host runs in {@code async} mode (RLE-230). */

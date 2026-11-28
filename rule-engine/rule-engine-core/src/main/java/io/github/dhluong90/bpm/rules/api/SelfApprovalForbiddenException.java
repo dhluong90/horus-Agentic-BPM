@@ -43,4 +43,15 @@ public final class SelfApprovalForbiddenException extends HorusBpmException {
                 + " cannot confirm it; another holder of rules:approve confirms, or the request is cancelled with"
                 + " :cancel-retire");
     }
+
+    /**
+     * The operator who asked for a retry or a resolve of a dead letter tried to approve or reject it (RLE-231).
+     *
+     * @param decisionId the decision
+     * @return the exception
+     */
+    public static SelfApprovalForbiddenException deadLetter(String decisionId) {
+        return new SelfApprovalForbiddenException("The operator who asked for the retry or resolve of the dead-lettered"
+                + " decision " + decisionId + " cannot approve or reject it; another holder of rules:log:approve does");
+    }
 }

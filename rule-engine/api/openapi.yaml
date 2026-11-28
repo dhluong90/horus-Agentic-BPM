@@ -2575,6 +2575,181 @@ paths:
         '403': { $ref: '#/components/responses/Problem' }
         '413': { $ref: '#/components/responses/Problem' }
         '500': { $ref: '#/components/responses/Problem' }
+  /decision-log/dead-letters:
+    get:
+      tags: [decisions]
+      operationId: listDeadLetters
+      summary: List the decisions the asynchronous decision log gave up on
+      description: |
+        Permission `rules:log:read`. Only with `decision-log.mode: async` (RLE-231). A decision the relay could not
+        write to the log after `decision-log.async.max-attempts` attempts is a dead letter. It is kept whole in the
+        queue, it holds back no other decision, and it is listed here, oldest first, with the attempts made, the
+        first line of the database's last message (never a row value) and the state of any request on it. The list is
+        the caller's tenant's only. The same count is the metric `horus.rle.decision.log.queue.dead`, which the alert
+        rule in `rule-engine/docs/alerts/decision-log-queue.rules.yml` watches. Writes nothing.
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 100
+      responses:
+        '200':
+          description: The dead letters, oldest first
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/DeadLetter'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{id}/dead-letter:request:
+    post:
+      tags: [decisions]
+      operationId: requestDeadLetterAction
+      summary: Ask to retry or resolve a dead-lettered decision
+      description: |
+        Permission `rules:log:operate`. Body `{action: RETRY|RESOLVE, comment}`, the comment 3 to 500 characters.
+        Nothing changes until a second person approves with `:approve`. A retry puts the decision back in the relay's
+        queue with its attempts counted from zero; a resolve closes it as handled outside the queue. Neither deletes
+        it, and no decision is ever deleted from the queue unless its copy is already in the log. The step is audited
+        by the event `rules.decision-log.dead-letter-action.v1` and a row of `rle_decision_queue_event`. A decision
+        that is not a dead letter of the caller's tenant is `404 DECISION_NOT_FOUND`; one that already has a request
+        waiting is `409 INVALID_STATE`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, comment]
+              properties:
+                action:
+                  type: string
+                  enum: [RETRY, RESOLVE]
+                comment:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+            example:
+              action: RETRY
+              comment: February partition created by the DBA
+      responses:
+        '200':
+          description: The dead letter, now waiting for a second person
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadLetter'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{id}/dead-letter:approve:
+    post:
+      tags: [decisions]
+      operationId: approveDeadLetterRequest
+      summary: Approve the retry or resolve asked for on a dead letter
+      description: |
+        Permission `rules:log:approve`, held by someone other than the requester: the requester gets
+        `403 SELF_APPROVAL_FORBIDDEN`. Body `{comment?}`. An approved retry makes the decision wait for the relay
+        again; an approved resolve closes it. Neither deletes it. A decision with no request waiting is
+        `409 INVALID_STATE`.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                comment:
+                  type: string
+                  maxLength: 500
+      responses:
+        '200':
+          description: The step recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadLetterStep'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
+  /decisions/{id}/dead-letter:reject:
+    post:
+      tags: [decisions]
+      operationId: rejectDeadLetterRequest
+      summary: Refuse the retry or resolve asked for on a dead letter
+      description: |
+        Permission `rules:log:approve`, held by someone other than the requester. Body `{comment}`, 3 to 500
+        characters. The decision stays a dead letter and a new request may follow.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [comment]
+              properties:
+                comment:
+                  type: string
+                  minLength: 3
+                  maxLength: 500
+      responses:
+        '200':
+          description: The step recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeadLetterStep'
+        '400': { $ref: '#/components/responses/Problem' }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '413': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        '500': { $ref: '#/components/responses/Problem' }
 components:
   securitySchemes:
     hostAuth:
@@ -2906,6 +3081,32 @@ components:
           type: string
           format: date-time
           description: The latest creation, request, approval or rejection of any version of the rule set
+    DeadLetter:
+      type: object
+      required: [decisionId, ruleSet, version, queuedAt, attempts, state]
+      properties:
+        decisionId: { type: string }
+        ruleSet: { type: string }
+        version: { type: integer }
+        queuedAt: { type: string, format: date-time }
+        attempts: { type: integer, description: Attempts the relay made }
+        lastError:
+          type: [string, 'null']
+          description: The first line of the database's last message, with its SQLSTATE; never a row value
+        state:
+          type: string
+          enum: [DEAD, RETRY_REQUESTED, RESOLVE_REQUESTED]
+        requestedBy: { type: string, description: Present when a request waits for a second person }
+        requestComment: { type: string }
+        requestedAt: { type: string, format: date-time }
+    DeadLetterStep:
+      type: object
+      required: [decisionId, event]
+      properties:
+        decisionId: { type: string }
+        event:
+          type: string
+          enum: [RETRY_APPROVED, RESOLVE_APPROVED, REQUEST_REJECTED]
     DecisionLogPage:
       type: object
       required: [data, nextCursor, hasNext]
