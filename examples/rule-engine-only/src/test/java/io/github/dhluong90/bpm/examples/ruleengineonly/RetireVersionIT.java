@@ -42,6 +42,7 @@ class RetireVersionIT {
             "lan", List.of("rules:read", "rules:author"),
             "bob", List.of("rules:read", "rules:approve"),
             "dan", List.of("rules:read"),
+            "audit", List.of("rules:log:read"),
             "teller", List.of("rules:evaluate"),
             "system:supersession", List.of("rules:read", "rules:approve"));
 
@@ -194,6 +195,38 @@ class RetireVersionIT {
     }
 
     @Test
+    void RLE_026_a_decision_logged_before_the_retirement_replays_with_its_logged_answer() throws Exception {
+        // Given decision D1 logged on v1 at 1 Feb 2027 with waiveFee true
+        String t = "bank-retire-d";
+        clock.set(Instant.parse("2027-01-15T00:00:00Z"));
+        Reply v1 = publish(t, tetFeeWaiver("2027-01-20T00:00:00Z"), 1);
+        clock.set(Instant.parse("2027-02-01T09:00:00Z"));
+        Reply logged = send(t, "teller", "POST", "/decisions/tet-fee-waiver:evaluate",
+                body("{\"inputs\":{\"channel\":\"CARD\"}}"), "application/json", null, null);
+        assertThat(logged.status()).as(logged.body()).isEqualTo(200);
+        String d1 = logged.json().path("decisionId").asString();
+        assertThat(logged.json().path("outputs").path("waiveFee").asBoolean()).isTrue();
+
+        // When bob retires v1 at 17 Feb, the last version in effect, with the confirmation
+        clock.set(Instant.parse("2027-02-17T08:00:00Z"));
+        Reply retired = send(t, "bob", "POST", "/rule-sets/tet-fee-waiver/versions/1:retire",
+                body("{\"reason\":\"Tet promotion ended\",\"confirmNoVersionInEffect\":true}"), "application/json",
+                "k-401", v1.etag());
+        assertThat(retired.json().path("status").asString()).isEqualTo("RETIRED");
+        long decisionsBefore = decisions(t);
+
+        // Then replay(D1) returns version 1 and waiveFee true, and writes no decision row
+        Reply replay = send(t, "audit", "POST", "/decisions/" + d1 + ":replay", null, null, null, null);
+        assertThat(replay.status()).as(replay.body()).isEqualTo(200);
+        assertThat(replay.json().path("version").asInt()).isEqualTo(1);
+        assertThat(replay.json().path("outputs").path("waiveFee").asBoolean()).isTrue();
+        assertThat(decisions(t)).isEqualTo(decisionsBefore);
+        // while a new evaluation at the host clock finds no version in effect
+        assertProblem(send(t, "teller", "POST", "/decisions/tet-fee-waiver:evaluate",
+                body("{\"inputs\":{\"channel\":\"CARD\"}}"), "application/json", null, null), 404, "NO_EFFECTIVE_VERSION");
+    }
+
+    @Test
     void RLE_026_refused_retirements_change_nothing() throws Exception {
         String t = "bank-retire-b";
         clock.set(Instant.parse("2027-01-15T00:00:00Z"));
@@ -266,6 +299,11 @@ class RetireVersionIT {
     long retiredEvents(String tenant) {
         return jdbc.sql("SELECT count(*) FROM rle_decision_outbox WHERE tenant_id = :t"
                 + " AND payload->>'eventType' = 'rules.version.retired.v1'").param("t", tenant).query(Long.class).single();
+    }
+
+    long decisions(String tenant) {
+        return jdbc.sql("SELECT count(*) FROM rle_decision WHERE tenant_id = :t").param("t", tenant)
+                .query(Long.class).single();
     }
 
     long rows(String tenant) {
