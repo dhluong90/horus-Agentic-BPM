@@ -210,7 +210,7 @@ class HostMetadataIT {
     }
 
     private URI url(String path) {
-        return URI.create("http://localhost:" + environment.getProperty("local.server.port") + path);
+        return URI.create("http://127.0.0.1:" + environment.getProperty("local.server.port") + path);
     }
 
     private static List<String> strings(HttpResponse<String> response, String field) {

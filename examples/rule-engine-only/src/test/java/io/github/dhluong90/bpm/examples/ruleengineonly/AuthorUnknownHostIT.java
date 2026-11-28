@@ -137,7 +137,7 @@ class AuthorUnknownHostIT {
      */
     private static Reply send(int port, String bearer, String method, String path, String body, Long ifMatch,
             String key) throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", bearer)
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()
                         : HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8));

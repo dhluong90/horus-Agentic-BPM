@@ -169,7 +169,7 @@ class EvaluationMetricsIT {
     }
 
     URI uri(String path) {
-        return URI.create("http://localhost:" + environment.getProperty("local.server.port") + "/api/bpm/rules/v1"
+        return URI.create("http://127.0.0.1:" + environment.getProperty("local.server.port") + "/api/bpm/rules/v1"
                 + path);
     }
 

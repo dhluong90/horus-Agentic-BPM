@@ -281,10 +281,12 @@ class LoanOriginationIT {
                 + "ORDER BY occurred_at, id").param(id).query(String.class).list();
     }
 
+    /** The rules the given instance matched in the rule set, in the order of its decisions; the log's correlation id is the instance id. */
     private List<String> ruleIds(String instanceId, String ruleSet) {
         List<String> ids = new ArrayList<>();
-        jdbc.sql("SELECT matched_rule_ids::text FROM rle_decision WHERE rule_set_name = ? ORDER BY created_at")
-                .param(ruleSet).query(String.class).list().forEach(s -> ids.add(s.replaceAll("[^A-Z0-9]", "")));
+        jdbc.sql("SELECT matched_rule_ids::text FROM rle_decision WHERE rule_set_name = ? AND correlation_id = ? "
+                + "ORDER BY created_at").param(ruleSet).param(instanceId).query(String.class).list()
+                .forEach(s -> ids.add(s.replaceAll("[^A-Z0-9]", "")));
         return ids.isEmpty() ? ids : List.of(ids.getLast());
     }
 
@@ -299,7 +301,7 @@ class LoanOriginationIT {
 
     private HttpResponse<String> send(String user, String method, String path, String body, Map<String, String> headers)
             throws Exception {
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", "Basic " + Base64.getEncoder()
                         .encodeToString((user + ":it-pass").getBytes(StandardCharsets.UTF_8)))
                 .method(method, body == null ? HttpRequest.BodyPublishers.noBody()

@@ -19,7 +19,7 @@ const pillars = [
 // Real captures of the cockpit. w1 x h1 is the 1x size; w2 the 2x width.
 const shots = [
   { id: 'process', h1: 377, w2: 1030, eyebrow: 'BPMN diagram', title: 'See every running step on the diagram.',
-    text: 'Boundary events and compensation, from the BPMN you import, laid out automatically.',
+    text: 'Boundary events and compensation, from the BPMN you import, drawn as its diagram has them.',
     alt: 'The Loan payout process drawn as a BPMN diagram in the cockpit, with service tasks, a boundary event and an undo path.' },
   { id: 'timeline', wide: true, h1: 622, w2: 1400, eyebrow: 'Instance timeline', title: 'See each step, and what was undone.',
     text: 'A finished instance shows its steps, and which ones compensation undid.',

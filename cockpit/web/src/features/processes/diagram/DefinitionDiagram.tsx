@@ -606,7 +606,7 @@ export default function DefinitionDiagram({ graph, label, overlay, marks, markLa
           tabIndex={pannable ? 0 : undefined} role={pannable ? 'region' : undefined} aria-label={pannable ? t('diagram.pan') : undefined}
           onKeyDown={onKeyDown} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerUp}>
           <svg className="dg__svg" role="group" aria-label={label} width={width} height={height}
-            viewBox={`${String(bounds.x)} ${String(bounds.y)} ${String(bounds.width)} ${String(bounds.height)}`} data-layout="auto" data-scale={scale.toFixed(2)}>
+            viewBox={`${String(bounds.x)} ${String(bounds.y)} ${String(bounds.width)} ${String(bounds.height)}`} data-layout={graph.stored === undefined ? 'auto' : 'stored'} data-scale={scale.toFixed(2)}>
             <defs>
               <marker id={marker} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
                 <path d="M0 0 L10 5 L0 10 z" className="dg-arrow" />

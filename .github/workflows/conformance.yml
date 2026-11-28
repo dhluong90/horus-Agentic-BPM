@@ -1,0 +1,95 @@
+name: Conformance
+
+# #203 and #204: the DMN TCK against the Rule Engine and the BPMN MIWG reference models through import, export and
+# compare against the Process Engine, every day. The run measures and publishes; it fails only when a number falls
+# below tools/conformance/baseline.json (the ratchet, tools/conformance/ratchet.py). A pull request that raises a
+# number updates the baseline in the same change. The suites are pinned by commit and SHA-256 in
+# tools/conformance/pins.env, fetched at build time and never committed or shipped.
+on:
+  schedule:
+    - cron: "30 3 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - rule-engine/rule-engine-core/src/**
+      - process-engine/process-engine-bpmn/src/**
+      - process-engine/process-engine-core/src/main/**
+      - tools/conformance/**
+      - tools/test_conformance_ratchet.py
+      - .github/workflows/conformance.yml
+
+# Actions are pinned by commit SHA; the comment names the release. Update both together.
+permissions:
+  contents: read
+
+concurrency:
+  group: conformance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    name: DMN TCK and BPMN MIWG
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+
+      - name: Tests of the ratchet
+        run: python3 tools/test_conformance_ratchet.py -v
+
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: /home/runner/.m2/repository
+          key: maven-${{ runner.os }}-conformance-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            maven-${{ runner.os }}-conformance-
+            maven-${{ runner.os }}-
+
+      - name: Drop remembered download failures from the Maven cache
+        run: find ~/.m2/repository -name '*.lastUpdated' -print -delete 2>/dev/null | sed 's/^/removed /' || true
+
+      - name: Fetch the pinned suites (SHA-256 checked)
+        run: tools/conformance/fetch.sh all
+
+      - name: Run the DMN TCK, the MIWG round trip and the project's own scenarios
+        run: >-
+          tools/mvn-retry.sh -B -ntp -Dcockpit.bundle.skip=true
+          -pl rule-engine/rule-engine-core,process-engine/process-engine-bpmn -am test
+          -Dtest=DmnTckConformanceRun,MiwgRoundTripRun,ConformanceSuiteTest
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Dconformance.tck.dir="$GITHUB_WORKSPACE/target/conformance/suites/dmn-tck"
+          -Dconformance.miwg.dir="$GITHUB_WORKSPACE/target/conformance/suites/bpmn-miwg"
+          -Dconformance.exclusions="$GITHUB_WORKSPACE/tools/conformance/dmn-tck-exclusions.txt"
+          -Dconformance.out="$GITHUB_WORKSPACE/target/conformance"
+
+      # Writes the summary even when the ratchet fails, and then fails the job with the ratchet's exit status.
+      - name: Pass rates, change since the baseline, ratchet
+        run: |
+          set +e
+          python3 tools/conformance/ratchet.py check target/conformance \
+            --own-suite process-engine/process-engine-bpmn/target/surefire-reports/TEST-*ConformanceSuiteTest.xml \
+            > target/conformance/summary.md
+          status=$?
+          cat target/conformance/summary.md >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      # Results only: case ids, pass or fail and a reason. No suite file is uploaded.
+      - name: Upload the per-case results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: conformance-results
+          path: |
+            target/conformance/dmn-tck-results.json
+            target/conformance/tck_results.csv
+            target/conformance/bpmn-miwg-results.json
+            target/conformance/summary.md
+          if-no-files-found: ignore
+          retention-days: 30

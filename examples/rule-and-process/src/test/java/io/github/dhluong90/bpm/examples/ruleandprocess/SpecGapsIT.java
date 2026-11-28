@@ -167,7 +167,7 @@ class SpecGapsIT {
     }
 
     private HttpResponse<String> rulePost(String path, String yaml, String key) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic("lan")).header("Content-Type", "application/yaml")
                 .header("Idempotency-Key", key).POST(HttpRequest.BodyPublishers.ofString(yaml)).build(),
                 HttpResponse.BodyHandlers.ofString());
@@ -199,13 +199,13 @@ class SpecGapsIT {
     }
 
     private HttpResponse<String> post(String bpmn) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + BASE))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + BASE))
                 .header("Authorization", basic("lan")).header("Content-Type", "application/xml")
                 .POST(HttpRequest.BodyPublishers.ofString(bpmn)).build(), HttpResponse.BodyHandlers.ofString());
     }
 
     private HttpResponse<String> get(String path) throws Exception {
-        return HTTP.send(HttpRequest.newBuilder(URI.create("http://localhost:" + port + path))
+        return HTTP.send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + path))
                 .header("Authorization", basic("lan")).GET().build(), HttpResponse.BodyHandlers.ofString());
     }
 
