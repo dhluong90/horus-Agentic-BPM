@@ -46,6 +46,9 @@ class ApprovalSealPostgresIT {
     static final Set<String> APPROVER = Set.of("rules:read", "rules:approve");
     static final Set<String> PRICING = Set.of("rules:evaluate", "rules:simulate");
     static final byte[] KEY = "a-vault-held-key-of-32-bytes-min".getBytes(StandardCharsets.UTF_8);
+    static final ApprovalSealKey.Key K1 = new ApprovalSealKey.Key("k1", KEY);
+    static final ApprovalSealKey.Key K2 = new ApprovalSealKey.Key("k2",
+            "a-second-vault-key-of-32-bytes-!".getBytes(StandardCharsets.UTF_8));
 
     final EffectiveDatesAndReplayPostgresIT.Caller caller = new EffectiveDatesAndReplayPostgresIT.Caller();
     final EditorApiPostgresIT.Movable clock = new EditorApiPostgresIT.Movable(Instant.parse("2026-10-20T00:00:00Z"));
@@ -166,12 +169,11 @@ class ApprovalSealPostgresIT {
 
     @Test
     void RLE_223_a_host_key_makes_the_seal_an_hmac_and_a_plain_seal_or_another_key_is_refused() {
-        // Given a host that holds the seal key outside the database
-        ApprovalSealKey key = () -> Optional.of(KEY);
+        // Given a host that holds the seal key k1 outside the database
+        ApprovalSealKey key = ApprovalSealKey.of(K1);
         RuleEngines keyed = engines(key);
         publish(keyed, "50000 VND", null);
-        assertThat(jdbc.sql("SELECT approval_seal FROM rle_version WHERE version_num = 1").query(String.class).single())
-                .matches("hmac-sha256:[0-9a-f]{64}");
+        assertThat(seal(1)).matches("hmac-sha256:k1:[0-9a-f]{64}");
         assertThat(evaluate(engines(key), NOV_20).outcome())
                 .isNotInstanceOf(DecisionResult.Failed.class);
 
@@ -181,8 +183,127 @@ class ApprovalSealPostgresIT {
         // And when a database administrator writes a plain seal over the row, the keyed engine refuses it too
         jdbc.sql("UPDATE rle_version SET approval_seal = 'sha256:' || repeat('a', 64) WHERE version_num = 1").update();
         assertThat(evaluate(engines(key), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
-        assertThatThrownBy(() -> evaluate(engines(() -> Optional.of(new byte[8])), NOV_20))
-                .isInstanceOf(IllegalStateException.class).hasMessageContaining("at least 32 bytes");
+        assertThatThrownBy(() -> new ApprovalSealKey.Key("short", new byte[8]))
+                .isInstanceOf(IllegalArgumentException.class).hasMessageContaining("at least 32 bytes");
+    }
+
+    @Test
+    void RLE_223_rotating_the_key_keeps_approved_versions_served_and_a_second_person_reseals_them() {
+        // Given v1 approved under k1
+        publish(engines(ApprovalSealKey.of(K1)), "50000 VND", null);
+        ApprovalSealKey rotated = new ApprovalSealKey() {
+            public Optional<Key> current() {
+                return Optional.of(K2);
+            }
+
+            public List<Key> previous() {
+                return List.of(K1);
+            }
+        };
+
+        // When the host rotates to k2 and lists k1 as previous, v1 is still served
+        RuleEngines engines = engines(rotated);
+        assertThat(evaluate(engines, NOV_20).outcome()).isNotInstanceOf(DecisionResult.Failed.class);
+        // but a host that dropped k1 from the ring refuses it
+        assertThat(evaluate(engines(ApprovalSealKey.of(K2)), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
+
+        // The approver and the author cannot re-seal; a third person can
+        caller.as("bank-a", "minh", APPROVER);
+        assertThatThrownBy(() -> engines.versionService().reseal("card-fee", 1, WriteOptions.none()))
+                .isInstanceOf(io.github.dhluong90.bpm.rules.api.SelfApprovalForbiddenException.class);
+        caller.as("bank-a", "omar", APPROVER);
+        engines.versionService().reseal("card-fee", 1, new WriteOptions(null, null, "rotation to k2"));
+
+        // Then the seal is under k2, one RESEALED row names omar, and k2 alone now serves v1
+        assertThat(seal(1)).matches("hmac-sha256:k2:[0-9a-f]{64}");
+        assertThat(jdbc.sql("SELECT actor FROM rle_version_history WHERE action = 'RESEALED'")
+                .query(String.class).single()).isEqualTo("omar");
+        assertThat(evaluate(engines(ApprovalSealKey.of(K2)), NOV_20).outcome())
+                .isNotInstanceOf(DecisionResult.Failed.class);
+
+        // and a second re-seal changes nothing and adds no history row
+        caller.as("bank-a", "omar", APPROVER);
+        engines.versionService().reseal("card-fee", 1, WriteOptions.none());
+        assertThat(count("rle_version_history WHERE action = 'RESEALED'")).isEqualTo(1);
+    }
+
+    @Test
+    void RLE_223_a_version_changed_in_the_table_is_not_resealed() {
+        RuleEngines engines = engines(ApprovalSealKey.of(K1));
+        publish(engines, "50000 VND", null);
+        jdbc.sql("UPDATE rle_version SET effective_from = effective_from - interval '1 day' WHERE version_num = 1")
+                .update();
+        caller.as("bank-a", "omar", APPROVER);
+        assertThatThrownBy(() -> engines.versionService().reseal("card-fee", 1, WriteOptions.none()))
+                .hasMessageContaining("SEAL_MISMATCH");
+        assertThat(seal(1)).matches("hmac-sha256:k1:[0-9a-f]{64}");
+    }
+
+    @Test
+    void RLE_223_switching_a_key_on_after_versions_were_approved_needs_the_window_and_a_reseal() {
+        // Given v1 approved with plain seals
+        publish(engines(ApprovalSealKey.none()), "50000 VND", null);
+        assertThat(seal(1)).startsWith("sha256:");
+
+        // When the host sets a key, v1 is refused: a plain seal is not trusted next to a key
+        assertThat(evaluate(engines(ApprovalSealKey.of(K1)), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
+
+        // With the window open it is served, and a second person re-seals it under k1
+        ApprovalSealKey window = new ApprovalSealKey() {
+            public Optional<Key> current() {
+                return Optional.of(K1);
+            }
+
+            public boolean acceptUnkeyedSeals() {
+                return true;
+            }
+        };
+        RuleEngines engines = engines(window);
+        assertThat(evaluate(engines, NOV_20).outcome()).isNotInstanceOf(DecisionResult.Failed.class);
+        caller.as("bank-a", "omar", APPROVER);
+        engines.versionService().reseal("card-fee", 1, WriteOptions.none());
+
+        // Then the window can close
+        assertThat(seal(1)).matches("hmac-sha256:k1:[0-9a-f]{64}");
+        assertThat(evaluate(engines(ApprovalSealKey.of(K1)), NOV_20).outcome())
+                .isNotInstanceOf(DecisionResult.Failed.class);
+    }
+
+    @Test
+    void RLE_223_an_approved_version_with_a_null_seal_is_refused_in_plain_mode() {
+        // Given v1 approved with a plain seal
+        publish(engines(ApprovalSealKey.none()), "50000 VND", null);
+        // the database itself refuses a NULL seal on an approved version
+        assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET approval_seal = NULL WHERE version_num = 1").update())
+                .hasMessageContaining("rle_version_approval_seal_check");
+
+        // When an administrator drops the constraint, clears the seal and moves the date
+        jdbc.sql("ALTER TABLE rle_version DROP CONSTRAINT rle_version_approval_seal_check").update();
+        jdbc.sql("UPDATE rle_version SET approval_seal = NULL, effective_from = effective_from - interval '1 day'"
+                + " WHERE version_num = 1").update();
+
+        // Then the engine refuses the version: only the marker written by V2 stands for "approved before seals"
+        assertThat(evaluate(engines(ApprovalSealKey.none()), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
+    }
+
+    @Test
+    void RLE_223_the_pre_seal_marker_cannot_be_written_after_the_migration_and_a_keyed_host_refuses_it() {
+        publish(engines(ApprovalSealKey.none()), "50000 VND", null);
+        assertThatThrownBy(() -> jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal'"
+                + " WHERE version_num = 1").update()).hasMessageContaining("rle_version_legacy_seal_guard");
+
+        // A version the migration marked (simulated by switching the guard off) is served in plain mode, as before
+        jdbc.sql("ALTER TABLE rle_version DISABLE TRIGGER rle_version_legacy_seal_guard").update();
+        jdbc.sql("UPDATE rle_version SET approval_seal = 'legacy:pre-seal' WHERE version_num = 1").update();
+        assertThat(evaluate(engines(ApprovalSealKey.none()), NOV_20).outcome())
+                .isNotInstanceOf(DecisionResult.Failed.class);
+        // a keyed host refuses it until the window opens and a second person re-seals it
+        assertThat(evaluate(engines(ApprovalSealKey.of(K1)), NOV_20).outcome()).isInstanceOf(DecisionResult.Failed.class);
+    }
+
+    String seal(int version) {
+        return jdbc.sql("SELECT approval_seal FROM rle_version WHERE version_num = :v").param("v", version)
+                .query(String.class).single();
     }
 
     static DataSource dataSource(String database) {

@@ -104,6 +104,19 @@ public record StoredVersion(
     }
 
     /**
+     * Returns a copy of an approved version that carries a new seal; the lock version moves, nothing else does.
+     *
+     * @param seal the new seal text
+     * @return the copy
+     */
+    public StoredVersion resealed(String seal) {
+        return new StoredVersion(tenantId, id, ruleSetId, ruleSet, version, status, hitPolicy, effectiveFrom,
+                canonicalJson, canonicalHash, sourceFormat, sourceDocument, sourceHash, lockVersion + 1, requestedBy,
+                requestedAt, approvedBy, approvedAt, approvalComment, createdBy, createdAt, retiredAt, copiedFrom,
+                retirementRequest, seal);
+    }
+
+    /**
      * Creates a row of a restore, which has no pending retirement.
      *
      * @param tenantId see the record

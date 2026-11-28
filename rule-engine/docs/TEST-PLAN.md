@@ -126,7 +126,7 @@ Every statement in [`SPEC.md`](SPEC.md) has at least one automated test whose na
 | RLE-220 | `RLE_220_*` in `HistorySimulationTest` | A decision replay by ids reads each id by key and never scans the period (AUD-06) | M3 | `TR-SEC-04` | Done (#573) |
 | RLE-221 | `RLE_221_*` in `CursorKeyRotationTest` and `CursorKeyPropertiesTest` | List cursors name their signing key: rotation, old cursors fail as 400 (AUD-13) | M3 | `TR-SEC-04` | Done (#573) |
 | RLE-222 | `RLE_222_*` in `DisplayNamesTest` | Display names need a permission of an installed engine (AUD-09) | M3 | `TR-SEC-04` | Done (#573) |
-| RLE-223 | `RLE_223_*` in `ApprovalSealPostgresIT` | The approved effective date is sealed at approval and a changed date is refused (#237) | M3 | `TR-SEC-04` | Done (#237) |
+| RLE-223 | `RLE_223_*` in `ApprovalSealPostgresIT` | The approved effective date is sealed at approval and a changed date is refused; key id, rotation and re-seal, NULL seal refused (#237) | M3 | `TR-SEC-04` | Done (#237) |
 
 ## Compatibility matrix
 Every pull request runs the unit, ArchUnit and Testcontainers tests on four legs (`TR-EMB-02`, ADR-0011): Java 21 and 25, each with Spring Boot 4.x and 3.5.x (3.5.16 or later), and each Spring Boot line on PostgreSQL 14 and the newest release (18). Pushes to `main`, the nightly run and manual runs add two PostgreSQL 16 legs (Java 25 with Spring Boot 4.x, Java 21 with Spring Boot 3.5.x), so each Java version and each Spring Boot line also runs on 16. The legs cover every two-way pair of Java, Spring Boot line and PostgreSQL version; the JDBC driver follows the Spring Boot BOM, so a three-way failure has no plausible mechanism. A fifth leg runs Spring Boot 4.0.x (Java 21, PostgreSQL 16) until 4.0 leaves open-source support on 31 Dec 2026.

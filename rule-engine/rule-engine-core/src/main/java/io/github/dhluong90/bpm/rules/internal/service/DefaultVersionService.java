@@ -42,6 +42,7 @@ import io.github.dhluong90.bpm.rules.api.VersionService;
 import io.github.dhluong90.bpm.rules.api.VersionActions;
 import io.github.dhluong90.bpm.rules.api.VersionStatus;
 import io.github.dhluong90.bpm.rules.api.EffectiveDateInPastException;
+import io.github.dhluong90.bpm.rules.api.EvaluationErrorException;
 import io.github.dhluong90.bpm.rules.api.WriteOptions;
 import io.github.dhluong90.bpm.rules.api.AcknowledgedWarning;
 import io.github.dhluong90.bpm.rules.api.VersionWarning;
@@ -1012,6 +1013,43 @@ public final class DefaultVersionService implements VersionService {
                     .put("discardedBy", actor)
                     .put("canonicalHash", current.canonicalHash())
                     .put("reason", reason));
+            return view(updated, false);
+        }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
+    }
+
+    @Override
+    public RuleSetVersion reseal(String ruleSet, int version, WriteOptions options) {
+        WriteOptions opts = options == null ? WriteOptions.none() : options;
+        String tenant = context.tenant();
+        String actor = context.callerWith(PERMISSION_APPROVE);
+        requireCommentLength(opts.comment());
+        String requestHash = Hashes.sha256Parts("reseal", actor, ruleSet, Integer.toString(version), opts.comment());
+        return context.idempotent(tenant, "reseal", opts.idempotencyKey(), requestHash, 200, () -> {
+            StoredVersion current = load(tenant, ruleSet, version);
+            if (current.approvedAt() == null
+                    || (current.status() != VersionStatus.PUBLISHED && current.status() != VersionStatus.RETIRED)) {
+                throw new InvalidStateException(ruleSet, version, current.status(), "reseal");
+            }
+            // Four eyes: the people who made and approved the version cannot vouch for it a second time.
+            if (actor.equals(current.approvedBy()) || actor.equals(current.createdBy())
+                    || actor.equals(current.requestedBy())) {
+                throw new SelfApprovalForbiddenException(ruleSet, version);
+            }
+            ApprovalSeal seal = new ApprovalSeal(context.sealKey());
+            // The old seal is verified first: a version that was changed in the table is refused, not blessed.
+            if (!seal.matches(current)) {
+                throw new EvaluationErrorException("SEAL_MISMATCH: the approval seal of " + ruleSet + " v" + version
+                        + " does not match its effective date, hash and approver; it is not re-sealed");
+            }
+            if (!seal.isStale(current)) {
+                return view(current, false);
+            }
+            Instant now = context.clock().instant();
+            StoredVersion updated = current.resealed(seal.seal(current));
+            store.updateVersion(updated, current.lockVersion());
+            store.appendHistory(new HistoryRow(tenant, Ulid.next(now), updated.id(), LifecycleAction.RESEALED,
+                    current.status(), updated.status(), actor, opts.comment(), updated.lockVersion(), now, null, null,
+                    null, updated.canonicalHash(), null, null, null, null, null, updated.effectiveFrom()));
             return view(updated, false);
         }, v -> EngineValues.write(EngineValues.version(v)), EngineValues::versionFromJson);
     }

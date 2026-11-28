@@ -7,7 +7,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -15,14 +17,15 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * The approval seal (RLE-223, ADR-0026 decision 4): a hash over what an approver approved, so the effective date,
  * which is outside the content hash, cannot move without being found. Written at approval, checked before a version is
- * compiled or served. Plain form {@code sha256:<hex>}; keyed form {@code hmac-sha256:<hex>} when the host supplies a
- * {@link ApprovalSealKey}.
+ * compiled or served. Plain form {@code sha256:<hex>}; keyed form {@code hmac-sha256:<keyId>:<hex>} when the host
+ * supplies an {@link ApprovalSealKey}, verified against its current and previous keys.
  */
 final class ApprovalSeal {
 
     static final String PLAIN = "sha256:";
     static final String KEYED = "hmac-sha256:";
-    private static final int MIN_KEY_BYTES = 32;
+    /** Written by migration {@code V2} on a version approved before seals existed; nothing writes it afterwards. */
+    static final String LEGACY = "legacy:pre-seal";
 
     private final ApprovalSealKey keys;
 
@@ -33,40 +36,51 @@ final class ApprovalSeal {
     /** Computes the seal of an approved version, in the keyed form when a key is set. */
     String seal(StoredVersion approved) {
         String message = message(approved);
-        Optional<byte[]> key = key();
-        return key.isPresent() ? KEYED + hmac(key.get(), message) : PLAIN + Hashes.sha256(message);
+        Optional<ApprovalSealKey.Key> key = keys.current();
+        return key.isPresent() ? KEYED + key.get().id() + ":" + hmac(key.get().bytes(), message)
+                : PLAIN + Hashes.sha256(message);
     }
 
     /**
-     * Tells whether a version's row still matches what was approved.
+     * Tells whether a version's row still matches what was approved. Fails closed: an approved version with no seal
+     * is refused, because only migration {@code V2} writes {@link #LEGACY} for versions approved before seals existed.
      *
-     * @return true when the version was never approved, was approved before seals existed and no key is set, or the
-     *     seal matches
+     * @return true when the version was never approved or its seal verifies against the current or a previous key
      */
     boolean matches(StoredVersion version) {
         if (version.approvedAt() == null) {
             return true;
         }
-        Optional<byte[]> key = key();
         String stored = version.approvalSeal();
         if (stored == null) {
-            // Approved before seals existed: nothing to compare. With a key set, a missing seal is what someone who
-            // cleared it would leave, so it is refused.
-            return key.isEmpty();
+            return false;
+        }
+        boolean unkeyedOk = keys.current().isEmpty() || keys.acceptUnkeyedSeals();
+        if (LEGACY.equals(stored)) {
+            return unkeyedOk;
         }
         String message = message(version);
         if (stored.startsWith(KEYED)) {
-            return key.isPresent() && constantTime(stored, KEYED + hmac(key.get(), message));
+            String[] parts = stored.substring(KEYED.length()).split(":", -1);
+            if (parts.length != 2) {
+                return false;
+            }
+            return keyring().stream().filter(k -> k.id().equals(parts[0])).findFirst()
+                    .map(k -> constantTime(stored, KEYED + k.id() + ":" + hmac(k.bytes(), message))).orElse(false);
         }
-        return key.isEmpty() && constantTime(stored, PLAIN + Hashes.sha256(message));
+        return unkeyedOk && constantTime(stored, PLAIN + Hashes.sha256(message));
     }
 
-    private Optional<byte[]> key() {
-        Optional<byte[]> key = keys.key();
-        if (key.isPresent() && key.get().length < MIN_KEY_BYTES) {
-            throw new IllegalStateException("The approval seal key must be at least " + MIN_KEY_BYTES + " bytes");
-        }
-        return key;
+    /** Tells whether the stored seal is not what {@link #seal} writes now, so the version should be re-sealed. */
+    boolean isStale(StoredVersion version) {
+        return version.approvalSeal() == null || !version.approvalSeal().equals(seal(version));
+    }
+
+    private List<ApprovalSealKey.Key> keyring() {
+        List<ApprovalSealKey.Key> ring = new ArrayList<>();
+        keys.current().ifPresent(ring::add);
+        ring.addAll(keys.previous());
+        return ring;
     }
 
     /** Tenant, rule set, version, hash, date, approver and time, each prefixed by its length. */
