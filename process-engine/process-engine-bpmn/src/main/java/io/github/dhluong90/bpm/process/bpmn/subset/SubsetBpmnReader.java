@@ -164,6 +164,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
     /** A {@code horus:compensate} value: a handler or adapter name, or {@code manual}. */
     /** The key of a called definition: lower-case words joined by hyphens, as every definition key. */
     private static final Pattern CALLED_ELEMENT = Pattern.compile("^[a-z][a-z0-9]*(-[a-z0-9]+)*$");
+    /** Problems that only a run of the activity would raise; a manual undo is not run (#632). */
+    private static final Set<String> RUN_ONLY_CODES = Set.of("ASSIGNEE_INVALID", "RESULT_VARIABLE_REQUIRED",
+            "SCRIPT_MISSING", "CALLED_ELEMENT_INVALID", "CORRELATION_KEY_REQUIRED", "MESSAGE_REF_UNRESOLVED");
     /** The {@code implementation} form that names a registered handler (#632). */
     private static final String HANDLER_URN = "urn:horus-bpm:handler:";
     /** The activities that can be a compensation activity: a person or a handler undoes the step (#632). */
@@ -408,6 +411,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
             if (resolved.isEmpty()) {
                 invalid.add(DefinitionProblem.of("NO_PROCESS", "The document has no executable process", null));
             }
+            // #632: a manual undo runs nothing, so it needs none of what a run would need (the content it carries is
+            // refused instead, COMPENSATION_ACTIVITY_CONTENT_UNUSED).
+            invalid.removeIf(p -> RUN_ONLY_CODES.contains(p.code()) && manualUndoIds.contains(p.elementId()));
             if (!invalid.isEmpty()) {
                 throw new ValidationFailedException(invalid);
             }
@@ -1226,11 +1232,45 @@ public final class SubsetBpmnReader implements DefinitionReader {
         private void attachCompensation(List<FlowElement> elements, int before) {
             if (elements.size() > before && elements.get(elements.size() - 1) instanceof Activity activity
                     && !activity.activity().isForCompensation()) {
+                if (!(activity instanceof ServiceTask)) {
+                    manualUndoIds.add(safe(activity.id()));
+                    refuseUnusedCompensationContent(activity);
+                }
                 ActivityAttributes a = activity.activity();
                 elements.set(elements.size() - 1, withAttributes(activity, new ActivityAttributes(true,
                         a.startQuantity(), a.completionQuantity(), a.defaultFlow(), a.ioSpecification(),
                         a.dataInputAssociations(), a.dataOutputAssociations(), a.resources(),
                         a.loopCharacteristics())));
+            }
+        }
+
+        /**
+         * #632: a manual undo raises an incident; it never runs the activity. So content that only a run would use is
+         * refused with COMPENSATION_ACTIVITY_CONTENT_UNUSED, never dropped without a word.
+         */
+        private void refuseUnusedCompensationContent(Activity activity) {
+            List<String> unused = new ArrayList<>();
+            if (activity.extensions().first(TaskAssignment.class).isPresent()) {
+                unused.add("horus:assignee");
+            }
+            if (activity.extensions().first(ResultVariable.class).isPresent()) {
+                unused.add("horus:resultVariable");
+            }
+            if (activity.extensions().first(FormSpec.class).isPresent()) {
+                unused.add("form");
+            }
+            switch (activity) {
+                case CallActivity c when c.calledElement() != null -> unused.add("calledElement");
+                case SendTask t when t.messageRef() != null -> unused.add("messageRef");
+                case ReceiveTask t when t.messageRef() != null -> unused.add("messageRef");
+                case ScriptTask t when t.script() != null && !t.script().isBlank() -> unused.add("script");
+                default -> { }
+            }
+            if (!unused.isEmpty()) {
+                invalid.add(new DefinitionProblem("COMPENSATION_ACTIVITY_CONTENT_UNUSED", "a compensation activity that is"
+                        + " not a service task is a manual undo: the engine raises an incident and runs nothing, so "
+                        + String.join(", ", unused) + " would be ignored; remove it, or use a service task with a handler",
+                        activity.getClass().getSimpleName(), safe(activity.id()), line()));
             }
         }
 
@@ -1505,13 +1545,26 @@ public final class SubsetBpmnReader implements DefinitionReader {
          * flow in or out: its own start event, which carries the trigger, starts it. A loop or multi-instance marker is
          * named as unsupported like on any other activity.
          */
+        /** Ids of the compensation activities that are not service tasks (#632). */
+        private final Set<String> manualUndoIds = new HashSet<>();
+
+        /** True while the direct container being read is an event sub-process (#632). */
+        private boolean inEventSubProcess;
+
         private FlowElement subProcess() throws XMLStreamException {
             String id = id();
             String name = attr("name");
             boolean byEvent = "true".equals(attr("triggeredByEvent"));
             List<FlowElement> elements = new ArrayList<>();
             List<Artifact> artifacts = new ArrayList<>();
-            LoopCharacteristics own = container(elements, artifacts);
+            boolean outerScope = inEventSubProcess;
+            inEventSubProcess = byEvent;
+            LoopCharacteristics own;
+            try {
+                own = container(elements, artifacts);
+            } finally {
+                inEventSubProcess = outerScope;
+            }
             // Read after the nested steps, which reset it: the marker of this sub-process, if any, goes to its container.
             lastLoop = own;
             return new SubProcess(id, name, List.of(), List.of(), ActivityAttributes.defaults(), byEvent,
@@ -1696,6 +1749,10 @@ public final class SubsetBpmnReader implements DefinitionReader {
             int line = line();
             String key = horus("correlationKey");
             boolean interrupting = !"false".equals(attr("isInterrupting"));
+            if (start && !interrupting && !inEventSubProcess) {
+                warn("INTERRUPTING_HAS_NO_EFFECT", "isInterrupting=\"false\" is kept and exported, but only the start of an"
+                        + " event sub-process uses it; here the start event behaves the same either way", element, id);
+            }
             boolean parallel = "true".equals(attr("parallelMultiple"));
             List<EventDefinition> definitions = new ArrayList<>();
             List<HorusExtension> ext = new ArrayList<>();
@@ -2839,7 +2896,9 @@ public final class SubsetBpmnReader implements DefinitionReader {
                         + " a completion result can never overwrite other process variables", "userTask", safe(id), line));
             }
             List<HorusExtension> ext = new ArrayList<>();
-            ext.add(new TaskAssignment(assignee, fourEyes));
+            if (assignee != null || !"true".equals(attr("isForCompensation"))) {
+                ext.add(new TaskAssignment(assignee, fourEyes));
+            }
             if (result != null) {
                 ext.add(new ResultVariable(result));
             }
