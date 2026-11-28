@@ -9,6 +9,7 @@ import '../../components/audit.css';
 import { useRulesSession } from '../rules/api/rulesContext';
 import { useVersion } from '../rules/api/useRules';
 import { CellValue } from '../rules/components/CellValue';
+import { ErrorModeText } from '../rules/components/ErrorModeText';
 import { DecisionTable } from '../rules/components/DecisionTable';
 import { Tabs } from '../rules/components/Tabs';
 import { formatDateTime } from '../rules/model/dates';
@@ -129,6 +130,7 @@ function Facts({ decision }: { decision: LoggedDecision }) {
       </div>
       <div><dt>{t('dlog.fact.case')}</dt><dd className="ref-text">{decision.correlationId ?? <span className="muted">—</span>}</dd></div>
       <div><dt>{t('dlog.fact.clock')}</dt><dd className="tnum">{formatDateTime(decision.evalClock, locale)}{decision.clockChosen ? <span className="muted dlog-facts__note">· {t('dlog.clockChosen')}</span> : null}{decision.pinned ? <span className="muted dlog-facts__note">· {t('dlog.pinned')}</span> : null}</dd></div>
+      {decision.errorMode !== undefined ? <div><dt>{t('errorMode.field')}</dt><dd><ErrorModeText mode={decision.errorMode} explain /></dd></div> : null}
       <div>
         <dt>{t('dlog.fact.id')}</dt>
         <dd className="dlog-facts__ref"><span className="ref-text" data-testid="decision-id">{decision.decisionId}</span><CopyButton value={decision.decisionId} label={t('dlog.copyId')} copiedLabel={t('dlog.idCopied')} /></dd>

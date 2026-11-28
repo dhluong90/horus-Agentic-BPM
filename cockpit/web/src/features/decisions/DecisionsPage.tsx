@@ -10,6 +10,7 @@ import { useRulesSession } from '../rules/api/rulesContext';
 import { formatDateTime } from '../rules/model/dates';
 import { useDecisionSearch, type DecisionSearchKey } from './api/useAudit';
 import { AuditError, LockIcon, statusOf } from './components/AuditParts';
+import { ErrorModeText } from '../rules/components/ErrorModeText';
 import { MonthSelect } from './components/MonthSelect';
 import { OutcomeMark } from './components/OutcomeMark';
 import { rememberDecisionQuery } from './lastQuery';
@@ -152,6 +153,7 @@ function Results({ search, results, decisions }: { search: DecisionSearchKey | u
             <th scope="col">{t('dlog.col.when')}</th>
             <th scope="col">{t('dlog.col.ruleSet')}</th>
             <th scope="col">{t('dlog.col.result')}</th>
+            <th scope="col">{t('errorMode.field')}</th>
             <th scope="col">{t('dlog.col.case')}</th>
             <th scope="col">{t('dlog.col.decision')}</th>
             <th scope="col"><span className="sr-only">{t('dlog.open')}</span></th>
@@ -167,6 +169,7 @@ function Results({ search, results, decisions }: { search: DecisionSearchKey | u
               </td>
               <td>{decision.ruleSet} <span className="muted">· {t('rules.version', { version: String(decision.version) })}</span></td>
               <td><OutcomeMark outcome={knownOutcome(decision.outcome, decision.matchedRuleIds)} matched={decision.matchedRuleIds} /></td>
+              <td><ErrorModeText mode={decision.errorMode} /></td>
               <td className="ref-text">{decision.correlationId ?? <span className="muted">—</span>}</td>
               <td className="ref-text">{shortId(decision.decisionId)}</td>
               <td className="qtable__chevron" aria-hidden="true">›</td>

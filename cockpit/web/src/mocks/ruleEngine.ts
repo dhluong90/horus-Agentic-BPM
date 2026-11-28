@@ -129,7 +129,7 @@ function pendingItem(v: StoredVersion, request: FakeRequest) {
 
 function lifecycle(v: StoredVersion, request: FakeRequest) {
   return {
-    ruleSet: v.ruleSet, version: v.version, status: v.status, hitPolicy: v.definition.hitPolicy.toUpperCase(), effectiveFrom: v.effectiveFrom,
+    ruleSet: v.ruleSet, version: v.version, status: v.status, hitPolicy: v.definition.hitPolicy.toUpperCase(), errorMode: 'strict', effectiveFrom: v.effectiveFrom,
     lockVersion: v.lockVersion, canonicalHash: hash(JSON.stringify(v.definition)),
     requestedBy: v.requestedBy, requestedAt: v.requestedAt, approvedBy: v.approvedBy, approvedAt: v.approvedAt,
     createdBy: v.createdBy, createdAt: v.createdAt, allowedActions: actionsFor(v, request),

@@ -19,6 +19,8 @@ export interface StoredDecision {
   matchedRuleIds: string[];
   correlationId: string | null;
   evaluatedAt: string;
+  /** The mode stored with the decision; `unknown` for a row logged before modes were stored. Strict when absent. */
+  errorMode?: 'strict' | 'spec' | 'unknown';
 }
 
 /** What the audit reads need of a stored version, so this module does not depend on the version store's shape. */
@@ -83,7 +85,7 @@ export function demoDecisions(): StoredDecision[] {
       matchedRuleIds: ['R5'], correlationId: 'LN-2026-0061', evaluatedAt: '2026-11-18T16:40:00Z' },
     { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TC', ruleSet: 'card-fee', version: 1, outcome: 'EVALUATION_ERROR', errorCode: 'EVALUATION_ERROR',
       inputs: { tier: 'GOLD', balance: null, txCount: 2, nationalId: MASKED_ID }, outputs: null,
-      matchedRuleIds: [], correlationId: 'LN-2026-0063', evaluatedAt: '2026-11-17T11:05:00Z' },
+      matchedRuleIds: [], correlationId: 'LN-2026-0063', evaluatedAt: '2026-11-17T11:05:00Z', errorMode: 'unknown' },
     { decisionId: '01KF2Q8Z0RQ6V2Y8M1C4N5P7TD', ruleSet: 'kyc-risk', version: 1, outcome: 'MATCHED', errorCode: null,
       inputs: { country: 'VN', monthlyIncome: vnd(250_000_000), pep: false }, outputs: { risk: 'MEDIUM' },
       matchedRuleIds: ['K2'], correlationId: 'LN-2026-0042', evaluatedAt: '2026-11-20T09:58:00Z' },
@@ -259,7 +261,7 @@ function explanation(d: StoredDecision, v: AuditVersion | undefined, language: '
 
 function logged(d: StoredDecision, v: AuditVersion | undefined) {
   return {
-    decisionId: d.decisionId, ruleSet: d.ruleSet, version: d.version, hitPolicy: (v?.hitPolicy ?? 'first').toUpperCase(), outcome: d.outcome, errorCode: d.errorCode,
+    decisionId: d.decisionId, ruleSet: d.ruleSet, version: d.version, hitPolicy: (v?.hitPolicy ?? 'first').toUpperCase(), outcome: d.outcome, errorCode: d.errorCode, errorMode: d.errorMode ?? 'strict',
     inputs: d.inputs, outputs: d.outputs, matchedRuleIds: d.matchedRuleIds, callerId: 'teller-app', onBehalfOf: null, correlationId: d.correlationId,
     evalClock: d.evaluatedAt, evaluatedAt: d.evaluatedAt, clockChosen: false, pinned: false, durationMicros: 412,
   };
