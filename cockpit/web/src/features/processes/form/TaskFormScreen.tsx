@@ -11,7 +11,7 @@ import { groupWhileTyping } from '../../rules/model/money';
 import { useProcessesSession } from '../api/processesContext';
 import { useClaimTask, useCompleteForm, useTaskForm } from '../api/useProcesses';
 import { ReviewMeta, useReviewCrumbs } from '../review/ReviewParts';
-import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, type Drafts, type FormField, type Problem } from './model';
+import { apiErrorsOf, build, currencyKey, fieldsOf, initialDrafts, isRequired, optionText, type Drafts, type FormField, type Problem } from './model';
 
 /*
  * A task completed through the form its process declares (CKP-021). The engine owns the form and checks the result;
@@ -67,7 +67,7 @@ function useWhyNot(task: Task): string | undefined {
   if (task.status === 'COMPLETED') return t('form.dock.completed', { who: task.completedBy ?? '', when: formatDateTime(task.completedAt, locale) ?? '' });
   if (task.status === 'CANCELLED') return t('form.dock.cancelled');
   if (task.status === 'CLAIMED' && task.claimedBy !== userId) return t('form.dock.claimedByOther', { who: task.claimedBy ?? '' });
-  if (task.status === 'OPEN' && !allowed.has('claim')) return task.fourEyes ? t('form.dock.fourEyes') : t('form.dock.notAssigned');
+  if (task.status === 'OPEN' && !allowed.has('claim')) return task.fourEyes ? t('form.dock.fourEyes', { who: task.assignee.replace(/^(role|group|user):/, '').replace(/[_-]/g, ' ').toLowerCase() }) : t('form.dock.notAssigned');
   if (task.status === 'CLAIMED' && !allowed.has('complete')) return t('form.dock.cannotComplete');
   return undefined;
 }
@@ -119,7 +119,12 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
   const complete = useCompleteForm(task.id, form.lockVersion);
   const why = useWhyNot(task);
   const working = task.status === 'CLAIMED' && why === undefined;
+  const refusedByFourEyes = task.fourEyes && task.status === 'OPEN' && !task.allowedActions.includes('claim');
   const built = useMemo(() => build(fields, drafts, data, locale, replaced), [fields, drafts, data, locale, replaced]);
+  // What each choice leads to, beside the action: the chosen one stands out.
+  const effectsOf = fields.flatMap((field) => Object.entries(field.effects).map(([code, text]) => ({
+    code, text, label: `${optionText(field, code)}:`, chosen: drafts[field.name] === code,
+  })));
   const refused = complete.error === null ? undefined : toHostError(complete.error);
   const api = apiErrorsOf(refused?.kind === 'problem' ? refused.members?.['errors'] : undefined);
 
@@ -175,6 +180,11 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
       </article>
       <section className="card review-dock" aria-labelledby="taskform-dock-title">
         <h2 id="taskform-dock-title" className="rules-card-title">{t('form.dock.title')}</h2>
+        {working && effectsOf.length > 0 ? (
+          <ul className="taskform__effects" aria-label={t('form.effects')}>
+            {effectsOf.map((item) => <li key={item.code} className={item.chosen ? 'is-chosen' : undefined}><strong>{item.label}</strong> {item.text}</li>)}
+          </ul>
+        ) : null}
         {working ? (
           <div className="review-dock__foot">
             <div className="review-dock__messages" role="status">
@@ -187,7 +197,7 @@ function FormBody({ task, form, title }: { task: Task; form: TaskForm; title: st
           </div>
         ) : (
           <div className="review-dock__row">
-            <p className="dock__note review-dock__line">{why ?? t('form.dock.claimHint')}</p>
+            <p className={refusedByFourEyes ? 'dock__self review-dock__line' : 'dock__note review-dock__line'}>{why ?? t('form.dock.claimHint')}</p>
             {task.status === 'OPEN' && why === undefined ? (
               <button type="button" className="btn btn--primary" disabled={claim.isPending} aria-busy={claim.isPending} onClick={() => { claim.mutate(); }}>
                 {claim.isPending ? t('form.dock.claiming') : t('form.dock.claim')}
@@ -228,14 +238,14 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
     id,
     disabled: disabled || field.readOnly,
     'aria-invalid': message !== undefined,
-    'aria-required': field.required,
+    'aria-required': isRequired(field, drafts),
     'aria-describedby': message !== undefined ? errorId : undefined,
   } as const;
   const wide = kind.kind === 'text' && kind.multiline;
   const label = (
     <>
       {field.label}
-      {field.required ? <span className="taskform__star" aria-hidden="true"> *</span> : null}
+      {isRequired(field, drafts) ? <span className="taskform__star" aria-hidden="true"> *</span> : null}
     </>
   );
   let control: React.ReactNode;
@@ -255,7 +265,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
           {options.map((option) => (
             <label key={option} className="taskform__option">
               <input type="radio" name={id} value={option} checked={value === option} aria-invalid={message !== undefined} onChange={() => { onChange(field.name, option); }} />
-              <span>{kind.kind === 'yesno' ? t(option === 'true' ? 'review.yes' : 'review.no') : option}</span>
+              <span>{kind.kind === 'yesno' ? t(option === 'true' ? 'review.yes' : 'review.no') : optionText(field, option)}</span>
             </label>
           ))}
         </div>
@@ -266,7 +276,7 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
     control = (
       <select {...common} className="field__input" value={value} onChange={(e) => { onChange(field.name, e.target.value); }}>
         <option value="">{t('form.choose')}</option>
-        {kind.options.map((option) => <option key={option} value={option}>{option}</option>)}
+        {kind.options.map((option) => <option key={option} value={option}>{optionText(field, option)}</option>)}
       </select>
     );
   } else if (kind.kind === 'text' && kind.multiline) {
@@ -295,10 +305,13 @@ function FieldRow({ field, drafts, locale, message, disabled, replaced, onChange
       </div>
     );
   } else {
-    control = (
-      <input {...common} className="field__input" type="text" autoComplete="off" value={value}
-        inputMode={kind.kind === 'number' ? 'decimal' : undefined} onChange={(e) => { onChange(field.name, e.target.value); }} />
+    const grouped = kind.kind === 'number' && kind.grouped;
+    const input = (
+      <input {...common} className={grouped ? 'field__input tnum' : 'field__input'} type="text" autoComplete="off" value={value}
+        inputMode={kind.kind === 'number' ? (kind.integer ? 'numeric' : 'decimal') : undefined}
+        onChange={(e) => { onChange(field.name, grouped ? groupWhileTyping(e.target.value, locale) : e.target.value); }} />
     );
+    control = field.unit !== undefined ? <div className="taskform__money">{input}<span className="taskform__unit">{field.unit}</span></div> : input;
   }
   return (
     <div className={wide ? 'field taskform__field taskform__field--wide' : 'field taskform__field'}>

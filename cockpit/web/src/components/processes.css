@@ -130,7 +130,7 @@
 .review-value__text { white-space: pre-wrap; }
 
 .masked { display: inline-flex; align-items: center; gap: 6px; }
-.masked__tag { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: var(--radius-pill); background: var(--surface-3); color: var(--ink-2); font: var(--type-caption); font-weight: 600; line-height: 20px; }
+.masked__tag { display: inline-flex; align-items: center; gap: 4px; color: var(--ink-2); font: var(--type-caption); font-weight: 600; }
 
 .review-why__sentence { margin: 0; color: var(--ink); font-weight: 600; }
 .rule-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
@@ -379,3 +379,9 @@
 .taskform__masked { display: flex; align-items: center; gap: 12px; min-height: var(--target-min); }
 .taskform__keep { align-self: flex-start; }
 .taskform .review-dock { margin-top: 16px; max-width: 960px; }
+.taskform__unit { flex: none; align-self: center; color: var(--ink-2); font: var(--type-label); white-space: nowrap; }
+.taskform__effects { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; color: var(--ink-2); font: var(--type-label); }
+.taskform__effects li.is-chosen { color: var(--ink); }
+.taskform__effects strong { font-weight: 600; color: var(--ink); }
+/* On a phone the action card follows the fields instead of floating over them, so it never covers a field. */
+@media (max-width: 640px) { .taskform .review-dock { position: static; } }

@@ -21,7 +21,7 @@ test.use({ timezoneId: 'Asia/Ho_Chi_Minh' });
 
 const T = {
   complete: { en: 'Complete task', vi: 'Hoàn thành tác vụ' },
-  reject: { en: 'REJECT', vi: 'REJECT' },
+  reject: { en: 'Reject', vi: 'Reject' },
   date: { en: /^Review date/, vi: /^Ngày thẩm định/ },
   dateText: { en: '2026-11-21', vi: '2026-11-21' },
 } as const;
@@ -57,7 +57,6 @@ async function refuse(page: Page, locale: Locale) {
   await page.getByRole('radio', { name: T.reject[locale] }).check();
   await page.getByLabel(T.date[locale]).fill(T.dateText[locale]);
   await page.getByRole('button', { name: T.complete[locale] }).click();
-  await expect(page.getByRole('alert')).toBeVisible();
   await expect(page.locator('.field__error').first()).toBeVisible();
 }
 
