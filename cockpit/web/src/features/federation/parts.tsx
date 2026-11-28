@@ -20,7 +20,7 @@ export function ScopeSwitch({ area, merged }: { area: 'tasks' | 'incidents'; mer
 
 /** Which service a row belongs to, in words. */
 export function HostTag({ label }: { label: string }) {
-  return <span className="badge badge--neutral merged__host" title={label}>{label}</span>;
+  return <span className="merged__host" title={label}>{label}</span>;
 }
 
 /** A host that could not be read: named, and the list says it is incomplete. The other hosts' rows stay. */

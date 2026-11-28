@@ -212,7 +212,7 @@ export function TryItPanel({ version, onMatched }: { version: RuleSetVersion; on
                 <span aria-hidden="true">{result.outcome === 'MATCHED' ? '✓' : '✕'}</span>{' '}
                 {result.outcome === 'MATCHED' ? t('try.matchedRow', { rows: result.matchedRuleIds.join(', ') }) : t('try.noMatch')}
               </p>
-              <p className="badge badge--accent">{t('try.inEffect', { version: String(result.version) })}</p>
+              <p className="status status--accent">{t('try.inEffect', { version: String(result.version) })}</p>
             </div>
             <dl className="try__tiles">
               {definition.outputs.filter((o) => o.name in result.outputs).map((output) => (

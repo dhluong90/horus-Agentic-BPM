@@ -29,7 +29,7 @@
 .msteps__pick { padding: 0; border: 0; background: none; color: var(--accent); font: var(--type-body); font-weight: 600; text-align: left; cursor: pointer; }
 .msteps__pick:hover { text-decoration: underline; }
 .msteps__flag { color: var(--warn); font-weight: 600; }
-.msteps__flag > span[aria-hidden] { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-right: 2px; border-radius: var(--radius-pill); background: var(--warn-soft); font: 700 12px/1 var(--font-ui); }
+.msteps__flag > span[aria-hidden] { margin-right: 2px; font-weight: 700; }
 .msteps__flag .muted { font-weight: 400; }
 .msteps__note { margin: 0; color: var(--muted); font: var(--type-caption); }
 .notmoved__mark { color: var(--warn); font-weight: 700; }

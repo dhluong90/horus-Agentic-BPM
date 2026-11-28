@@ -305,7 +305,7 @@ async function diagramFacts(page: Page, nodeId?: string) {
     const box = frame.getBoundingClientRect();
     const node = id !== '' ? element.querySelector(`[data-node="${id}"]`) : null;
     const nodeBox = node?.getBoundingClientRect();
-    const checks = Array.from(element.querySelectorAll('.dg-badge--done circle')).map((circle) => circle.getBoundingClientRect().width);
+    const checks = Array.from(element.querySelectorAll('.dg-badge--done text')).map((circle) => circle.getBoundingClientRect().width);
     return {
       smallest: Math.min(...texts.map((text) => parseFloat(getComputedStyle(text).fontSize) * scale)),
       smallestCheck: Math.min(99, ...checks),

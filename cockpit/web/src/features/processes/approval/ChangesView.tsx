@@ -23,7 +23,7 @@ const GLYPH: Record<Mark, string> = { added: '+', changed: '•', removed: '−'
 function MarkTag({ mark }: { mark: Mark }) {
   const { t } = useI18n();
   return (
-    <span className={`diff-tag diff-tag--${mark}`}>
+    <span className={`diff-mark diff-mark--${mark}`}>
       <span aria-hidden="true">{GLYPH[mark]}</span> {t(`diff.mark.${mark}`)}
     </span>
   );
@@ -188,7 +188,7 @@ function SideDiagram({ definitionKey, diff, side, onSide, selected, title, targe
       </div>
       <ul className="pdiff__legend" aria-label={t('diff.legend')}>
         {(side === 'target' ? (['added', 'changed'] as const) : (['removed', 'changed'] as const)).map((mark) => (
-          <li key={mark} className={`pdiff__key pdiff__key--${mark}`}><span className="pdiff__swatch" aria-hidden="true">{GLYPH[mark]}</span>{t(`diff.mark.${mark}`)}</li>
+          <li key={mark} className={`pdiff__key pdiff__key--${mark}`}><span className="pdiff__swatch" aria-hidden="true" />{t(`diff.mark.${mark}`)}</li>
         ))}
       </ul>
     </div>

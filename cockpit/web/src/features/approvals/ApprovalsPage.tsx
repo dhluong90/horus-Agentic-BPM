@@ -131,7 +131,7 @@ function QueueBody({ queue, engines, items, view, current, onSelect }: {
             <li key={itemKey(item)} ref={selected ? selectedRow : undefined}>
               <button type="button" className={selected ? 'queue-card is-selected' : 'queue-card'} aria-pressed={selected} onClick={() => { onSelect(item); }}>
                 <span className="queue-card__title">{itemTitle(item, t)}</span>
-                <span className="tag tag--kind">{t(kindLabel(item))}</span>
+                <span className="queue-card__kind">{t(kindLabel(item))}</span>
                 <span className="queue-card__meta tnum">{who} · {formatDateTime(item.requestedAt, locale)}</span>
               </button>
             </li>
