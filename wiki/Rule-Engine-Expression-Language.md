@@ -41,7 +41,7 @@ Precedence from lowest to highest: `or`, `and`, `not`, comparison, `+ -`, `* /`,
 
 ## Numbers, rounding and text
 
-These rules follow FEEL, so a rule gives the same result in this engine and in any DMN engine (ADR-0019). A test checks this on every change: generated expressions are evaluated here and, translated to FEEL, by a reference FEEL implementation, which runs in tests only and never ships.
+These rules follow FEEL, so a rule gives the same result in this engine and in a reference FEEL implementation (ADR-0019). A test checks this on every change: generated expressions are evaluated here and, translated to FEEL, by a reference FEEL implementation, which runs in tests only and never ships.
 
 | Topic | Rule | Example |
 |---|---|---|

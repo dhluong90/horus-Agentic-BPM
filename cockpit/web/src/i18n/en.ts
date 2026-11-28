@@ -526,6 +526,7 @@ export const en = {
   'node.complexGateway': 'Complex gateway',
   'node.adHocSubProcess': 'Ad-hoc sub-process',
   'node.multiple': 'Multiple event',
+  'node.intermediateEvent': 'Intermediate event',
   'node.parallelMultiple': 'Parallel multiple event',
   'node.timer': 'Timer',
   'node.messageStart': 'Message start',

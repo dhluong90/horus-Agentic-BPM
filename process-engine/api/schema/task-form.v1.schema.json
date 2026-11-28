@@ -34,6 +34,9 @@
   },
   "oneOf": [ { "required": ["form"] }, { "required": ["link"] } ],
   "$defs": {
+    "texts200": { "type": "object", "minProperties": 1, "propertyNames": { "pattern": "^[a-z]{2}(-[A-Z]{2})?$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 200 } },
+    "texts300": { "type": "object", "minProperties": 1, "propertyNames": { "pattern": "^[a-z]{2}(-[A-Z]{2})?$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 300 } },
+    "texts30": { "type": "object", "minProperties": 1, "propertyNames": { "pattern": "^[a-z]{2}(-[A-Z]{2})?$" }, "additionalProperties": { "type": "string", "minLength": 1, "maxLength": 30 } },
     "hints": {
       "type": "object",
       "additionalProperties": false,
@@ -52,7 +55,43 @@
             "additionalProperties": { "type": "string", "maxLength": 200 }
           }
         },
-        "readOnly": { "type": "array", "uniqueItems": true, "items": { "type": "string" } }
+        "readOnly": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "options": {
+          "description": "PRE-393. Per enum field, per value, a label per locale and an optional one-line consequence per locale. The value itself never changes; only what the screen shows.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "required": ["label"],
+              "additionalProperties": false,
+              "properties": {
+                "label": { "$ref": "#/$defs/texts200" },
+                "consequence": { "$ref": "#/$defs/texts300" }
+              }
+            }
+          }
+        },
+        "units": {
+          "description": "PRE-393. Per field, a suffix per locale shown after the value, for example { \"termMonths\": { \"en\": \"months\", \"vi\": \"tháng\" } }.",
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/texts30" }
+        },
+        "formats": {
+          "description": "PRE-393. Per field, display of a number or money amount: grouping of thousands by the viewer's locale and a fixed currency or the name of a field that holds it. Stored values never change.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "grouping": { "type": "boolean" },
+              "currency": { "type": "string", "pattern": "^[A-Z]{3}$" },
+              "currencyFrom": { "type": "string" }
+            },
+            "not": { "required": ["currency", "currencyFrom"] }
+          }
+        }
       }
     }
   }
